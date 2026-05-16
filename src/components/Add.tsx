@@ -1,0 +1,255 @@
+"use client";
+
+import { useCartStore } from "@/hooks/useCartStore";
+import { useWixClient } from "@/hooks/useWixClient";
+import { trackMetaEvent } from "@/lib/metaEvents";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+
+const Add = ({
+  productId,
+  variantId,
+  stockNumber,
+  productName,
+  productPrice,
+}: {
+  productId: string;
+  variantId: string;
+  stockNumber: number;
+  productName: string;
+  productPrice: number;
+}) => {
+  const [quantity, setQuantity] = useState(1);
+  const [isAdded, setIsAdded] = useState(false);
+  const [isBuyingNow, setIsBuyingNow] = useState(false);
+
+  const handleQuantity = (type: "i" | "d") => {
+    if (type === "d" && quantity > 1) {
+      setQuantity((prev) => prev - 1);
+    }
+    if (type === "i" && quantity < stockNumber) {
+      setQuantity((prev) => prev + 1);
+    }
+  };
+
+  const wixClient = useWixClient();
+  const router = useRouter();
+  const { addItem, isLoading } = useCartStore();
+
+  const handleAddToCart = async () => {
+    await addItem(wixClient, productId, variantId, quantity);
+    trackMetaEvent("AddToCart", {
+      currency: "INR",
+      value: productPrice * quantity,
+      content_ids: [productId],
+      content_name: productName,
+      content_type: "product",
+      contents: [{ id: productId, quantity, item_price: productPrice }],
+      num_items: quantity,
+    });
+    setIsAdded(true);
+    setTimeout(() => setIsAdded(false), 2000);
+  };
+
+  const handleBuyNow = async () => {
+    if (isOutOfStock || isBuyingNow) return;
+    setIsBuyingNow(true);
+    try {
+      await addItem(wixClient, productId, variantId, quantity);
+
+      trackMetaEvent("InitiateCheckout", {
+        currency: "INR",
+        value: productPrice * quantity,
+        content_ids: [productId],
+        content_name: productName,
+        content_type: "product",
+        contents: [{ id: productId, quantity, item_price: productPrice }],
+        num_items: quantity,
+      });
+
+      router.push("/checkout");
+      return;
+    } catch (err) {
+      console.error("Buy Now failed:", err);
+    }
+    setIsBuyingNow(false);
+  };
+
+  const isOutOfStock = stockNumber < 1;
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* Quantity Selector */}
+      <div>
+        <h4 className="font-medium text-sm text-gray-700 mb-3">Quantity</h4>
+        <div className="flex items-center gap-4">
+          <div className="quantity-selector">
+            <button
+              className="quantity-btn"
+              onClick={() => handleQuantity("d")}
+              disabled={quantity === 1 || isOutOfStock}
+              aria-label="Decrease quantity"
+            >
+              −
+            </button>
+            <span className="quantity-value">{quantity}</span>
+            <button
+              className="quantity-btn"
+              onClick={() => handleQuantity("i")}
+              disabled={quantity === stockNumber || isOutOfStock}
+              aria-label="Increase quantity"
+            >
+              +
+            </button>
+          </div>
+
+          {/* Stock Status */}
+          {isOutOfStock ? (
+            <div className="stock-out">
+              <span className="w-2 h-2 bg-red-500 rounded-full"></span>
+              Out of stock
+            </div>
+          ) : stockNumber < 10 ? (
+            <div className="stock-low">
+              <span className="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></span>
+              Only {stockNumber} left!
+            </div>
+          ) : (
+            <div className="stock-in">
+              <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+              In stock
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        {/* Add to Cart */}
+        <button
+          onClick={handleAddToCart}
+          disabled={isLoading || isOutOfStock}
+          className={`flex-1 py-4 px-6 rounded-lg font-semibold text-sm uppercase tracking-wider transition-all duration-300 flex items-center justify-center gap-2 ${isAdded
+              ? "bg-green-500 text-white"
+              : isOutOfStock
+                ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                : "bg-primary text-white hover:bg-primary-light hover:shadow-lg"
+            }`}
+        >
+          {isLoading ? (
+            <>
+              <svg
+                className="animate-spin w-5 h-5"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                ></circle>
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                ></path>
+              </svg>
+              Adding...
+            </>
+          ) : isAdded ? (
+            <>
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              Added to Cart!
+            </>
+          ) : isOutOfStock ? (
+            "Out of Stock"
+          ) : (
+            <>
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"
+                />
+              </svg>
+              Add to Cart
+            </>
+          )}
+        </button>
+
+        {/* Buy Now */}
+        <button
+          onClick={handleBuyNow}
+          disabled={isOutOfStock || isBuyingNow}
+          className={`flex-1 py-4 px-6 rounded-lg font-semibold text-sm uppercase tracking-wider border-2 transition-all duration-300 flex items-center justify-center gap-2 ${isOutOfStock
+              ? "border-gray-200 text-gray-400 cursor-not-allowed"
+              : "border-accent bg-accent text-white hover:bg-accent/90 hover:border-accent/90"
+            }`}
+        >
+          {isBuyingNow ? (
+            <>
+              <svg className="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Redirecting...
+            </>
+          ) : (
+            <>
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              Buy Now
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Trust Indicators */}
+      <div className="grid grid-cols-2 gap-4 pt-4 border-t border-[#1A1410]/10">
+        <div className="flex items-center gap-2 text-sm text-[#1A1410]/75">
+          <svg className="w-5 h-5 text-[#9B1B30]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 7h11v10H3z" />
+            <path d="M14 10h4l3 3v4h-7" />
+            <circle cx="7.5" cy="17.5" r="1.5" />
+            <circle cx="17.5" cy="17.5" r="1.5" />
+          </svg>
+          Free Shipping
+        </div>
+        <div className="flex items-center gap-2 text-sm text-[#1A1410]/75">
+          <svg className="w-5 h-5 text-[#9B1B30]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 8v4l3 2" />
+            <path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          48 Hrs Exchange
+        </div>
+        <div className="flex items-center gap-2 text-sm text-[#1A1410]/75">
+          <svg className="w-5 h-5 text-[#9B1B30]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="11" width="18" height="10" rx="2" />
+            <path d="M7 11V8a5 5 0 0110 0v3" />
+          </svg>
+          Secure Payment
+        </div>
+        <div className="flex items-center gap-2 text-sm text-[#1A1410]/75">
+          <svg className="w-5 h-5 text-[#9B1B30]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2l2.39 4.84 5.34.78-3.86 3.77.91 5.31L12 14.27l-4.78 2.51.91-5.31L4.27 7.62l5.34-.78L12 2z" />
+          </svg>
+          Quality Assured
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Add;

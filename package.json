@@ -1,0 +1,41 @@
+{
+  "name": "ecomstarter",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@next/third-parties": "^16.2.6",
+    "@wix/ecom": "^1.0.2054",
+    "@wix/members": "^1.0.450",
+    "@wix/redirects": "^1.0.113",
+    "@wix/sdk": "^1.21.9",
+    "@wix/stores": "^1.0.768",
+    "emailjs-com": "^3.2.0",
+    "isomorphic-dompurify": "^2.9.0",
+    "js-cookie": "^3.0.5",
+    "next": "14.2.2",
+    "razorpay": "^2.9.6",
+    "react": "^18",
+    "react-confetti": "^6.1.0",
+    "react-dom": "^18",
+    "react-swipeable": "^7.0.2",
+    "timeago.js": "^4.0.2",
+    "zustand": "^4.5.2"
+  },
+  "devDependencies": {
+    "@types/js-cookie": "^3.0.6",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "eslint": "^8",
+    "eslint-config-next": "14.2.2",
+    "postcss": "^8",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5"
+  }
+}
