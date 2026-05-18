@@ -14,7 +14,7 @@ import {
   trackPurchase,
 } from "@/lib/metaPixel";
 
-type PaymentMethod = "UPI" | "CARD" | "WALLET" | "COD";
+type PaymentMethod = "PREPAID" | "COD";
 
 interface CheckoutModalProps {
   open: boolean;
@@ -38,16 +38,17 @@ const loadRazorpayScript = (): Promise<boolean> =>
 const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   const router = useRouter();
   const wixClient = useWixClient();
-  const { cart, getCart } = useCartStore();
+  const { cart, getCart, clearCart } = useCartStore();
   const { showToast } = useToast();
   const [mounted, setMounted] = useState(false);
   const [step, setStep] = useState<1 | 2>(1);
+  const [email, setEmail] = useState("");
   const [mobile, setMobile] = useState("");
   const [fullName, setFullName] = useState("");
-  const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
   const [pincode, setPincode] = useState("");
-  // Razorpay/prepaid temporarily disabled pending domain approval. Default locked to COD.
+  const [city, setCity] = useState("");
+  const [state, setState] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("COD");
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
@@ -60,9 +61,13 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
     if (open) {
       document.body.style.overflow = "hidden";
       setError("");
-      // Reset stale processing flag from a previous interrupted attempt so
-      // the "PLACE ORDER" button never gets stuck on "Processing...".
       setProcessing(false);
+      // Auto-skip to Step 2 if user is logged in
+      if (wixClient.auth.loggedIn()) {
+        setStep(2);
+      } else {
+        setStep(1);
+      }
     } else {
       document.body.style.overflow = "";
     }
@@ -97,7 +102,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   // const total = Math.max(0, subtotal - (isPrepaid ? PREPAID_DISCOUNT : 0));
   const total = subtotal;
 
-  // Display-only inflated subtotal — frontend optics only. `total`/`subtotal`
+  // Display-only inflated subtotal. Frontend optics only. `total`/`subtotal`
   // (the real cart items total) is what's sent to /api/razorpay and used for
   // tracking / order amounts.
   const displaySubtotal = subtotal + 99 + 50;
@@ -105,8 +110,8 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   if (!mounted || !open) return null;
 
   const goToStep2 = () => {
-    if (!/^\d{10}$/.test(mobile.trim())) {
-      setError("Enter a valid 10-digit mobile number.");
+    if (!email.trim() || !/^\S+@\S+\.\S+$/.test(email)) {
+      setError("Please enter a valid email address.");
       return;
     }
     setError("");
@@ -115,21 +120,27 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
 
   const validateDelivery = () => {
     if (!fullName.trim()) return "Please enter your full name.";
-    if (!email.trim() || !/^\S+@\S+\.\S+$/.test(email))
-      return "Please enter a valid email.";
     if (!address.trim()) return "Please enter your address.";
     if (!/^\d{6}$/.test(pincode.trim())) return "Enter a valid 6-digit pincode.";
+    if (!city.trim()) return "Please enter your city.";
+    if (!state.trim()) return "Please enter your state.";
+    if (!/^\d{10}$/.test(mobile.trim())) return "Enter a valid 10-digit mobile number.";
     return "";
   };
 
   const handlePayment = async () => {
+    if (paymentMethod === "PREPAID") {
+      setError("Prepaid checkout is coming soon. Please choose Cash on Delivery for now.");
+      return;
+    }
+
     const validationError = validateDelivery();
     if (validationError) {
       setError(validationError);
       return;
     }
 
-    // Guard against an empty cart — Wix's createCheckoutFromCurrentCart will
+    // Guard against an empty cart. Wix's createCheckoutFromCurrentCart will
     // otherwise reject with an opaque error.
     if (!lineItems.length) {
       const msg = "Your cart is empty.";
@@ -155,79 +166,84 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
     trackInitiateCheckout(total, "INR", totalQuantity);
 
     try {
-      // COD-only flow while Razorpay/online payments are paused pending domain
-      // approval. We officially create the order in Wix so it appears in the
-      // Wix admin dashboard with Pending payment status (Cash on Delivery).
-      const nameParts = fullName.trim().split(/\s+/).filter(Boolean);
-      const firstName = nameParts[0] || fullName.trim();
-      const lastName = nameParts.slice(1).join(" ") || undefined;
-
-      const shippingAndBilling = {
-        address: {
-          country: "IN",
-          addressLine1: address.trim(),
-          postalCode: pincode.trim(),
-        },
-        contactDetails: {
-          firstName,
-          lastName,
-          phone: mobile.trim(),
-        },
-      };
-
       // 1. Convert the current Wix cart to a checkout.
-      const checkout = await wixClient.currentCart.createCheckoutFromCurrentCart({
-        channelType: currentCart.ChannelType.WEB,
-      });
-
-      const checkoutId = checkout.checkoutId;
-      if (!checkoutId) {
-        throw new Error("Could not create Wix checkout from cart.");
-      }
-
-      // 2. Attach buyer / billing / shipping details and a COD marker.
-      const wixClientAny = wixClient as any;
-      if (wixClientAny.checkout?.updateCheckout) {
-        await wixClientAny.checkout.updateCheckout(checkoutId, {
-          _id: checkoutId,
-          billingInfo: shippingAndBilling,
-          shippingInfo: { shippingDestination: shippingAndBilling },
-          buyerInfo: { email: email.trim() },
-          buyerNote: `Payment: Cash on Delivery (COD). Recipient phone: ${mobile.trim()}. Pincode: ${pincode.trim()}.`,
-          customFields: [
-            { title: "Payment Method", value: "Cash on Delivery" },
-            { title: "Payment Status", value: "Pending" },
-            { title: "Mobile", value: mobile.trim() },
-            { title: "Pincode", value: pincode.trim() },
-          ],
-        });
-      }
-
-      // 3. Create the actual Wix order from the checkout.
-      let wixOrderId: string | undefined;
-      if (wixClientAny.checkout?.createOrder) {
-        const orderResult = await wixClientAny.checkout.createOrder(checkoutId);
-        wixOrderId =
-          orderResult?.orderId ||
-          orderResult?.order?._id ||
-          orderResult?._id ||
-          orderResult?.id;
-      }
-
-      if (!wixOrderId) {
-        throw new Error("Wix did not return an order id.");
-      }
-
-      // 4. Clear the user's Wix cart and refresh local store.
+      let checkoutId: string;
       try {
-        if (wixClientAny.currentCart?.deleteCurrentCart) {
-          await wixClientAny.currentCart.deleteCurrentCart();
-        }
-        await getCart(wixClient);
-      } catch (clearErr) {
-        // Cart clear is non-fatal — order is already created.
-        console.warn("Failed to clear cart after COD order:", clearErr);
+        const checkoutResult = await wixClient.currentCart.createCheckoutFromCurrentCart({
+          channelType: currentCart.ChannelType.WEB,
+        });
+        checkoutId = checkoutResult.checkoutId!;
+        if (!checkoutId) throw new Error("Wix returned an empty checkoutId.");
+        console.log("[COD] Step 1 OK - Checkout created:", checkoutId);
+      } catch (stepErr: any) {
+        console.error("[COD] Step 1 Failed (createCheckoutFromCurrentCart):", stepErr);
+        throw new Error(`Checkout creation failed: ${stepErr?.details?.applicationError?.description || stepErr?.message || "Unknown"}`);
       }
+
+      // 2. Finalize the Wix checkout/order on the server with API-key
+      // permissions so the order lands in Wix Orders, Payments, and analytics
+      // the same way a Wix checkout-created order does.
+      let wixOrderId: string;
+      try {
+        const finalizeResponse = await fetch("/api/wix/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            checkoutId,
+            details: {
+              email: email.trim(),
+              fullName: fullName.trim(),
+              phone: mobile.trim(),
+              addressLine1: address.trim(),
+              city: city.trim(),
+              state: state.trim(),
+              postalCode: pincode.trim(),
+              paymentMethod,
+            },
+          }),
+        });
+
+        const finalizeResult = await finalizeResponse.json();
+
+        if (!finalizeResponse.ok) {
+          throw new Error(finalizeResult?.error || "Wix order creation failed.");
+        }
+
+        wixOrderId = finalizeResult.orderId;
+        if (!wixOrderId) throw new Error("Wix did not return an order ID.");
+        console.log("[COD] Step 2 OK - Wix checkout finalized:", finalizeResult);
+      } catch (stepErr: any) {
+        console.error("[COD] Step 2 Failed (finalize Wix checkout):", stepErr);
+        throw new Error(`Wix order finalization failed: ${stepErr?.message || "Unknown"}`);
+      }
+
+      // NOTE: For COD / manual payments, NO explicit payment processing call is
+      // needed from the frontend. The Wix backend automatically handles the
+      // order's payment status based on the "Manual Payments" configuration in
+      // your Wix Dashboard (Settings > Accept Payments > Manual Payments).
+      // The order will appear in the dashboard as "Pending Payment" - which is
+      // the correct COD workflow. Mark it as paid manually in the dashboard
+      // once you collect the cash.
+      console.log("[COD] Step 3.5 - Skipping frontend payment processing (handled by Wix backend for manual payments).");
+
+      // 4. Clear the user's Wix cart AND the local Zustand store.
+      //    deleteCurrentCart() removes the cart on Wix's side. getCart() right
+      //    after it used to throw OWNED_CART_NOT_FOUND silently, leaving the
+      //    purchased items lingering in the local store. That is the "cart not"
+      //    clearing" bug. Reset local state synchronously via clearCart() so
+      //    the cart icon/CartModal reflect the empty state immediately, even
+      //    if the network call hiccups.
+      clearCart();
+      try {
+        await wixClient.currentCart.deleteCurrentCart();
+      } catch (clearErr) {
+        console.warn("Failed to delete Wix cart after COD order:", clearErr);
+      }
+      // Re-fetch in the background. If the backend confirms empty (or throws
+      // OWNED_CART_NOT_FOUND, which getCart() now handles by resetting), local
+      // state stays clean. If a fresh cart was somehow created mid-flow, this
+      // pulls it down so the UI is honest.
+      getCart(wixClient).catch(() => {});
 
       // 5. Tracking + redirect to success page.
       try {
@@ -247,126 +263,15 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
       onClose();
       router.push(`/success?orderId=${encodeURIComponent(wixOrderId)}`);
       return;
-
-      /* ---------------------------------------------------------------
-       * RAZORPAY / ONLINE PAYMENT HANDOFF — TEMPORARILY DISABLED
-       * Uncomment this block once the production domain is approved by
-       * Razorpay. Also re-enable the prepaid radio options, the offer
-       * banner, the prepaid discount calculation, and the "Pay Now" CTA.
-       * ---------------------------------------------------------------
-      if (paymentMethod === "COD") {
-        const codOrderId = `viora_cod_${Date.now()}`;
-        try {
-          window.sessionStorage.setItem(
-            "vioraPendingPurchase",
-            JSON.stringify({
-              value: total,
-              currency: "INR",
-              content_ids: contentIds,
-            })
-          );
-        } catch {}
-        trackPurchase(total, "INR", contentIds, codOrderId);
-        router.push(`/success?orderId=${codOrderId}`);
-        return;
-      }
-
-      const res = await fetch("/api/razorpay", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          amount: total,
-          currency: "INR",
-          receipt: `viora_${Date.now()}`,
-          notes: {
-            mobile,
-            email,
-            fullName,
-            pincode,
-            method: paymentMethod,
-          },
-        }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error || "Could not create payment order.");
-      }
-
-      const { order_id, amount, currency, key_id } = await res.json();
-
-      const scriptOk = await loadRazorpayScript();
-      if (!scriptOk || !window.Razorpay) {
-        throw new Error("Could not load Razorpay. Please try again.");
-      }
-
-      trackAddPaymentInfo(total, "INR");
-
-      const options: Record<string, any> = {
-        key: key_id,
-        amount,
-        currency,
-        order_id,
-        name: "Viora Jewels",
-        description: "Order Payment",
-        prefill: {
-          name: fullName,
-          email,
-          contact: mobile,
-        },
-        notes: { address, pincode },
-        theme: { color: "#9B1B30" },
-        handler: function (response: any) {
-          const paidOrderId =
-            response?.razorpay_order_id || order_id || `viora_${Date.now()}`;
-          try {
-            window.sessionStorage.setItem(
-              "vioraPendingPurchase",
-              JSON.stringify({
-                value: total,
-                currency: "INR",
-                content_ids: contentIds,
-              })
-            );
-          } catch {}
-          router.push(`/success?orderId=${paidOrderId}`);
-        },
-        modal: {
-          ondismiss: () => {
-            setProcessing(false);
-          },
-        },
-      };
-
-      if (paymentMethod === "UPI") {
-        options.method = { upi: true };
-        options.config = {
-          display: { preferences: { show_default_blocks: true } },
-        };
-      } else if (paymentMethod === "CARD") {
-        options.method = { card: true };
-      } else if (paymentMethod === "WALLET") {
-        options.method = { wallet: true };
-      }
-
-      const rzp = new window.Razorpay(options);
-      rzp.on?.("payment.failed", () => {
-        setError("Payment failed. Please try again.");
-        setProcessing(false);
-      });
-      rzp.open();
-      */
     } catch (err: any) {
-      // Surface the full error so it's debuggable in the browser console while
-      // still showing a clean user-facing message in the toast.
+      // Surface the full Wix API error so the developer can debug.
       console.error("Order placement failed:", err);
       const cause =
         err?.details?.applicationError?.description ||
         err?.message ||
         "Unknown error";
-      const userMsg = "Failed to place order, please try again";
-      setError(`${userMsg} (${cause})`);
-      showToast(userMsg, "error");
+      setError(`Failed to place order: ${cause}`);
+      showToast("Failed to place order, please try again", "error");
       setProcessing(false);
       // Do NOT redirect to /success on failure.
     }
@@ -376,19 +281,14 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
     id: PaymentMethod;
     label: string;
     sub?: string;
-    discount?: boolean;
-    recommended?: boolean;
   }> = [
-    // Prepaid options paused pending Razorpay domain approval. Restore when re-enabling.
-    // { id: "UPI", label: "UPI", sub: "PhonePe, GPay, Paytm & more", discount: true, recommended: true },
-    // { id: "CARD", label: "Debit / Credit Cards", sub: "Visa, Mastercard, RuPay", discount: true },
-    // { id: "WALLET", label: "Wallets", sub: "Paytm, Mobikwik, Freecharge", discount: true },
-    { id: "COD", label: "Cash on Delivery", sub: "Pay when you receive your order" },
+    { id: "COD", label: "Cash on Delivery (COD)", sub: "Pay when you receive your order" },
+    { id: "PREPAID", label: "Prepaid (UPI / Cards)", sub: "Get ₹50 OFF on Prepaid Orders (Coming Soon)" },
   ];
 
   const modal = (
     <div
-      className="fixed inset-0 z-[10000] flex items-end md:items-center justify-center bg-black/55 backdrop-blur-sm"
+      className="fixed inset-0 z-[10000] flex items-end justify-center bg-black/55 md:items-center"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -412,54 +312,55 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
           </button>
           <div className="flex-1 flex justify-center">
             <Image
-              src="/final%20logo%20copy.png"
+              src="/logo%20compressed.png"
               alt="Viora Jewels"
               width={120}
               height={40}
               className="h-10 w-auto object-contain"
+              style={{ width: "auto" }}
             />
           </div>
           <span className="text-[10px] md:text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-1 whitespace-nowrap">
-            🔒 100% Secured
+            100% Secured
           </span>
         </div>
 
-        {/* Offer banner — hidden while prepaid is paused. Restore with prepaid relaunch.
+        {/* Offer banner hidden while prepaid is paused. Restore with prepaid relaunch.
         <div className="bg-green-600 text-white text-center text-sm font-semibold py-2 px-4">
-          🎉 Get Extra ₹50 Off on Prepaid Payments
+          Get Extra ₹50 Off on Prepaid Payments
         </div>
         */}
 
         <div className="p-5 space-y-5">
           {/* Step 1 - Contact */}
-          <section className="space-y-2">
-            <h3 className="text-sm font-semibold text-primary uppercase tracking-wider">
-              1. Contact
-            </h3>
-            <label className="block">
-              <span className="text-xs font-medium text-gray-700">Mobile Number</span>
-              <input
-                type="tel"
-                value={mobile}
-                onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                placeholder="10-digit mobile"
-                inputMode="numeric"
-                className="mt-1 w-full rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
-              />
-              <span className="mt-1 block text-xs text-gray-500">
-                Get OTP for faster checkout
-              </span>
-            </label>
-            {step === 1 && (
+          {step === 1 && (
+            <section className="space-y-2">
+              <h3 className="text-sm font-semibold text-primary uppercase tracking-wider">
+                1. Contact
+              </h3>
+              <label className="block">
+                <span className="text-xs font-medium text-gray-700">Email Address</span>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Enter your email"
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
+                />
+                <span className="mt-1 block text-xs text-gray-500">
+                  We&apos;ll send your order confirmation here.
+                </span>
+              </label>
               <button
                 type="button"
                 onClick={goToStep2}
-                className="w-full mt-2 rounded-lg bg-[#9B1B30] py-3 text-sm font-semibold uppercase tracking-wider text-white hover:bg-[#7d1527]"
+                disabled={processing}
+                className="w-full mt-2 rounded-lg bg-[#9B1B30] py-3 text-sm font-semibold uppercase tracking-wider text-white hover:bg-[#7d1527] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Continue
               </button>
-            )}
-          </section>
+            </section>
+          )}
 
           {/* Step 2 - Delivery + Payment */}
           {step === 2 && (
@@ -476,28 +377,47 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                     placeholder="Full Name"
                     className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
                   />
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Email"
-                    className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
-                  />
                   <textarea
                     rows={3}
                     value={address}
                     onChange={(e) => setAddress(e.target.value)}
-                    placeholder="Full Address (house, street, city, state)"
+                    placeholder="Full Address (house, street)"
                     className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20 resize-none"
                   />
-                  <input
-                    type="text"
-                    value={pincode}
-                    onChange={(e) => setPincode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                    placeholder="Pincode"
-                    inputMode="numeric"
-                    className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
-                  />
+                  <div className="grid grid-cols-2 gap-3">
+                    <input
+                      type="text"
+                      value={city}
+                      onChange={(e) => setCity(e.target.value)}
+                      placeholder="City"
+                      className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
+                    />
+                    <input
+                      type="text"
+                      value={state}
+                      onChange={(e) => setState(e.target.value)}
+                      placeholder="State"
+                      className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <input
+                      type="text"
+                      value={pincode}
+                      onChange={(e) => setPincode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="Pincode"
+                      inputMode="numeric"
+                      className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
+                    />
+                    <input
+                      type="tel"
+                      value={mobile}
+                      onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                      placeholder="Phone (10 digits)"
+                      inputMode="numeric"
+                      className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
+                    />
+                  </div>
                 </div>
               </section>
 
@@ -530,19 +450,9 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                             <span className="font-semibold text-sm text-primary">
                               {opt.label}
                             </span>
-                            {opt.recommended && (
-                              <span className="text-[10px] uppercase tracking-wide bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-semibold">
-                                Recommended
-                              </span>
-                            )}
-                            {opt.discount && (
-                              <span className="text-[10px] uppercase tracking-wide bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold">
-                                ₹50 Discount
-                              </span>
-                            )}
                           </span>
                           {opt.sub && (
-                            <span className="block text-xs text-gray-500 mt-0.5">
+                            <span className={`block text-xs mt-0.5 ${opt.id === "PREPAID" ? "text-green-600 font-medium" : "text-gray-500"}`}>
                               {opt.sub}
                             </span>
                           )}
@@ -554,8 +464,8 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
               </section>
 
               {/* Total summary */}
-              <section className="rounded-lg bg-gray-50 p-4 space-y-1 text-sm">
-                <div className="flex justify-between text-gray-600">
+              <section className="rounded-lg bg-gray-50 p-4 space-y-1 text-sm border border-gray-100 shadow-sm">
+                <div className="flex justify-between text-gray-600 mb-2">
                   <span>Subtotal</span>
                   <span>₹{displaySubtotal.toFixed(2)}</span>
                 </div>
@@ -563,35 +473,39 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                   <span>Shipping</span>
                   <span>
                     <span className="text-gray-400 line-through mr-2">₹99</span>
-                    <span className="text-green-700 font-bold">FREE</span>
+                    <span className="text-green-600 font-bold">FREE Shipping!</span>
                   </span>
                 </div>
-                <div className="flex justify-between text-gray-600">
+                <div className="flex justify-between text-gray-600 mb-2">
                   <span>Processing Fee</span>
                   <span>
                     <span className="text-gray-400 line-through mr-2">₹50</span>
-                    <span className="text-green-700 font-bold">FREE</span>
+                    <span className="text-green-600 font-bold">FREE</span>
                   </span>
                 </div>
-                {/* Prepaid discount row — hidden while prepaid is paused.
+
+                <div className="mt-3 mb-2 flex items-center gap-1.5 bg-green-50/50 p-2 rounded-md border border-green-100">
+                  <svg className="w-4 h-4 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                  <p className="text-green-600 text-sm font-medium">
+                    You are saving ₹149 on this order!
+                  </p>
+                </div>
+
+                {/* Prepaid discount row hidden while prepaid is paused.
                 {isPrepaid && (
                   <div className="flex justify-between text-green-700 font-medium">
                     <span>Prepaid Discount</span>
-                    <span>− ₹{PREPAID_DISCOUNT}</span>
+                    <span>- ₹{PREPAID_DISCOUNT}</span>
                   </div>
                 )}
                 */}
-                <div className="flex justify-between text-base font-bold text-primary pt-2 border-t border-gray-200 mt-2">
-                  <span>Total Payable</span>
+                <div className="flex justify-between text-base font-bold text-primary pt-3 border-t border-gray-200 mt-3">
+                  <span>Estimated Total</span>
                   <span>₹{total.toFixed(2)}</span>
                 </div>
               </section>
-
-              {error && (
-                <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {error}
-                </p>
-              )}
 
               <button
                 type="button"
@@ -601,17 +515,18 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
               >
                 {processing
                   ? "Processing..."
-                  : `PLACE ORDER (COD) ⚡ — ₹${total.toFixed(2)}`}
+                  : `PLACE ORDER - ₹${total.toFixed(2)}`}
               </button>
 
               <p className="text-[11px] text-gray-500 text-center">
-                🔒 Payments are 100% secure and encrypted.
+                Payments are 100% secure and encrypted.
               </p>
             </>
           )}
 
-          {step === 1 && error && (
-            <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+          {/* Global Error Display */}
+          {error && (
+            <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 mt-2">
               {error}
             </p>
           )}

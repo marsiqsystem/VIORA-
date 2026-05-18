@@ -8,6 +8,7 @@ import { useCartStore } from "@/hooks/useCartStore";
 import { useWixClient } from "@/hooks/useWixClient";
 import { trackMetaEvent } from "@/lib/metaEvents";
 import { trackAddPaymentInfo } from "@/lib/metaPixel";
+import BackButton from "@/components/BackButton";
 
 type AddressForm = {
   fullName: string;
@@ -57,7 +58,15 @@ const toWixAddressWithContact = (form: AddressForm) => {
 const CheckoutPage = () => {
   const wixClient = useWixClient();
   const router = useRouter();
-  const { cart, getCart, isLoading } = useCartStore();
+  const { cart, getCart, isLoading, updateQuantity, removeItem } = useCartStore();
+
+  const handleQuantityChange = async (itemId: string, newQuantity: number) => {
+    if (newQuantity < 1) {
+      await removeItem(wixClient, itemId);
+    } else {
+      await updateQuantity(wixClient, itemId, newQuantity);
+    }
+  };
   const [billing, setBilling] = useState<BillingForm>(emptyBilling);
   const [giftShipping, setGiftShipping] = useState<AddressForm>(emptyAddress);
   const [alternateShipping, setAlternateShipping] =
@@ -256,6 +265,12 @@ const CheckoutPage = () => {
         className="mx-auto grid max-w-6xl gap-8 lg:grid-cols-[1fr_360px]"
       >
         <div className="space-y-6">
+          {/* TASK 1: Back button */}
+          <div className="flex items-center gap-2">
+            <BackButton className="bg-white shadow-sm hover:shadow-md" />
+            <span className="text-sm text-gray-500">Back</span>
+          </div>
+
           <section className="rounded-xl border border-silver-light bg-white p-6 shadow-premium md:p-8">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent">
               Secure checkout
@@ -462,56 +477,95 @@ const CheckoutPage = () => {
           <h2 className="font-playfair text-2xl font-bold text-primary">
             Order Summary
           </h2>
-          <div className="mt-5 space-y-4">
+          <div className="mt-5 space-y-5">
             {lineItems.map((item: any) => (
-              <div key={item._id} className="flex justify-between gap-4 text-sm">
-                <span className="line-clamp-2 text-gray-600">
-                  {item.productName?.original || "Viora item"} x {item.quantity || 1}
-                </span>
-                <span className="font-semibold text-primary">
-                  Rs. {item.price?.amount || "0"}
-                </span>
+              <div key={item._id} className="flex gap-4 text-sm group relative">
+                {/* Product Image (Optional space, if they have an image in lineItems. Here just aligning content) */}
+                <div className="flex-1 flex flex-col justify-between">
+                  <div className="flex justify-between gap-4 mb-2">
+                    <span className="line-clamp-2 text-gray-700 font-medium">
+                      {item.productName?.original || "Viora item"}
+                    </span>
+                    <span className="font-semibold text-primary whitespace-nowrap">
+                      ₹{item.price?.amount || "0"}
+                    </span>
+                  </div>
+
+                  {/* Controls */}
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center border border-gray-200 rounded-md overflow-hidden bg-white">
+                      <button
+                        type="button"
+                        onClick={() => handleQuantityChange(item._id, (item.quantity || 1) - 1)}
+                        disabled={isLoading}
+                        className="px-2.5 py-1 text-gray-500 hover:bg-gray-50 hover:text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        aria-label="Decrease quantity"
+                      >
+                        −
+                      </button>
+                      <span className="w-6 text-center text-xs font-semibold text-gray-700">
+                        {item.quantity || 1}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleQuantityChange(item._id, (item.quantity || 1) + 1)}
+                        disabled={isLoading}
+                        className="px-2.5 py-1 text-gray-500 hover:bg-gray-50 hover:text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        aria-label="Increase quantity"
+                      >
+                        +
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => removeItem(wixClient, item._id)}
+                      disabled={isLoading}
+                      className="text-xs text-gray-400 hover:text-red-500 transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                      aria-label="Remove item"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                      Remove
+                    </button>
+                  </div>
+                </div>
               </div>
             ))}
           </div>
-          <div className="mt-5 space-y-2 text-sm">
+          <div className="mt-5 space-y-3 text-sm">
             <div className="flex justify-between text-gray-600">
               <span>Shipping</span>
               <span>
                 <span className="text-gray-400 line-through mr-2">₹99</span>
-                <span className="text-green-700 font-bold">FREE Shipping!</span>
+                <span className="text-green-600 font-bold">FREE Shipping!</span>
               </span>
             </div>
             <div className="flex justify-between text-gray-600">
               <span>Processing Fee</span>
               <span>
                 <span className="text-gray-400 line-through mr-2">₹50</span>
-                <span className="text-green-700 font-bold">FREE</span>
+                <span className="text-green-600 font-bold">FREE</span>
               </span>
             </div>
           </div>
 
-          {(() => {
-            const mrpSavings = lineItems.reduce((s: number, item: any) => {
-              const fullPrice =
-                Number(item.fullPrice?.amount) || Number(item.price?.amount) || 0;
-              const currentPrice = Number(item.price?.amount) || 0;
-              return s + (fullPrice - currentPrice) * (item.quantity || 1);
-            }, 0);
-            const totalSavings = 149 + mrpSavings;
-            return (
-              <p className="mt-3 text-green-700 text-sm font-medium">
-                ✅ You are saving ₹{totalSavings.toFixed(0)} on this order!
-              </p>
-            );
-          })()}
+          <div className="mt-4 flex items-center gap-1.5 bg-green-50/50 p-2.5 rounded-lg border border-green-100">
+            <svg className="w-4 h-4 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+            <p className="text-green-600 text-sm font-medium">
+              You are saving ₹149 on this order!
+            </p>
+          </div>
 
           <div className="mt-5 border-t border-silver-light pt-5">
-            <div className="flex justify-between text-base font-semibold">
+            <div className="flex justify-between text-base font-semibold text-primary">
               <span>Estimated Total</span>
-              <span>Rs. {subtotal.toFixed(2)}</span>
+              <span>₹{subtotal.toFixed(2)}</span>
             </div>
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1.5 text-xs text-gray-500">
               Shipping and taxes are confirmed in the final Wix checkout step.
             </p>
           </div>

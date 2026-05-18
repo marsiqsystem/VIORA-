@@ -2,43 +2,11 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useState } from "react";
+import { useWixClient } from "@/hooks/useWixClient";
+import { useEffect, useState } from "react";
+import { orders } from "@wix/ecom";
 import ExchangeModal from "@/components/ExchangeModal";
 
-type MockOrder = {
-  id: string;
-  number: string;
-  placedOn: string;
-  status: "Processing" | "Shipped" | "Delivered";
-  carrier: string;
-  trackingNumber: string;
-  trackingUrl: string;
-  deliveredOn?: string;
-  items: { name: string; qty: number; price: number; image: string }[];
-  total: number;
-};
-
-const MOCK_ORDERS: MockOrder[] = [
-  {
-    id: "viora-100245",
-    number: "VRA-100245",
-    placedOn: "12 May 2026",
-    status: "Delivered",
-    carrier: "BlueDart",
-    trackingNumber: "BD-9382-44A",
-    trackingUrl: "https://www.bluedart.com/tracking",
-    deliveredOn: "14 May 2026",
-    items: [
-      {
-        name: "Aurelia Statement Set",
-        qty: 1,
-        price: 1499,
-        image: "/product.png",
-      },
-    ],
-    total: 1578,
-  },
-];
 
 const formatINR = (n: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -47,10 +15,11 @@ const formatINR = (n: number) =>
     maximumFractionDigits: 0,
   }).format(n);
 
-const statusStyles: Record<MockOrder["status"], string> = {
-  Processing: "bg-amber-100 text-amber-800 border-amber-200",
-  Shipped: "bg-blue-100 text-blue-800 border-blue-200",
-  Delivered: "bg-emerald-100 text-emerald-800 border-emerald-200",
+const statusStyles: Record<string, string> = {
+  PENDING: "bg-amber-100 text-amber-800 border-amber-200",
+  APPROVED: "bg-blue-100 text-blue-800 border-blue-200",
+  FULFILLED: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  CANCELED: "bg-red-100 text-red-800 border-red-200",
 };
 
 const SIDEBAR = [
@@ -70,6 +39,29 @@ const SIDEBAR = [
 
 const MyOrdersPage = () => {
   const [exchangeOrderId, setExchangeOrderId] = useState<string | null>(null);
+  const wixClient = useWixClient();
+  const [realOrders, setRealOrders] = useState<orders.Order[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchOrders = async () => {
+      try {
+        if (wixClient.auth.loggedIn()) {
+          // In a real scenario, use searchOrders to get list. 
+          // (User prompt mentioned getOrder(orderId), but searchOrders is correct for a list)
+          const res = await wixClient.orders.searchOrders({
+            cursorPaging: { limit: 20 },
+          });
+          setRealOrders(res.orders || []);
+        }
+      } catch (err) {
+        console.error("Failed to fetch orders", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchOrders();
+  }, [wixClient]);
 
   return (
     <div className="min-h-screen bg-platinum text-[#1A1410]">
@@ -126,7 +118,11 @@ const MyOrdersPage = () => {
 
           {/* Orders list */}
           <div className="space-y-5">
-            {MOCK_ORDERS.length === 0 && (
+            {loading ? (
+              <div className="rounded-2xl border border-white/60 bg-white/70 p-10 text-center shadow-premium backdrop-blur-md">
+                <p className="animate-pulse font-playfair text-xl text-[#1A1410]">Loading your orders...</p>
+              </div>
+            ) : realOrders.length === 0 ? (
               <div className="rounded-2xl border border-white/60 bg-white/70 p-10 text-center shadow-premium backdrop-blur-md">
                 <p className="font-playfair text-xl text-[#1A1410]">
                   You haven&apos;t placed an order yet.
@@ -141,146 +137,138 @@ const MyOrdersPage = () => {
                   Start shopping
                 </Link>
               </div>
-            )}
-
-            {MOCK_ORDERS.map((order) => (
-              <article
-                key={order.id}
-                className="overflow-hidden rounded-2xl border border-white/60 bg-white/70 shadow-premium backdrop-blur-md transition-shadow hover:shadow-premium-hover"
-              >
-                {/* Header */}
-                <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[#1A1410]/5 px-5 py-4 md:px-6">
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-gray-500">
-                      Order
-                    </p>
-                    <p className="font-playfair text-lg font-bold text-[#1A1410]">
-                      {order.number}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      Placed on {order.placedOn}
-                    </p>
-                  </div>
-                  <span
-                    className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${
-                      statusStyles[order.status]
-                    }`}
+            ) : (
+              realOrders.map((order) => {
+                const statusStr = order.status || "PENDING";
+                return (
+                  <article
+                    key={order._id}
+                    className="overflow-hidden rounded-2xl border border-white/60 bg-white/70 shadow-premium backdrop-blur-md transition-shadow hover:shadow-premium-hover"
                   >
-                    <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                    {order.status}
-                    {order.deliveredOn && order.status === "Delivered" && (
-                      <span className="font-normal opacity-75">
-                        · {order.deliveredOn}
-                      </span>
-                    )}
-                  </span>
-                </header>
-
-                {/* Items */}
-                <div className="divide-y divide-[#1A1410]/5">
-                  {order.items.map((item, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center gap-4 px-5 py-4 md:px-6"
-                    >
-                      <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-platinum">
-                        <Image
-                          src={item.image}
-                          alt={item.name}
-                          fill
-                          sizes="64px"
-                          loading="lazy"
-                          className="object-cover"
-                        />
-                      </div>
-                      <div className="flex-1">
-                        <p className="line-clamp-1 text-sm font-medium text-[#1A1410]">
-                          {item.name}
+                    {/* Header */}
+                    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[#1A1410]/5 px-5 py-4 md:px-6">
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-gray-500">
+                          Order
+                        </p>
+                        <p className="font-playfair text-lg font-bold text-[#1A1410]">
+                          #{order.number}
                         </p>
                         <p className="text-xs text-gray-500">
-                          Qty {item.qty} · {formatINR(item.price)}
+                          Placed on {order._createdDate ? new Date(order._createdDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "N/A"}
                         </p>
                       </div>
-                      <p className="font-playfair text-base font-semibold text-[#1A1410]">
-                        {formatINR(item.price * item.qty)}
-                      </p>
+                      <span
+                        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${
+                          statusStyles[statusStr] || "bg-gray-100 text-gray-800 border-gray-200"
+                        }`}
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                        {statusStr}
+                      </span>
+                    </header>
+
+                    {/* Items */}
+                    <div className="divide-y divide-[#1A1410]/5">
+                      {order.lineItems?.map((item, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center gap-4 px-5 py-4 md:px-6"
+                        >
+                          <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-platinum">
+                            {item.image ? (
+                              <Image
+                                src={item.image}
+                                alt={item.productName?.original || "Item"}
+                                fill
+                                sizes="64px"
+                                loading="lazy"
+                                className="object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full bg-gray-200" />
+                            )}
+                          </div>
+                          <div className="flex-1">
+                            <p className="line-clamp-1 text-sm font-medium text-[#1A1410]">
+                              {item.productName?.original || "Product"}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              Qty {item.quantity} · {formatINR(Number(item.price?.amount || 0))}
+                            </p>
+                          </div>
+                          <p className="font-playfair text-base font-semibold text-[#1A1410]">
+                            {formatINR(Number(item.totalPriceAfterTax?.amount || item.price?.amount || 0) * (item.quantity || 1))}
+                          </p>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
 
-                {/* Footer / actions */}
-                <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-[#1A1410]/5 bg-platinum/60 px-5 py-4 md:px-6">
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-gray-500">
-                      Order Total
-                    </p>
-                    <p className="font-playfair text-lg font-bold text-[#1A1410]">
-                      {formatINR(order.total)}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <a
-                      href={order.trackingUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-2 rounded-full border border-[#1A1410] px-4 py-2 text-xs font-semibold uppercase tracking-wider text-[#1A1410] transition-colors hover:bg-[#1A1410] hover:text-white"
-                    >
-                      <svg
-                        className="h-4 w-4"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={1.8}
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M3 7h11v10H3z"
-                        />
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M14 10h4l3 3v4h-7"
-                        />
-                        <circle cx="7.5" cy="17.5" r="1.5" />
-                        <circle cx="17.5" cy="17.5" r="1.5" />
-                      </svg>
-                      Track Order
-                    </a>
-                    <button
-                      type="button"
-                      onClick={() => setExchangeOrderId(order.id)}
-                      className="inline-flex items-center gap-2 rounded-full bg-[#9B1B30] px-4 py-2 text-xs font-semibold uppercase tracking-wider text-white transition-colors hover:bg-[#7d1626]"
-                    >
-                      <svg
-                        className="h-4 w-4"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={1.8}
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M4 4v6h6M20 20v-6h-6M20 9A8 8 0 005.6 5.6M4 15a8 8 0 0014.4 3.4"
-                        />
-                      </svg>
-                      Exchange Order
-                    </button>
-                  </div>
-                </footer>
+                    {/* Footer / actions */}
+                    <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-[#1A1410]/5 bg-platinum/60 px-5 py-4 md:px-6">
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-gray-500">
+                          Order Total
+                        </p>
+                        <p className="font-playfair text-lg font-bold text-[#1A1410]">
+                          {formatINR(Number(order.priceSummary?.total?.amount || 0))}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Link
+                          href={`/orders/${order._id}`}
+                          className="inline-flex items-center gap-2 rounded-full border border-[#1A1410] px-4 py-2 text-xs font-semibold uppercase tracking-wider text-[#1A1410] transition-colors hover:bg-[#1A1410] hover:text-white"
+                        >
+                          <svg
+                            className="h-4 w-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={1.8}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M3 7h11v10H3z"
+                            />
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M14 10h4l3 3v4h-7"
+                            />
+                            <circle cx="7.5" cy="17.5" r="1.5" />
+                            <circle cx="17.5" cy="17.5" r="1.5" />
+                          </svg>
+                          Track Order
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => setExchangeOrderId(order._id || "")}
+                          className="inline-flex items-center gap-2 rounded-full bg-[#9B1B30] px-4 py-2 text-xs font-semibold uppercase tracking-wider text-white transition-colors hover:bg-[#7d1626]"
+                        >
+                          <svg
+                            className="h-4 w-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={1.8}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M4 4v6h6M20 20v-6h-6M20 9A8 8 0 005.6 5.6M4 15a8 8 0 0014.4 3.4"
+                            />
+                          </svg>
+                          Exchange Order
+                        </button>
+                      </div>
+                    </footer>
+                  </article>
+                );
+              })
+            )}
 
-                {/* Tracking strip */}
-                {order.trackingNumber && (
-                  <div className="border-t border-[#1A1410]/5 bg-white px-5 py-3 text-xs text-gray-600 md:px-6">
-                    <span className="font-semibold text-[#1A1410]">
-                      {order.carrier}
-                    </span>{" "}
-                    · Tracking #{order.trackingNumber}
-                  </div>
-                )}
-              </article>
-            ))}
+
 
             <p className="px-2 text-xs text-gray-500">
               Exchanges are eligible within{" "}

@@ -93,7 +93,7 @@ const CartModal = () => {
       ) : (
         <>
           {/* Cart Items */}
-          <div className="flex flex-col gap-4 max-h-[300px] overflow-y-auto pr-2 scrollbar-hide">
+          <div className="flex flex-col gap-4 max-h-[40vh] overflow-y-auto pr-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent">
             {cart.lineItems.map((item) => (
               <div
                 className="flex gap-4 p-3 bg-gray-50 rounded-lg group"
@@ -165,28 +165,33 @@ const CartModal = () => {
             </div>
 
             {/* Shipping & Processing pricing */}
-            <div className="space-y-1.5 mb-3 text-sm">
+            <div className="space-y-2 mb-3 text-sm">
               <div className="flex justify-between text-gray-600">
                 <span>Shipping</span>
                 <span>
                   <span className="text-gray-400 line-through mr-2">₹99</span>
-                  <span className="text-green-700 font-bold">FREE Shipping!</span>
+                  <span className="text-green-600 font-bold">FREE Shipping!</span>
                 </span>
               </div>
               <div className="flex justify-between text-gray-600">
                 <span>Processing Fee</span>
                 <span>
                   <span className="text-gray-400 line-through mr-2">₹50</span>
-                  <span className="text-green-700 font-bold">FREE</span>
+                  <span className="text-green-600 font-bold">FREE</span>
                 </span>
               </div>
             </div>
 
             {/* Savings Line */}
             {cart.lineItems && cart.lineItems.length > 0 && (
-              <p className="text-green-600 text-sm font-medium mb-2">
-                ✅ You are saving ₹{totalSavings.toFixed(0)} on this order!
-              </p>
+              <div className="mb-3 flex items-center gap-1.5 bg-green-50/50 p-2 rounded-md border border-green-100">
+                <svg className="w-4 h-4 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                <p className="text-green-600 text-sm font-medium">
+                  You are saving ₹149 on this order!
+                </p>
+              </div>
             )}
 
             <div className="flex items-center justify-between mb-2 border-t border-gray-100 pt-2">

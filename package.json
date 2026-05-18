@@ -25,6 +25,8 @@
     "react-dom": "^18",
     "react-swipeable": "^7.0.2",
     "timeago.js": "^4.0.2",
+    "ts-morph": "^28.0.0",
+    "ts-node": "^10.9.2",
     "zustand": "^4.5.2"
   },
   "devDependencies": {

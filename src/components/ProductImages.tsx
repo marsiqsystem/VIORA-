@@ -107,10 +107,17 @@ const ProductImages = ({
   }
 
   return (
-    <div className="relative group select-none" {...handlers}>
+    // w-full + overflow-hidden on the swipe-handler root guarantees no horizontal
+    // bleed during a swipe gesture. touch-action: pan-y stops the browser from
+    // committing a page-level horizontal scroll while the user swipes the image.
+    <div
+      className="relative group select-none w-full max-w-full overflow-hidden"
+      style={{ touchAction: "pan-y" }}
+      {...handlers}
+    >
       {/* BIG IMAGE CONTAINER */}
       <div
-        className="relative w-full aspect-square overflow-hidden rounded-xl bg-gradient-to-br from-gray-50 to-gray-100"
+        className="relative w-full max-w-full aspect-square overflow-hidden rounded-none md:rounded-xl bg-gradient-to-br from-gray-50 to-gray-100"
         onClick={() => setIsZoomed(!isZoomed)}
         ref={containerRef}
         onMouseDown={handleMouseDown}
@@ -210,14 +217,14 @@ const ProductImages = ({
       </div>
 
       {/* THUMBNAILS */}
-      <div className="relative mt-4">
-        {/* Left fade */}
-        <div className="pointer-events-none absolute left-0 top-0 h-full w-8 bg-gradient-to-r from-white to-transparent z-10" />
+      <div className="relative mt-3 md:mt-4 w-full max-w-full overflow-hidden">
+        {/* Left fade — uses platinum on mobile to match page bg, white on desktop card area */}
+        <div className="pointer-events-none absolute left-0 top-0 h-full w-6 md:w-8 bg-gradient-to-r from-platinum md:from-white to-transparent z-10" />
 
         {/* Right fade */}
-        <div className="pointer-events-none absolute right-0 top-0 h-full w-8 bg-gradient-to-l from-white to-transparent z-10" />
+        <div className="pointer-events-none absolute right-0 top-0 h-full w-6 md:w-8 bg-gradient-to-l from-platinum md:from-white to-transparent z-10" />
 
-        <div className="flex gap-3 overflow-x-auto scrollbar-hide px-2">
+        <div className="flex gap-2 md:gap-3 overflow-x-auto scrollbar-hide px-3 md:px-2 w-full">
           {items.map((item: any, i: number) => (
             <button
               className={`relative min-w-[4.5rem] h-24 rounded-lg overflow-hidden shrink-0 border-2 transition-all duration-200 ${i === index

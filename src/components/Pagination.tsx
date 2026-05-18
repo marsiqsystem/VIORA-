@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 
 const Pagination = ({
   currentPage,
@@ -13,12 +13,14 @@ const Pagination = ({
 }) => {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { replace } = useRouter();
 
   const createPageUrl = (pageNumber: number) => {
     const params = new URLSearchParams(searchParams);
     params.set("page", pageNumber.toString());
-    replace(`${pathname}?${params.toString()}`);
+    // Navigate to the new page URL with #product-grid hash so the browser
+    // scrolls directly to the product section instead of the top of the page.
+    const url = `${pathname}?${params.toString()}#product-grid`;
+    window.location.href = url;
   };
 
   return (

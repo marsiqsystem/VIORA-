@@ -1,4 +1,4 @@
-import { wixClientServer } from "@/lib/wixClientServer";
+﻿import { wixAdminClientServer } from "@/lib/wixAdminClientServer";
 import Link from "next/link";
 import { format } from "timeago.js";
 import OrderActions from "@/components/OrderActions";
@@ -6,7 +6,7 @@ import OrderActions from "@/components/OrderActions";
 export const dynamic = "force-dynamic";
 
 const OrdersPage = async () => {
-    const wixClient = await wixClientServer();
+    const wixClient = wixAdminClientServer();
 
     let orders: any[] = [];
     try {
@@ -22,7 +22,7 @@ const OrdersPage = async () => {
 
             {orders.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 gap-6">
-                    <div className="text-gray-400 text-6xl">📦</div>
+                    <div className="text-gray-400 text-2xl font-semibold">Orders</div>
                     <h2 className="text-xl text-gray-600">No orders yet</h2>
                     <p className="text-gray-500">
                         When you place orders, they will appear here.
@@ -79,7 +79,7 @@ const OrdersPage = async () => {
                                     <div className="text-right">
                                         <p className="text-sm text-gray-500">Total</p>
                                         <p className="font-semibold">
-                                            ₹{order.priceSummary?.total?.amount || "0.00"}
+                                           ₹{order.priceSummary?.total?.amount || "0.00"}
                                         </p>
                                     </div>
                                 </div>
@@ -113,14 +113,14 @@ const OrdersPage = async () => {
                                     </span>
                                 </div>
                                 <div className="font-semibold">
-                                    ₹{order.priceSummary?.total?.amount || "0.00"}
+                                   ₹{order.priceSummary?.total?.amount || "0.00"}
                                 </div>
                                 <div className="text-right">
                                     <Link
                                         href={`/orders/${order._id}`}
                                         className="text-accent hover:underline font-medium"
                                     >
-                                        View Details →
+                                        View Details
                                     </Link>
                                 </div>
                             </div>
@@ -138,3 +138,4 @@ const OrdersPage = async () => {
 };
 
 export default OrdersPage;
+

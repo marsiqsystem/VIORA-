@@ -6,7 +6,11 @@ import { useCartStore } from "@/hooks/useCartStore";
 import { useWixClient } from "@/hooks/useWixClient";
 import { trackMetaEvent } from "@/lib/metaEvents";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 
+const CheckoutModal = dynamic(() => import("@/components/CheckoutModal"), {
+  ssr: false,
+});
 type Props = {
   productId: string;
   variantId: string;
@@ -33,6 +37,7 @@ const StickyAddToCart = ({
   const { addItem } = useCartStore();
   const [visible, setVisible] = useState(false);
   const [isBuyingNow, setIsBuyingNow] = useState(false);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
 
   useEffect(() => {
     const target = document.querySelector(triggerSelector);
@@ -58,7 +63,14 @@ const StickyAddToCart = ({
 
     setIsBuyingNow(true);
     try {
+      // Add to cart and wait for Wix API to confirm
       await addItem(wixClient, productId, variantId, 1);
+
+      // Verify cart actually has items before navigating
+      const verifyCart = await wixClient.currentCart.getCurrentCart();
+      if (!verifyCart?.lineItems?.length) {
+        throw new Error("Cart is still empty after adding item");
+      }
 
       const baseEvent = {
         currency: "INR",
@@ -72,8 +84,8 @@ const StickyAddToCart = ({
       trackMetaEvent("AddToCart", baseEvent);
       trackMetaEvent("InitiateCheckout", baseEvent);
 
-      router.push("/checkout");
-      return;
+      // Open the Checkout OTP Modal popup right on the product page
+      setCheckoutOpen(true);
     } catch (err) {
       console.error("Sticky Buy Now failed:", err);
     }
@@ -143,6 +155,8 @@ const StickyAddToCart = ({
           </button>
         </div>
       </div>
+
+      <CheckoutModal open={checkoutOpen} onClose={() => setCheckoutOpen(false)} />
     </div>
   );
 };

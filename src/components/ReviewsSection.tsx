@@ -33,10 +33,55 @@ const MOCK_REVIEWS: MockReview[] = [
     text: "Exactly what I was hoping for. The detailing is delicate and elegant, perfect for everyday wear.",
     image: "/product.png",
   },
+  {
+    name: "Sneha K.",
+    rating: 5,
+    date: "3 weeks ago",
+    text: "Absolutely beautiful craftsmanship! It feels very premium and the polish is exceptional.",
+  },
+  {
+    name: "Rohit V.",
+    rating: 5,
+    date: "2 months ago",
+    text: "Bought this for an anniversary, my wife loved it. The quality easily exceeds the price tag.",
+  },
+  {
+    name: "Kritika B.",
+    rating: 4,
+    date: "2 weeks ago",
+    text: "Looks even better in person. Very premium packaging, making it a perfect gift option.",
+    image: "/product.png",
+  },
+  {
+    name: "Aarti P.",
+    rating: 5,
+    date: "3 months ago",
+    text: "Such a stunning statement piece. I've worn it daily for weeks and it hasn't lost any shine.",
+  },
+  {
+    name: "Meera D.",
+    rating: 5,
+    date: "1 week ago",
+    text: "The delivery was super fast, and the jewelry itself is breathtaking. Highly recommend Viora!",
+  },
+  {
+    name: "Neha W.",
+    rating: 4,
+    date: "1 month ago",
+    text: "Very classy and versatile. It goes well with both ethnic and western outfits.",
+  },
+  {
+    name: "Simran J.",
+    rating: 5,
+    date: "2 months ago",
+    text: "I was skeptical buying jewelry online, but the quality here is unmatched. Flawless design.",
+    image: "/product.png",
+  }
 ];
 
 type Props = {
   productName?: string;
+  productIdHash?: number;
 };
 
 const Stars = ({ value }: { value: number }) => (
@@ -54,8 +99,13 @@ const Stars = ({ value }: { value: number }) => (
   </div>
 );
 
-const ReviewsSection = ({ productName }: Props) => {
+const ReviewsSection = ({ productName, productIdHash = 0 }: Props) => {
   const [open, setOpen] = useState(false);
+
+  // Deterministically select 2 or 3 reviews based on the hash
+  const numReviews = 2 + (productIdHash % 2); // 2 or 3
+  const startIndex = productIdHash % (MOCK_REVIEWS.length - numReviews + 1);
+  const selectedReviews = MOCK_REVIEWS.slice(startIndex, startIndex + numReviews);
 
   return (
     <div className="border-t border-gray-100 pt-6">
@@ -75,7 +125,7 @@ const ReviewsSection = ({ productName }: Props) => {
         </summary>
 
         <div className="mt-4 space-y-5">
-          {MOCK_REVIEWS.map((r, i) => (
+          {selectedReviews.map((r, i) => (
             <div
               key={i}
               className="rounded-xl border border-gray-100 bg-platinum/40 p-4"

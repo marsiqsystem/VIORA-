@@ -6,57 +6,78 @@ type CartState = {
   cart: currentCart.Cart;
   isLoading: boolean;
   counter: number;
-  getCart: (wixClient: WixClient) => void;
+  getCart: (wixClient: WixClient) => Promise<void>;
   addItem: (
     wixClient: WixClient,
     productId: string,
     variantId: string,
-    quantity: number
-  ) => void;
-  removeItem: (wixClient: WixClient, itemId: string) => void;
+    quantity: number,
+    selectedOptions?: Record<string, string>
+  ) => Promise<void>;
+  removeItem: (wixClient: WixClient, itemId: string) => Promise<void>;
   updateQuantity: (
     wixClient: WixClient,
     itemId: string,
     quantity: number
-  ) => void;
+  ) => Promise<void>;
+  clearCart: () => void;
 };
 
+const EMPTY_CART = {} as currentCart.Cart;
+
 export const useCartStore = create<CartState>((set) => ({
-  cart: [],
+  cart: EMPTY_CART,
   isLoading: true,
   counter: 0,
   getCart: async (wixClient) => {
     try {
       const cart = await wixClient.currentCart.getCurrentCart();
       set({
-        cart: cart || [],
+        cart: cart || EMPTY_CART,
         isLoading: false,
         counter: cart?.lineItems?.length || 0,
       });
     } catch (err) {
-      set((prev) => ({ ...prev, isLoading: false }));
+      // Wix throws "OWNED_CART_NOT_FOUND" after deleteCurrentCart() — that means
+      // the cart is gone, not that the request failed. Reset local state so the
+      // UI reflects the empty backend instead of clinging to the stale items.
+      set({ cart: EMPTY_CART, counter: 0, isLoading: false });
     }
   },
-  addItem: async (wixClient, productId, variantId, quantity) => {
+  addItem: async (wixClient, productId, variantId, quantity, selectedOptions) => {
     set((state) => ({ ...state, isLoading: true }));
-    const response = await wixClient.currentCart.addToCurrentCart({
-      lineItems: [
-        {
-          catalogReference: {
-            appId: process.env.NEXT_PUBLIC_WIX_APP_ID!,
-            catalogItemId: productId,
-            ...(variantId && { options: { variantId } }),
+    try {
+      await wixClient.currentCart.addToCurrentCart({
+        lineItems: [
+          {
+            catalogReference: {
+              appId: "215238eb-22a5-4c36-9e7b-e7c08025e04e",
+              catalogItemId: productId,
+              ...((variantId && variantId !== "00000000-0000-0000-0000-000000000000") || (selectedOptions && Object.keys(selectedOptions).length > 0) ? {
+                options: {
+                  ...(variantId && variantId !== "00000000-0000-0000-0000-000000000000" && { variantId }),
+                  ...(selectedOptions && Object.keys(selectedOptions).length > 0 && { options: selectedOptions }),
+                }
+              } : {}),
+            },
+            quantity: quantity,
           },
-          quantity: quantity,
-        },
-      ],
-    });
+        ],
+      });
 
-    set({
-      cart: response.cart,
-      counter: response.cart?.lineItems?.length || 0,
-      isLoading: false,
-    });
+      // Fetch the updated cart state to ensure global UI sync
+      const updatedCart = await wixClient.currentCart.getCurrentCart();
+      
+      set({
+        cart: updatedCart || EMPTY_CART,
+        counter: updatedCart?.lineItems?.length || 0,
+        isLoading: false,
+      });
+    } catch (err) {
+      console.error("Failed to add item to cart in store:", err);
+      set((state) => ({ ...state, isLoading: false }));
+      throw err; // Propagate error so the UI can catch it
+    }
   },
   removeItem: async (wixClient, itemId) => {
     set((state) => ({ ...state, isLoading: true }));
@@ -86,5 +107,9 @@ export const useCartStore = create<CartState>((set) => ({
       set((state) => ({ ...state, isLoading: false }));
     }
   },
+  // Synchronously zero-out local cart state. Call this after a successful
+  // checkout (server-side cart has already been deleted by deleteCurrentCart).
+  clearCart: () => {
+    set({ cart: EMPTY_CART, counter: 0, isLoading: false });
+  },
 }));
-

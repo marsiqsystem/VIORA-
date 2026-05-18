@@ -45,32 +45,43 @@ const ProductList = async ({
   // color variants. Wix doesn't expose server-side group-by; this is the
   // pragmatic workaround for the 15-image-per-product constraint.
   const OVERFETCH_FACTOR = 4;
+
+  // TASK 3 FIX: Parse page number (0-indexed from URL search params)
+  const currentPage = searchParams?.page ? parseInt(searchParams.page) : 0;
+
   productQuery = productQuery
     .limit(pageSize * OVERFETCH_FACTOR)
-    .skip(
-      searchParams?.page
-        ? parseInt(searchParams.page) * pageSize * OVERFETCH_FACTOR
-        : 0
-    );
+    .skip(currentPage * pageSize * OVERFETCH_FACTOR);
 
   const res = await productQuery.find();
 
   // Group color variants by Base Name (everything before " - ").
   // Convention: "[Base Name] - [Color]" (e.g. "Ethnic Jewellery Set - Blue").
-  // We render only the FIRST product seen per base name to keep the grid clean.
-  const dedupedItems: products.Product[] = [];
+  // We keep only the FIRST product per base name to collapse color variants.
+  //
+  // IMPORTANT: Dedupe ALL fetched items first (don't stop at pageSize).
+  // We need the full deduped count to determine if there's a next page.
+  const allDedupedItems: products.Product[] = [];
   const seenBaseNames = new Set<string>();
   for (const item of res.items) {
     const baseName = (item.name || "").split(" - ")[0].trim().toLowerCase();
     if (!baseName) {
-      dedupedItems.push(item);
+      allDedupedItems.push(item);
       continue;
     }
     if (seenBaseNames.has(baseName)) continue;
     seenBaseNames.add(baseName);
-    dedupedItems.push(item);
-    if (dedupedItems.length >= pageSize) break;
+    allDedupedItems.push(item);
   }
+
+  // Slice the deduped list to only show the current page's worth of items.
+  const dedupedItems = allDedupedItems.slice(0, pageSize);
+
+  // hasNext is true if:
+  // 1) There are more deduped items beyond what we're showing on this page, OR
+  // 2) Wix has more raw items beyond our overfetch window
+  const hasNextPage = allDedupedItems.length > pageSize || res.hasNext();
+  const hasPrevPage = currentPage > 0;
 
   return (
     <div className="mt-12">
@@ -97,12 +108,12 @@ const ProductList = async ({
         </div>
       )}
 
-      {res.items.length > 0 && (
+      {dedupedItems.length > 0 && (
         <div className="mt-12">
           <Pagination
-            currentPage={res.currentPage || 0}
-            hasPrev={res.hasPrev()}
-            hasNext={res.hasNext()}
+            currentPage={currentPage}
+            hasPrev={hasPrevPage}
+            hasNext={hasNextPage}
           />
         </div>
       )}

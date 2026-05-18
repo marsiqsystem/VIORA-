@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Image from "next/image";
 import Link from "next/link";
@@ -42,7 +42,7 @@ const Footer = () => {
   };
 
   return (
-    <footer className="bg-primary text-white pb-20 md:pb-0">
+    <footer className="bg-primary text-white pb-20 md:pb-0 w-full max-w-[100vw] overflow-x-hidden">
       <div className="border-b border-white/10">
         <div className="container-responsive py-12 md:py-16">
           <div className="flex flex-col items-center justify-between gap-8 md:flex-row">
@@ -54,18 +54,18 @@ const Footer = () => {
                 Early access to new drops, gifting edits, and private offers.
               </p>
             </div>
-            <form onSubmit={handleSubscribe} className="flex w-full max-w-md md:w-auto">
+            <form onSubmit={handleSubscribe} className="flex w-full min-w-0 max-w-md md:w-auto">
               <input
                 type="email"
                 placeholder="Enter your email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="flex-1 rounded-l-lg border border-white/20 bg-white/10 px-5 py-3.5 text-white placeholder:text-white/45 transition-colors focus:border-white/40 focus:outline-none"
+                className="min-w-0 flex-1 rounded-l-lg border border-white/20 bg-white/10 px-3 py-3.5 text-white placeholder:text-white/45 transition-colors focus:border-white/40 focus:outline-none sm:px-5"
                 required
               />
               <button
                 type="submit"
-                className={`rounded-r-lg px-6 py-3.5 font-semibold transition-all duration-300 ${
+                className={`shrink-0 rounded-r-lg px-4 py-3.5 text-sm font-semibold transition-all duration-300 sm:px-6 sm:text-base ${
                   subscribed
                     ? "bg-green-500 text-white"
                     : "bg-accent text-white hover:bg-silver hover:text-primary"
@@ -83,11 +83,12 @@ const Footer = () => {
           <div className="col-span-2 md:col-span-1 lg:col-span-2">
             <Link href="/" className="mb-6 inline-block">
               <Image
-                src="/final%20logo%20copy.png"
+                src="/logo%20compressed.png"
                 alt="Viora Jewels"
                 width={300}
                 height={108}
                 className="h-28 w-auto object-contain brightness-0 invert"
+                style={{ width: "auto" }}
               />
             </Link>
             <p className="mb-6 max-w-xs text-sm leading-relaxed text-white/65">
@@ -107,7 +108,7 @@ const Footer = () => {
                   aria-label={label}
                   key={label}
                 >
-                  <Image src={src} alt="" width={18} height={18} className="brightness-0 invert" />
+                  <Image src={src} alt="" width={18} height={18} className="h-[18px] w-[18px] brightness-0 invert" />
                 </a>
               ))}
             </div>
@@ -154,12 +155,12 @@ const Footer = () => {
             <div className="flex items-center gap-4 text-sm text-white/60">
               <span>Copyright 2026 Viora Jewels. All rights reserved.</span>
               <span className="hidden text-white/20 md:inline">|</span>
-              <span>Rs. INR</span>
+              <span>₹ INR</span>
             </div>
             <div className="flex items-center gap-4">
-              <Image src="/visa.png" alt="Visa" width={40} height={24} className="opacity-70 transition-opacity hover:opacity-100" />
-              <Image src="/mastercard.png" alt="Mastercard" width={40} height={24} className="opacity-70 transition-opacity hover:opacity-100" />
-              <Image src="/paypal.png" alt="PayPal" width={40} height={24} className="opacity-70 transition-opacity hover:opacity-100" />
+              <Image src="/visa.png" alt="Visa" width={40} height={24} className="h-6 w-auto opacity-70 transition-opacity hover:opacity-100" style={{ width: "auto" }} />
+              <Image src="/mastercard.png" alt="Mastercard" width={40} height={24} className="h-6 w-auto opacity-70 transition-opacity hover:opacity-100" style={{ width: "auto" }} />
+              <Image src="/paypal.png" alt="PayPal" width={40} height={24} className="h-6 w-auto opacity-70 transition-opacity hover:opacity-100" style={{ width: "auto" }} />
             </div>
           </div>
         </div>
@@ -183,3 +184,4 @@ const Footer = () => {
 };
 
 export default Footer;
+

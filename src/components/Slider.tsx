@@ -5,15 +5,17 @@ import Link from "next/link";
 
 const Slider = () => {
   return (
-    <section className="relative w-full h-[60vh] md:h-[80vh] min-h-[500px] flex items-center bg-platinum max-md:pt-24">
+    <section className="relative w-full min-h-[500px] md:h-[80vh] flex items-center bg-platinum max-md:pt-24">
       {/* Background Image — object-cover + object-center keeps the necklace
           centred on every viewport; no max-h / overflow-hidden cropping. */}
       <div className="absolute inset-0 z-0 w-full h-full">
         <Image
-          src="/hero.png"
+          src="/hero-optimized.jpg"
           alt="Viora Jewels curated jewellery and accessories"
           fill
           sizes="100vw"
+          quality={70}
+          fetchPriority="high"
           className="object-cover object-center w-full h-full"
           priority
         />
@@ -47,7 +49,9 @@ const Slider = () => {
             New Arrivals
           </Link>
         </div>
-        <div className="mt-12 grid max-w-xl grid-cols-3 gap-4 border-t border-white/30 pt-6">
+
+        {/* Feature items: stack vertically on mobile, 3 columns on md+ */}
+        <div className="mt-10 mb-4 max-w-xl grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 border-t border-white/30 pt-6">
           <div>
             <p className="font-playfair text-2xl font-bold text-white">Premium</p>
             <p className="font-inter text-xs font-medium tracking-wide text-white/80">Quality Assured</p>

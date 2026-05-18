@@ -26,7 +26,7 @@ const ProductsPage = async ({ searchParams }: { searchParams: any }) => {
         <div
           className="w-full h-screen xl:flex-row bg-cover bg-center fade-in"
           style={{
-            backgroundImage: "url('/productsdesk.jpg')",
+            backgroundImage: "url('/productsdesk-optimized.jpg')",
           }}
         >
           <div className="flex flex-col items-center justify-center text-center gap-8 p-6 w-full h-full bg-black bg-opacity-40">

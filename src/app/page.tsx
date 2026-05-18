@@ -62,7 +62,7 @@ const HomePage = async () => {
             </p>
           </div>
           <Link
-            href="/list"
+            href="/list#product-grid"
             className="hidden sm:inline-flex items-center gap-2 rounded-full border border-primary px-5 py-2.5 text-sm font-semibold text-primary transition-colors hover:bg-primary hover:text-white"
           >
             View all
@@ -112,10 +112,12 @@ const HomePage = async () => {
         {/* Background Image */}
         <div className="absolute inset-0 z-0 w-full h-full">
           <Image
-            src="/banner 1.png"
+            src="/banner-optimized.jpg"
             alt="Gifting collection banner"
             fill
             sizes="100vw"
+            quality={70}
+            loading="lazy"
             className="object-cover object-center w-full h-full"
           />
           <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-primary/80 via-primary/50 to-transparent" />
@@ -124,7 +126,7 @@ const HomePage = async () => {
         {/* Content — left aligned */}
         <div className="relative z-10 w-full px-4 md:px-8 lg:px-12 xl:px-16 2xl:px-24 py-16 md:py-20">
           <div className="max-w-xl">
-            <span className="inline-block rounded-full border border-silver/40 bg-white/10 backdrop-blur-sm px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.25em] text-silver-light">
+            <span className="inline-block rounded-full border border-silver/40 bg-white/10 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.25em] text-silver-light">
               For Gifting
             </span>
 

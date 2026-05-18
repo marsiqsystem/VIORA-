@@ -4,7 +4,7 @@ import GiftPackagingForm, { GiftableProduct } from "@/components/GiftPackagingFo
 export const metadata = {
   title: "Customize Your Gift Packaging | Viora Jewels",
   description:
-    "Premium wrapping, ribbon and a personalised note — added to any Viora piece for Rs. 79.",
+    "Premium wrapping, ribbon and a personalised note — added to any Viora piece for ₹79.",
 };
 
 const GiftPackagingPage = async () => {

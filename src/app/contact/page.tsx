@@ -69,9 +69,11 @@ const ContactPage = () => {
       {/* Hero Section */}
       <div className="relative h-[50vh] md:h-[60vh] overflow-hidden">
         <Image
-          src="/contact us.png"
+          src="/contact-us-optimized.jpg"
           alt="Contact Viora Jewels"
           fill
+          sizes="100vw"
+          quality={70}
           className="object-cover"
           priority
         />
@@ -346,7 +348,7 @@ const ContactPage = () => {
 
       {/* Thank-You Popup */}
       {showPopup && (
-        <div className="fixed inset-0 flex justify-center items-center bg-black/50 backdrop-blur-sm z-50 p-4">
+        <div className="fixed inset-0 flex justify-center items-center bg-black/50 z-50 p-4">
           <div className="bg-white p-8 rounded-2xl shadow-premium-hover text-center max-w-md w-full animate-scale-in">
             <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <svg className="w-8 h-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">

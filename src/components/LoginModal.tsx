@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { trackCompleteRegistration } from "@/lib/metaPixel";
 
-type Mode = "LOGIN" | "REGISTER";
+type Mode = "LOGIN" | "REGISTER" | "VERIFY";
 
 interface LoginModalProps {
   open: boolean;
@@ -21,6 +21,7 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
   const [username, setUsername] = useState("");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -38,6 +39,8 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
       setError("");
       setMessage("");
       setPassword("");
+      setVerificationCode("");
+      setMode("LOGIN");
     }
     return () => {
       document.body.style.overflow = "";
@@ -55,6 +58,18 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
 
   if (!mounted || !open) return null;
 
+  // Shared post-success handler — exchanges Wix sessionToken for member tokens,
+  // persists the refresh token, and finishes the modal flow. Called both on
+  // direct LOGIN success and on successful OTP verification.
+  const finalizeLogin = async (sessionToken: string, justRegistered: boolean) => {
+    const tokens = await wixClient.auth.getMemberTokensForDirectLogin(sessionToken);
+    Cookies.set("refreshToken", JSON.stringify(tokens.refreshToken), { expires: 2 });
+    wixClient.auth.setTokens(tokens);
+    if (justRegistered) trackCompleteRegistration("email");
+    onLoggedIn?.();
+    onClose();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -62,6 +77,31 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
     setMessage("");
 
     try {
+      // VERIFY mode: user is entering the 6-digit OTP Wix emailed them.
+      if (mode === "VERIFY") {
+        const code = verificationCode.trim();
+        if (!/^\d{4,8}$/.test(code)) {
+          setError("Enter the code Wix emailed you (usually 6 digits).");
+          setIsLoading(false);
+          return;
+        }
+        const verifyResponse = await wixClient.auth.processVerification({
+          verificationCode: code,
+        });
+        if (verifyResponse?.loginState === LoginState.SUCCESS) {
+          setMessage("Verified! Logging you in...");
+          await finalizeLogin(verifyResponse.data.sessionToken!, true);
+          return;
+        }
+        if (verifyResponse?.loginState === LoginState.FAILURE) {
+          setError("That code didn't work. Double-check it or request a new one.");
+          return;
+        }
+        setError("Verification didn't complete. Please try again.");
+        return;
+      }
+
+      // LOGIN or REGISTER mode.
       const response =
         mode === "LOGIN"
           ? await wixClient.auth.login({ email: identifier, password })
@@ -73,17 +113,8 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
 
       switch (response?.loginState) {
         case LoginState.SUCCESS: {
-          if (mode === "REGISTER") trackCompleteRegistration("email");
           setMessage("Success! Logging you in...");
-          const tokens = await wixClient.auth.getMemberTokensForDirectLogin(
-            response.data.sessionToken!
-          );
-          Cookies.set("refreshToken", JSON.stringify(tokens.refreshToken), {
-            expires: 2,
-          });
-          wixClient.auth.setTokens(tokens);
-          onLoggedIn?.();
-          onClose();
+          await finalizeLogin(response.data.sessionToken!, mode === "REGISTER");
           break;
         }
         case LoginState.FAILURE:
@@ -101,7 +132,11 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
           }
           break;
         case LoginState.EMAIL_VERIFICATION_REQUIRED:
-          setMessage("Please check your email to verify your account.");
+          // Switch the modal into the OTP-entry step so the user can finish
+          // signup inline instead of being told "check your email" with no
+          // place to type the code.
+          setMode("VERIFY");
+          setMessage(`We sent a verification code to ${identifier}. Enter it below to finish signing in.`);
           break;
         case LoginState.OWNER_APPROVAL_REQUIRED:
           setMessage("Your account is pending approval.");
@@ -119,7 +154,7 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
 
   const modal = (
     <div
-      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/55 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/55 p-4"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -157,15 +192,22 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
           </div>
 
           <h2 className="font-playfair text-2xl font-bold text-primary mb-1">
-            {mode === "LOGIN" ? "Welcome Back" : "Create Your Account"}
+            {mode === "LOGIN"
+              ? "Welcome Back"
+              : mode === "REGISTER"
+                ? "Create Your Account"
+                : "Verify Your Email"}
           </h2>
           <p className="text-sm text-gray-500 mb-5">
             {mode === "LOGIN"
               ? "Log in to save your favorites and track orders."
-              : "Join Viora to save your wishlist across devices."}
+              : mode === "REGISTER"
+                ? "Join Viora to save your wishlist across devices."
+                : "Enter the verification code we just sent to your inbox."}
           </p>
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            {/* REGISTER-only username */}
             {mode === "REGISTER" && (
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-medium text-gray-700">Username</label>
@@ -178,28 +220,57 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
                 />
               </div>
             )}
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-gray-700">Email</label>
-              <input
-                type="email"
-                required
-                value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
-                placeholder="you@example.com"
-                className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-gray-700">Password</label>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter password"
-                className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
-              />
-            </div>
+
+            {/* Email + Password for LOGIN/REGISTER */}
+            {mode !== "VERIFY" && (
+              <>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-gray-700">Email</label>
+                  <input
+                    type="email"
+                    required
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                    placeholder="you@example.com"
+                    className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-gray-700">Password</label>
+                  <input
+                    type="password"
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter password"
+                    className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
+                  />
+                </div>
+              </>
+            )}
+
+            {/* OTP-only code input */}
+            {mode === "VERIFY" && (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-gray-700">
+                  Verification Code
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  required
+                  value={verificationCode}
+                  onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ""))}
+                  placeholder="6-digit code"
+                  maxLength={8}
+                  className="rounded-lg border border-gray-300 px-4 py-3 text-center text-lg font-mono tracking-[0.4em] outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
+                />
+                <p className="text-xs text-gray-500">
+                  Sent to <span className="font-medium">{identifier}</span>. Check your spam folder if you don&apos;t see it.
+                </p>
+              </div>
+            )}
 
             {error && (
               <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -221,12 +292,14 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
                 ? "Please wait..."
                 : mode === "LOGIN"
                   ? "Log In"
-                  : "Create Account"}
+                  : mode === "REGISTER"
+                    ? "Create Account"
+                    : "Verify & Continue"}
             </button>
           </form>
 
           <div className="mt-4 text-center text-sm text-gray-600">
-            {mode === "LOGIN" ? (
+            {mode === "LOGIN" && (
               <>
                 Don&apos;t have an account?{" "}
                 <button
@@ -237,7 +310,8 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
                   Sign up
                 </button>
               </>
-            ) : (
+            )}
+            {mode === "REGISTER" && (
               <>
                 Already have an account?{" "}
                 <button
@@ -248,6 +322,20 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
                   Log in
                 </button>
               </>
+            )}
+            {mode === "VERIFY" && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("REGISTER");
+                  setVerificationCode("");
+                  setError("");
+                  setMessage("");
+                }}
+                className="font-medium text-[#9B1B30] hover:underline"
+              >
+                Use a different email
+              </button>
             )}
           </div>
         </div>

@@ -24,23 +24,6 @@ const MobileBottomNav = () => {
 
   const tabs: Tab[] = [
     {
-      id: "home",
-      label: "Home",
-      href: "/",
-      match: (p) => p === "/",
-      icon: (active) => (
-        <svg
-          className="w-6 h-6"
-          fill={active ? "currentColor" : "none"}
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={1.6}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l9-9 9 9M5 10v10a1 1 0 001 1h3v-6h6v6h3a1 1 0 001-1V10" />
-        </svg>
-      ),
-    },
-    {
       id: "search",
       label: "Search",
       href: "/list",
@@ -105,7 +88,7 @@ const MobileBottomNav = () => {
       className="fixed bottom-0 left-0 w-full z-50 bg-white border-t border-[#1A1410]/10 shadow-lg block md:hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
-      <ul className="grid grid-cols-5">
+      <ul className="grid grid-cols-4">
         {tabs.map((tab) => {
           const active = tab.match(pathname);
           const tone = active ? "text-[#9B1B30]" : "text-[#1A1410]/75";

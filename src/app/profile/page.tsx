@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import UpdateButton from "@/components/UpdateButton";
 import { updateUser } from "@/lib/actions";
@@ -18,6 +18,13 @@ const ProfileContent = () => {
 
   useEffect(() => {
     const fetchData = async () => {
+      if (!wixClient.auth.loggedIn()) {
+        setUser(null);
+        setOrders([]);
+        setLoading(false);
+        return;
+      }
+
       try {
         const memberData = await wixClient.members.getCurrentMember({
           fieldsets: ["FULL"],
@@ -333,3 +340,4 @@ const ProfilePage = () => {
 };
 
 export default ProfilePage;
+

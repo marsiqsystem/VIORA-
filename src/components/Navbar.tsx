@@ -48,7 +48,7 @@ const Navbar = () => {
           scrolled ? "shadow-premium" : ""
         }`}
       >
-        <div className="relative h-16 md:h-20 w-full px-4 md:px-8 lg:px-12 xl:px-16 2xl:px-24">
+        <div className="relative h-20 md:h-24 w-full px-4 md:px-8 lg:px-12 xl:px-16 2xl:px-24">
           <div className="h-full flex items-center justify-between md:hidden">
             <div className="w-16 flex items-center justify-start">
               <Menumob />
@@ -56,11 +56,13 @@ const Navbar = () => {
             <div className="flex-1 flex items-center justify-center">
               <Link href="/" className="flex items-center">
                 <Image
-                  src="/final%20logo%20copy.png"
+                  src="/logo%20compressed.png"
                   alt="Viora Jewels Logo"
-                  width={140}
-                  height={48}
-                  className="h-12 w-auto object-contain"
+                  width={200}
+                  height={72}
+                  sizes="200px"
+                  className="h-14 w-auto object-contain"
+                  style={{ width: "auto" }}
                   priority
                 />
               </Link>
@@ -128,11 +130,13 @@ const Navbar = () => {
             <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2">
               <Link href="/" className="flex items-center">
                 <Image
-                  src="/final%20logo%20copy.png"
+                  src="/logo%20compressed.png"
                   alt="Viora Jewels Logo"
-                  width={300}
-                  height={96}
-                  className="h-20 md:h-24 w-auto object-contain"
+                  width={360}
+                  height={120}
+                  sizes="(max-width: 1024px) 220px, 280px"
+                  className="h-16 md:h-20 w-auto object-contain"
+                  style={{ width: "auto" }}
                   priority
                 />
               </Link>

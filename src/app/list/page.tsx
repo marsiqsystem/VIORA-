@@ -41,10 +41,11 @@ const ListPage = async ({ searchParams }: { searchParams: any }) => {
         {/* Background Image */}
         <div className="absolute inset-0 z-0">
           <Image
-            src="/all products.png"
+            src="/all-products-optimized.jpg"
             alt="All Products Banner"
             fill
             sizes="100vw"
+            quality={70}
             className="object-cover"
             priority
           />
@@ -119,8 +120,8 @@ const ListPage = async ({ searchParams }: { searchParams: any }) => {
 
 
 
-        {/* Results Info */}
-        <div className="flex items-center justify-between mt-10 mb-6">
+        {/* Results Info — anchor for pagination scroll */}
+        <div id="product-grid" className="flex items-center justify-between mt-10 mb-6 scroll-mt-24">
           <h2 className="text-xl md:text-2xl font-playfair font-bold text-primary">
             {categoryName}
           </h2>

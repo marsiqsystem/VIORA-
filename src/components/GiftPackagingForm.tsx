@@ -69,7 +69,7 @@ const GiftPackagingForm = ({ products }: { products: GiftableProduct[] }) => {
         lineItems: [
           {
             catalogReference: {
-              appId: process.env.NEXT_PUBLIC_WIX_APP_ID!,
+              appId: "215238eb-22a5-4c36-9e7b-e7c08025e04e",
               catalogItemId: selected.id,
               options: {
                 variantId: PLACEHOLDER_VARIANT,
@@ -415,7 +415,7 @@ const GiftPackagingForm = ({ products }: { products: GiftableProduct[] }) => {
                 )}
               </button>
               <p className="mt-2 text-center text-[10px] uppercase tracking-wider text-gray-400">
-                Signature Viora jewelry packaging included · Rs. 79 covers wrapping, ribbon shape &amp; note
+                Signature Viora jewelry packaging included · ₹79 covers wrapping, ribbon shape &amp; note
               </p>
             </div>
           </div>

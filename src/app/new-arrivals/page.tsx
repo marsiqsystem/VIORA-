@@ -12,7 +12,7 @@ const NewArrivalsPage = () => {
         {/* Background Image */}
         <div className="absolute inset-0 z-0">
           <Image
-            src="/new%20arrival.png"
+            src="/new-arrival-optimized.jpg"
             alt="New Arrivals Banner"
             fill
             sizes="100vw"

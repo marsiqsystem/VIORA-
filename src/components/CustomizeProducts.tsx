@@ -158,6 +158,7 @@ const CustomizeProducts = ({
         }
         productName={productName}
         productPrice={basePrice}
+        selectedOptions={selectedOptions}
       />
     </div>
   );

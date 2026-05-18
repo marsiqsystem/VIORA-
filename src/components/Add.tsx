@@ -1,10 +1,17 @@
-"use client";
+﻿"use client";
 
 import { useCartStore } from "@/hooks/useCartStore";
 import { useWixClient } from "@/hooks/useWixClient";
+import { useToast } from "@/components/Toast";
 import { trackMetaEvent } from "@/lib/metaEvents";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+
+import dynamic from "next/dynamic";
+
+const CheckoutModal = dynamic(() => import("@/components/CheckoutModal"), {
+  ssr: false,
+});
 
 const Add = ({
   productId,
@@ -12,16 +19,19 @@ const Add = ({
   stockNumber,
   productName,
   productPrice,
+  selectedOptions,
 }: {
   productId: string;
   variantId: string;
   stockNumber: number;
   productName: string;
   productPrice: number;
+  selectedOptions?: Record<string, string>;
 }) => {
   const [quantity, setQuantity] = useState(1);
   const [isAdded, setIsAdded] = useState(false);
   const [isBuyingNow, setIsBuyingNow] = useState(false);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
 
   const handleQuantity = (type: "i" | "d") => {
     if (type === "d" && quantity > 1) {
@@ -35,28 +45,43 @@ const Add = ({
   const wixClient = useWixClient();
   const router = useRouter();
   const { addItem, isLoading } = useCartStore();
+  const { showToast } = useToast();
 
   const handleAddToCart = async () => {
-    await addItem(wixClient, productId, variantId, quantity);
-    trackMetaEvent("AddToCart", {
-      currency: "INR",
-      value: productPrice * quantity,
-      content_ids: [productId],
-      content_name: productName,
-      content_type: "product",
-      contents: [{ id: productId, quantity, item_price: productPrice }],
-      num_items: quantity,
-    });
-    setIsAdded(true);
-    setTimeout(() => setIsAdded(false), 2000);
+    try {
+      await addItem(wixClient, productId, variantId, quantity, selectedOptions);
+      trackMetaEvent("AddToCart", {
+        currency: "INR",
+        value: productPrice * quantity,
+        content_ids: [productId],
+        content_name: productName,
+        content_type: "product",
+        contents: [{ id: productId, quantity, item_price: productPrice }],
+        num_items: quantity,
+      });
+      setIsAdded(true);
+      showToast(`${productName} added to cart!`, "success");
+      setTimeout(() => setIsAdded(false), 2000);
+    } catch (err) {
+      console.error("Detailed Wix Cart Error:", err);
+      showToast("Failed to add item to cart. Please try again.", "error");
+    }
   };
 
   const handleBuyNow = async () => {
     if (isOutOfStock || isBuyingNow) return;
     setIsBuyingNow(true);
     try {
-      await addItem(wixClient, productId, variantId, quantity);
+      // Step 1: Add to cart and WAIT for the Wix API to confirm
+      await addItem(wixClient, productId, variantId, quantity, selectedOptions);
 
+      // Step 2: Verify the cart actually has items now
+      const verifyCart = await wixClient.currentCart.getCurrentCart();
+      if (!verifyCart?.lineItems?.length) {
+        throw new Error("Cart is still empty after adding item");
+      }
+
+      // Step 3: Track event
       trackMetaEvent("InitiateCheckout", {
         currency: "INR",
         value: productPrice * quantity,
@@ -67,10 +92,11 @@ const Add = ({
         num_items: quantity,
       });
 
-      router.push("/checkout");
-      return;
+      // Step 4: Open the Checkout OTP Modal popup right on the product page
+      setCheckoutOpen(true);
     } catch (err) {
-      console.error("Buy Now failed:", err);
+      console.error("Detailed Wix Cart Error:", err);
+      showToast("Buy Now failed. Please try again.", "error");
     }
     setIsBuyingNow(false);
   };
@@ -248,8 +274,11 @@ const Add = ({
           Quality Assured
         </div>
       </div>
+
+      <CheckoutModal open={checkoutOpen} onClose={() => setCheckoutOpen(false)} />
     </div>
   );
 };
 
 export default Add;
+

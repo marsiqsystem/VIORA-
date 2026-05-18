@@ -7,10 +7,11 @@ const AboutPage = () => {
     <div className="min-h-screen bg-platinum">
       <div className="relative h-[56vh] overflow-hidden md:h-[66vh]">
         <Image
-          src="/about us.png"
+          src="/about-us-optimized.jpg"
           alt="Viora Jewels story"
           fill
           sizes="100vw"
+          quality={70}
           className="object-cover"
           priority
         />

@@ -3,7 +3,6 @@
 import { products } from "@wix/stores";
 import { useEffect, useState, useMemo } from "react";
 import { trackMetaEvent } from "@/lib/metaEvents";
-import DOMPurify from "isomorphic-dompurify";
 import dynamic from "next/dynamic";
 import ProductImages from "./ProductImages";
 import CustomizeProducts from "./CustomizeProducts";
@@ -103,15 +102,26 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
         setSelectedOptions(options);
     };
 
-    // Calculate discount
-    const hasDiscount = product.price?.price !== product.price?.discountedPrice;
-    const discountPercent = hasDiscount
-        ? Math.round(
-            ((product.price?.price! - product.price?.discountedPrice!) /
-                product.price?.price!) *
-            100
-        )
-        : 0;
+    // Pseudo-random deterministic logic based on product ID string
+    const getDeterministicHash = (id: string) => {
+        let hash = 0;
+        for (let i = 0; i < id.length; i++) {
+            hash = id.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        return Math.abs(hash);
+    };
+
+    const hashVal = product._id ? getDeterministicHash(product._id) : 0;
+    
+    const actualPrice = product.price?.price || 0;
+    const discountedPrice = product.price?.discountedPrice || null;
+    const hasDiscount = discountedPrice && discountedPrice < actualPrice;
+    const currentSellingPrice = hasDiscount ? discountedPrice : actualPrice;
+
+    // Ratings & Reviews Count Generation
+    const ratingDecimals = [2, 3, 4, 5, 6, 7, 8, 9];
+    const generatedRating = `4.${ratingDecimals[hashVal % ratingDecimals.length]}`;
+    const generatedReviewCount = 14 + (hashVal % 143); // 14 to 156
 
     return (
         <div className="flex flex-col lg:flex-row lg:items-start gap-8 lg:gap-16">
@@ -119,26 +129,33 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                 `lg:self-start lg:h-fit` keeps the column from stretching to the full
                 grid height (which is what previously broke the sticky lock and left
                 blank space below the image on long pages). */}
-            <div className="w-full lg:w-1/2 lg:sticky lg:top-32 lg:self-start lg:h-fit">
-                <ProductImages items={filteredMediaItems} isBestSeller={isBestSeller} />
+            {/*
+              Full-bleed mobile: w-screen + relative left-1/2 -translate-x-1/2 escapes
+              ANY parent padding (container-responsive px-4) and locks the gallery to
+              exactly the viewport width. overflow-hidden contains the swipe gesture
+              so no horizontal page scroll appears as a "white gap" on the right.
+              Desktop (md+) restores normal in-flow column behavior.
+            */}
+            <div className="relative left-1/2 -translate-x-1/2 w-screen max-w-[100vw] overflow-hidden md:left-auto md:translate-x-0 md:w-full md:max-w-none md:overflow-visible lg:w-1/2 lg:sticky lg:top-32 lg:self-start lg:h-fit">
+                <ProductImages items={filteredMediaItems} isBestSeller={isBestSeller} rating={parseFloat(generatedRating)} />
             </div>
 
             {/* Details */}
             <div className="w-full lg:w-1/2 flex flex-col gap-6">
                 {/* Title & Badge */}
                 <div>
-                    {hasDiscount && (
-                        <span className="inline-block bg-primary text-white text-xs font-bold px-3 py-1 rounded-full mb-3">
-                            {discountPercent}% OFF
-                        </span>
-                    )}
+                    {/* Badge hidden
+                    <span className="inline-block bg-gray-900 text-white text-xs font-bold px-3 py-1 rounded-sm mb-3 shadow-sm">
+                        -{fakeDiscountPercent}% OFF
+                    </span>
+                    */}
                     <h1 className="text-2xl md:text-3xl lg:text-4xl font-playfair font-bold text-primary leading-tight">
                         {displayName || (product.name || "").split(" - ")[0].trim()}
                     </h1>
 
                     {/* Social Proof Text */}
                     <p className="mt-2 text-sm text-gray-600 font-medium">
-                        ⭐ 4.8 | 10k+ Units Sold
+                        ⭐ {generatedRating} | 10k+ Units Sold
                     </p>
                 </div>
 
@@ -160,7 +177,7 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                         {[1, 2, 3, 4, 5].map((star) => (
                             <svg
                                 key={star}
-                                className={`w-5 h-5 ${star <= 4 ? "text-primary" : "text-silver-muted"}`}
+                                className={`w-5 h-5 ${star <= 4 ? "text-accent" : "text-gray-200"}`}
                                 fill="currentColor"
                                 viewBox="0 0 20 20"
                             >
@@ -168,31 +185,31 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                             </svg>
                         ))}
                     </div>
-                    <span className="text-sm text-gray-500">(24 reviews)</span>
+                    <span className="text-sm text-gray-500 font-medium">({generatedReviewCount} reviews)</span>
                 </div>
 
                 {/* Description */}
                 <div
                     className="text-gray-600 leading-relaxed prose prose-sm max-w-none"
                     dangerouslySetInnerHTML={{
-                        __html: DOMPurify.sanitize(product.description || ""),
+                        __html: product.description || "",
                     }}
                 />
 
                 <div className="h-px bg-gray-100" />
 
                 {/* Price */}
-                <div className="flex items-baseline flex-wrap gap-3">
+                <div className="flex items-baseline flex-wrap gap-3 mt-2">
                     <span className="text-3xl md:text-4xl font-bold text-primary">
-                        ₹{product.price?.discountedPrice}
+                        ₹{currentSellingPrice}
                     </span>
                     {hasDiscount && (
                         <>
-                            <span className="text-xl text-gray-400 line-through">
-                                ₹{product.price?.price}
+                            <span className="text-xl text-gray-400 line-through font-medium">
+                                ₹{actualPrice}
                             </span>
-                            <span className="text-green-700 bg-green-50 font-bold px-2 py-0.5 rounded text-sm">
-                                ({discountPercent}% OFF)
+                            <span className="text-green-700 bg-green-50 font-bold px-2.5 py-1 rounded-md text-sm border border-green-200 shadow-sm ml-1">
+                                Save {Math.round(((actualPrice - currentSellingPrice) / actualPrice) * 100)}%
                             </span>
                         </>
                     )}
@@ -312,7 +329,7 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                             <div
                                 className="mt-4 text-gray-600 leading-relaxed prose prose-sm max-w-none"
                                 dangerouslySetInnerHTML={{
-                                    __html: DOMPurify.sanitize(section.description || ""),
+                                    __html: section.description || "",
                                 }}
                             />
                         </details>
@@ -320,7 +337,7 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                 ))}
 
                 {/* Reviews */}
-                <ReviewsSection productName={product.name || undefined} />
+                <ReviewsSection productName={product.name || undefined} productIdHash={hashVal} />
 
                 {/* Delivery Info */}
                 <div className="bg-viora-gradient rounded-xl p-6 mt-4">

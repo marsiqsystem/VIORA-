@@ -2,7 +2,6 @@ import { wixClientServer } from "@/lib/wixClientServer";
 import { products } from "@wix/stores";
 import Image from "next/image";
 import Link from "next/link";
-import DOMPurify from "isomorphic-dompurify";
 import dynamic from "next/dynamic";
 const Pagination = dynamic(() => import("../components/Pagination"), {
   ssr: false,
@@ -75,8 +74,8 @@ const ExploreProd = async ({
                 fill
                 loading="lazy"
                 sizes="(max-width: 768px) 50vw, 16rem"
-                quality={70}
-                className="absolute object-cover"
+                quality={50}
+                className="hidden md:block absolute object-cover"
               />
             )}
           </div>

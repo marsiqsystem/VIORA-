@@ -8,7 +8,7 @@ import { media as wixMedia } from "@wix/sdk";
 import { trackMetaEvent } from "@/lib/metaEvents";
 // import GiftWrapUpsell from "@/components/GiftWrapUpsell"; // Gift wrap upsell paused — see banner comment below.
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import nextDynamic from "next/dynamic";
 
 const CheckoutModal = nextDynamic(() => import("@/components/CheckoutModal"), {
@@ -18,8 +18,12 @@ const CheckoutModal = nextDynamic(() => import("@/components/CheckoutModal"), {
 const CartPage = () => {
     const wixClient = useWixClient();
     const router = useRouter();
-    const { cart, isLoading, removeItem, updateQuantity } = useCartStore();
+    const { cart, isLoading, getCart, removeItem, updateQuantity } = useCartStore();
     const [checkoutOpen, setCheckoutOpen] = useState(false);
+
+    useEffect(() => {
+        getCart(wixClient).catch(() => {});
+    }, [getCart, wixClient]);
 
     const handleCheckout = async () => {
         try {
@@ -122,6 +126,7 @@ const CartPage = () => {
                                                     )}
                                                     alt={item.productName?.original || "Product"}
                                                     fill
+                                                    sizes="96px"
                                                     className="object-cover rounded-md"
                                                 />
                                             </div>
@@ -188,34 +193,41 @@ const CartPage = () => {
                         <div className="bg-gray-50 rounded-lg p-6 sticky top-24">
                             <h2 className="text-xl font-semibold mb-6">Order Summary</h2>
 
-                            <div className="space-y-3 mb-6">
-                                <div className="flex justify-between text-gray-600">
+                            <div className="space-y-3 mb-5">
+                                <div className="flex justify-between text-gray-600 text-sm">
                                     <span>Subtotal ({cart.lineItems.length} items)</span>
                                     <span>₹{displaySubtotal.toFixed(2)}</span>
                                 </div>
-                                <div className="flex justify-between text-gray-600">
+                                <div className="flex justify-between text-gray-600 text-sm">
                                     <span>Shipping</span>
                                     <span>
                                         <span className="text-gray-400 line-through mr-2">₹99</span>
-                                        <span className="text-green-700 font-bold">FREE Shipping!</span>
+                                        <span className="text-green-600 font-bold">FREE Shipping!</span>
                                     </span>
                                 </div>
-                                <div className="flex justify-between text-gray-600">
+                                <div className="flex justify-between text-gray-600 text-sm">
                                     <span>Processing Fee</span>
                                     <span>
                                         <span className="text-gray-400 line-through mr-2">₹50</span>
-                                        <span className="text-green-700 font-bold">FREE</span>
+                                        <span className="text-green-600 font-bold">FREE</span>
                                     </span>
                                 </div>
                             </div>
 
                             {/* Savings Line */}
-                            <p className="text-green-600 text-sm font-medium mb-3">
-                                ✅ You are saving ₹{totalSavings.toFixed(0)} on this order!
-                                <span className="block text-xs font-normal text-green-700/80">
-                                    Choose a prepaid method at checkout for ₹50 extra off.
-                                </span>
-                            </p>
+                            <div className="mb-5 flex items-start gap-2 bg-green-50/50 p-3 rounded-lg border border-green-100">
+                                <svg className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                                <div>
+                                    <p className="text-green-600 text-sm font-medium">
+                                        You are saving ₹149 on this order!
+                                    </p>
+                                    <span className="block text-xs font-normal text-green-700/80 mt-1">
+                                        Choose a prepaid method at checkout for ₹50 extra off.
+                                    </span>
+                                </div>
+                            </div>
 
                             <div className="border-t pt-4 mb-6">
                                 <div className="flex justify-between text-lg font-semibold">
