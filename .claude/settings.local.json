@@ -11,7 +11,10 @@
       "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 20)",
       "Bash(npx --no-install next build)",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(npm run *)",
+      "Bash(grep -nA15 \"interface Stock \" node_modules/@wix/auto_sdk_stores_products/build/cjs/index.typings.d.ts)",
+      "Bash(powershell *)"
     ]
   }
 }

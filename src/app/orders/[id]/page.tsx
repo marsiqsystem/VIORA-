@@ -16,12 +16,12 @@ const OrderPage = async ({ params }: { params: { id: string } }) => {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-180px)] items-center justify-center ">
-      <div className="relative shadow-[rgba(0,_0,_0,_0.25)_0px_25px_50px_-12px] px-40 py-20">
-        <div className="absolute top-6 left-6">
+    <div className="flex flex-col min-h-[calc(100vh-180px)] items-center justify-center px-4 py-10 md:py-16">
+      <div className="relative w-full max-w-2xl shadow-[rgba(0,_0,_0,_0.25)_0px_25px_50px_-12px] rounded-lg bg-white px-6 py-12 sm:px-10 sm:py-16 md:px-20 md:py-20">
+        <div className="absolute top-4 left-4 md:top-6 md:left-6">
           <BackButton ariaLabel="Back to orders" />
         </div>
-        <h1 className="text-xl">Order Details</h1>
+        <h1 className="text-xl pt-6 md:pt-0">Order Details</h1>
         <div className="mt-12 flex flex-col gap-6">
           <div className="">
             <span className="font-medium">Order Id: </span>

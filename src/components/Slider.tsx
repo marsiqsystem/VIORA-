@@ -5,7 +5,7 @@ import Link from "next/link";
 
 const Slider = () => {
   return (
-    <section className="relative w-full min-h-[500px] md:h-[80vh] flex items-center bg-platinum max-md:pt-24">
+    <section className="relative w-full min-h-[460px] md:h-[80vh] flex items-center bg-platinum">
       {/* Background Image — object-cover + object-center keeps the necklace
           centred on every viewport; no max-h / overflow-hidden cropping. */}
       <div className="absolute inset-0 z-0 w-full h-full">
@@ -24,11 +24,11 @@ const Slider = () => {
       </div>
 
       {/* Content */}
-      <div className="relative z-10 w-full flex flex-col justify-center px-4 py-14 md:px-8 lg:px-12 xl:px-16 2xl:px-24 text-white">
+      <div className="relative z-10 w-full flex flex-col justify-center px-4 py-8 md:py-14 md:px-8 lg:px-12 xl:px-16 2xl:px-24 text-white">
         <p className="mb-4 text-xs font-semibold uppercase tracking-[0.28em] text-platinum">
           Viora Jewels
         </p>
-        <h1 className="max-w-3xl font-playfair text-5xl font-bold leading-[0.95] md:text-7xl lg:text-8xl">
+        <h1 className="max-w-3xl font-playfair text-4xl font-semibold leading-[1.05] md:text-7xl md:font-bold md:leading-[0.95] lg:text-8xl">
           Jewellery That Sells The Moment.
         </h1>
         <p className="mt-6 max-w-xl text-base leading-7 text-gray-200 md:text-lg">

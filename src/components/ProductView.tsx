@@ -254,7 +254,13 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                         <Add
                             productId={product._id!}
                             variantId="00000000-0000-0000-0000-000000000000"
-                            stockNumber={product.stock?.quantity || 0}
+                            stockNumber={
+                                // When inventory isn't tracked, treat stock as essentially unlimited
+                                // so the quantity selector works. Cap at tracked quantity otherwise.
+                                product.stock?.trackInventory === true
+                                    ? product.stock?.quantity || 0
+                                    : 99
+                            }
                             productName={product.name || "Unnamed Product"}
                             productPrice={
                                 product.price?.discountedPrice || product.price?.price || 0
@@ -438,7 +444,16 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                     product.price?.discountedPrice || product.price?.price || 0
                 }
                 productImage={product.media?.mainMedia?.image?.url}
-                isOutOfStock={(product.stock?.quantity || 0) < 1}
+                isOutOfStock={
+                    // Only flag as sold out when Wix explicitly says inStock: false
+                    // OR when inventory IS tracked and quantity has reached 0.
+                    // Products that don't track inventory have undefined quantity —
+                    // the old `(quantity || 0) < 1` was wrongly marking those as
+                    // sold out, which is why every product showed "SOLD OUT".
+                    product.stock?.inStock === false ||
+                    (product.stock?.trackInventory === true &&
+                        (product.stock?.quantity ?? 0) < 1)
+                }
                 hasUnselectedVariants={
                     !!(product.variants && product.productOptions) &&
                     Object.keys(selectedOptions).length <
