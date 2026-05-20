@@ -7,6 +7,7 @@ import { memo, useState } from "react";
 import nextDynamic from "next/dynamic";
 import { trackAddToWishlist } from "@/lib/metaPixel";
 import { useWixClient } from "@/hooks/useWixClient";
+import { useWishlistStore } from "@/hooks/useWishlistStore";
 
 // Modal JS is only needed when a logged-out user taps the heart — defer it.
 const LoginModal = nextDynamic(() => import("./LoginModal"), { ssr: false });
@@ -20,23 +21,30 @@ const ProductCard = ({
 }) => {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
-  const [isWishlisted, setIsWishlisted] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const wixClient = useWixClient();
 
+  const isWishlisted = useWishlistStore((s) =>
+    product._id ? s.isWishlisted(product._id) : false
+  );
+  const toggleInStore = useWishlistStore((s) => s.toggle);
+
   const wishlistItem = () => {
-    setIsWishlisted((prev) => {
-      const next = !prev;
-      if (next && product._id) {
-        trackAddToWishlist(
-          [product._id],
-          product.name || undefined,
-          product.price?.discountedPrice || product.price?.price || 0,
-          "INR"
-        );
-      }
-      return next;
+    if (!product._id) return;
+    const price =
+      product.price?.discountedPrice || product.price?.price || 0;
+    const fullPrice = product.price?.price || price;
+    const added = toggleInStore({
+      id: product._id,
+      slug: product.slug || product._id,
+      name: product.name || "Unnamed Product",
+      image: product.media?.mainMedia?.image?.url || "/product.png",
+      price,
+      fullPrice,
     });
+    if (added) {
+      trackAddToWishlist([product._id], product.name || undefined, price, "INR");
+    }
   };
 
   const handleWishlistToggle = (e: React.MouseEvent) => {

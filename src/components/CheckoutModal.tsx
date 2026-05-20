@@ -63,9 +63,27 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
       document.body.style.overflow = "hidden";
       setError("");
       setProcessing(false);
-      // Auto-skip to Step 2 if user is logged in
+      // Auto-skip to Step 2 if user is logged in. Also pull their member email
+      // so the order isn't rejected with "Missing checkout contact" — Step 1
+      // (where email is normally captured) is skipped in this branch.
       if (wixClient.auth.loggedIn()) {
         setStep(2);
+        (async () => {
+          try {
+            const memberRes: any = await (wixClient as any).members?.getCurrentMember?.({
+              fieldsets: ["FULL"],
+            });
+            const memberEmail =
+              memberRes?.member?.loginEmail ||
+              memberRes?.member?.contact?.emails?.[0] ||
+              "";
+            if (memberEmail) {
+              setEmail((prev) => prev || memberEmail);
+            }
+          } catch (e) {
+            console.warn("Could not load current member email:", e);
+          }
+        })();
       } else {
         setStep(1);
       }
@@ -138,7 +156,10 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
     if (!/^\d{6}$/.test(pincode.trim())) return "Enter a valid 6-digit pincode.";
     if (!city.trim()) return "Please enter your city.";
     if (!state.trim()) return "Please enter your state.";
-    if (!/^\d{10}$/.test(mobile.trim())) return "Enter a valid 10-digit mobile number.";
+    const digitsOnly = mobile.replace(/\D/g, "");
+    if (digitsOnly.length !== 10) {
+      return "Phone number must be exactly 10 digits. Please remove any country code (like +91 or 0) and try again.";
+    }
     return "";
   };
 
@@ -207,7 +228,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
             details: {
               email: email.trim(),
               fullName: fullName.trim(),
-              phone: mobile.trim(),
+              phone: mobile.replace(/\D/g, ""),
               addressLine1: address.trim(),
               city: city.trim(),
               state: state.trim(),
@@ -426,9 +447,10 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                     <input
                       type="tel"
                       value={mobile}
-                      onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                      onChange={(e) => setMobile(e.target.value)}
                       placeholder="Phone (10 digits)"
-                      inputMode="numeric"
+                      inputMode="tel"
+                      autoComplete="tel"
                       className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
                     />
                   </div>

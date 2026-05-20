@@ -3,11 +3,13 @@
 import UpdateButton from "@/components/UpdateButton";
 import { updateUser } from "@/lib/actions";
 import { useWixClient } from "@/hooks/useWixClient";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, Suspense } from "react";
 import { format } from "timeago.js";
 import BackButton from "@/components/BackButton";
+import { useWishlistStore } from "@/hooks/useWishlistStore";
 
 const ProfileContent = () => {
   const searchParams = useSearchParams();
@@ -17,6 +19,9 @@ const ProfileContent = () => {
   const [user, setUser] = useState<any>(null);
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const wishlistItems = useWishlistStore((s) => s.items);
+  const wishlistHydrated = useWishlistStore((s) => s.hasHydrated);
+  const removeFromWishlist = useWishlistStore((s) => s.remove);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -245,13 +250,64 @@ const ProfileContent = () => {
           {activeTab === "wishlist" && (
             <div className="animate-fade-in">
               <h2 className="text-xl font-playfair font-bold text-primary mb-6">My Wishlist</h2>
-              <div className="text-center py-12">
-                <svg className="w-16 h-16 mx-auto text-gray-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-                </svg>
-                <p className="text-gray-500 mb-4">Your wishlist is empty</p>
-                <Link href="/list" className="btn-primary">Explore Products</Link>
-              </div>
+              {!wishlistHydrated ? (
+                <div className="text-center py-12 text-gray-400 text-sm">
+                  Loading your wishlist...
+                </div>
+              ) : wishlistItems.length === 0 ? (
+                <div className="text-center py-12">
+                  <svg className="w-16 h-16 mx-auto text-gray-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                  </svg>
+                  <p className="text-gray-500 mb-4">Your wishlist is empty</p>
+                  <Link href="/list" className="btn-primary">Explore Products</Link>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {wishlistItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className="group relative rounded-lg border border-gray-200 bg-white overflow-hidden hover:shadow-md transition-shadow"
+                    >
+                      <Link href={`/${item.slug}`} className="block">
+                        <div className="relative aspect-[3/4] bg-gray-50">
+                          <Image
+                            src={item.image}
+                            alt={item.name}
+                            fill
+                            sizes="(max-width: 768px) 50vw, 25vw"
+                            className="object-cover"
+                          />
+                        </div>
+                        <div className="p-3">
+                          <h3 className="text-sm font-medium text-gray-800 line-clamp-2">
+                            {item.name.split(" - ")[0].trim()}
+                          </h3>
+                          <div className="mt-1.5 flex items-center gap-2">
+                            <span className="text-sm font-bold text-accent">₹{item.price}</span>
+                            {item.fullPrice && item.fullPrice > item.price && (
+                              <span className="text-xs text-gray-400 line-through">
+                                ₹{item.fullPrice}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => removeFromWishlist(item.id)}
+                        aria-label="Remove from wishlist"
+                        title="Remove from wishlist"
+                        className="absolute top-2 right-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white shadow text-gray-500 hover:text-red-600 transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
