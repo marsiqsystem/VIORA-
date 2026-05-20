@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { createPortal } from "react-dom";
+import { CATEGORY_LINKS } from "@/lib/categories";
 
 const Menu: React.FC = () => {
   const [open, setOpen] = useState(false);
@@ -41,7 +42,7 @@ const Menu: React.FC = () => {
 
   const menuItems = [
     { href: "/", label: "Home", icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" },
-    { href: "/list", label: "Shop All", icon: "M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" },
+    { href: "/list", label: "Categories", icon: "M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" },
     { href: "/new-arrivals", label: "New Arrivals", icon: "M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" },
     { href: "/profile?tab=wishlist", label: "Wishlist", icon: "M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" },
     { href: "/contact", label: "Contact Us", icon: "M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" },
@@ -108,6 +109,21 @@ const Menu: React.FC = () => {
                 </svg>
               </Link>
             ))}
+            <div className="mt-4 border-t border-gray-200 pt-4">
+              <p className="px-4 pb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">
+                Categories
+              </p>
+              {CATEGORY_LINKS.map((category) => (
+                <Link
+                  key={category.slug}
+                  href={`/list?cat=${category.slug}#product-grid`}
+                  onClick={() => setOpen(false)}
+                  className="flex items-center px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:text-primary"
+                >
+                  {category.label}
+                </Link>
+              ))}
+            </div>
           </nav>
 
         </div>
@@ -116,7 +132,7 @@ const Menu: React.FC = () => {
         <div className="flex-shrink-0 p-6 border-t border-gray-200/50 bg-white/80">
           <div className="flex items-center justify-center gap-4 mb-4">
             <a
-              href="https://www.instagram.com/_viorajewels"
+              href="https://www.instagram.com/_viorajewels_?igsh=bGV3eTFjazIwejNs"
               target="_blank"
               rel="noopener noreferrer"
               aria-label="Instagram"
@@ -135,17 +151,6 @@ const Menu: React.FC = () => {
             >
               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-              </svg>
-            </a>
-            <a
-              href="https://twitter.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Twitter / X"
-              className="p-2 rounded-full text-gray-500 transition-all duration-200 hover:bg-gray-100 hover:text-[#9B1B30] hover:scale-110"
-            >
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
               </svg>
             </a>
           </div>

@@ -9,7 +9,6 @@ const AnnouncementMarquee = () => {
     "🔄 Easy Exchange",
     "✨ Premium Quality",
     "💸 ₹50 OFF on Prepaid Orders",
-    "🎁 Free Gift Ready Packaging",
   ];
 
   return (

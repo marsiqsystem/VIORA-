@@ -1,13 +1,11 @@
 import { wixClientServer } from "@/lib/wixClientServer";
+import { ALL_PRODUCTS_FEATURED_ORDER, WIX_COLLECTION_IDS } from "@/lib/categories";
 import { products } from "@wix/stores";
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import ProductCard from "./ProductCard";
-
-const Pagination = dynamic(() => import("../components/Pagination"), {
-  ssr: false,
-});
+import Pagination from "./Pagination";
 const PRODUCT_PER_PAGE = 8;
+const PRODUCT_FETCH_LIMIT = 100;
 
 const ProductList = async ({
   categoryId,
@@ -30,7 +28,7 @@ const ProductList = async ({
     .gt("priceData.price", searchParams?.min || 0)
     .lt("priceData.price", searchParams?.max || 999999);
 
-  if (categoryId && categoryId !== "00000000-000000-000000-000000000001") {
+  if (categoryId) {
     productQuery = productQuery.hasSome("collectionIds", [categoryId]);
   }
 
@@ -41,47 +39,68 @@ const ProductList = async ({
   }
 
   const pageSize = limit || PRODUCT_PER_PAGE;
-  // Over-fetch so dedupe by Base Name still leaves a full page after collapsing
-  // color variants. Wix doesn't expose server-side group-by; this is the
-  // pragmatic workaround for the 15-image-per-product constraint.
-  const OVERFETCH_FACTOR = 4;
+  const requestedPage = searchParams?.page ? parseInt(searchParams.page) : 0;
+  const currentPage = Number.isFinite(requestedPage) ? Math.max(requestedPage, 0) : 0;
 
-  // TASK 3 FIX: Parse page number (0-indexed from URL search params)
-  const currentPage = searchParams?.page ? parseInt(searchParams.page) : 0;
+  const res = await productQuery.limit(PRODUCT_FETCH_LIMIT).find();
 
-  productQuery = productQuery
-    .limit(pageSize * OVERFETCH_FACTOR)
-    .skip(currentPage * pageSize * OVERFETCH_FACTOR);
+  // Override which color variant is shown on the listing page for specific
+  // products. Key = lowercase base name, value = lowercase color suffix.
+  const preferredColorOverrides: Record<string, string> = {
+    "eternal shine jewelry set": "blue",
+    "emerald bloom ensemble jewelry set": "pink",
+  };
 
-  const res = await productQuery.find();
-
-  // Group color variants by Base Name (everything before " - ").
-  // Convention: "[Base Name] - [Color]" (e.g. "Ethnic Jewellery Set - Blue").
-  // We keep only the FIRST product per base name to collapse color variants.
-  //
-  // IMPORTANT: Dedupe ALL fetched items first (don't stop at pageSize).
-  // We need the full deduped count to determine if there's a next page.
-  const allDedupedItems: products.Product[] = [];
-  const seenBaseNames = new Set<string>();
+  // First pass: group all items by base name
+  const groupedByBase = new Map<string, products.Product[]>();
   for (const item of res.items) {
     const baseName = (item.name || "").split(" - ")[0].trim().toLowerCase();
     if (!baseName) {
-      allDedupedItems.push(item);
+      // Products without a base name pattern get added directly
+      groupedByBase.set(item._id || item.name || "", [item]);
       continue;
     }
-    if (seenBaseNames.has(baseName)) continue;
-    seenBaseNames.add(baseName);
-    allDedupedItems.push(item);
+    const existing = groupedByBase.get(baseName) || [];
+    existing.push(item);
+    groupedByBase.set(baseName, existing);
   }
 
-  // Slice the deduped list to only show the current page's worth of items.
-  const dedupedItems = allDedupedItems.slice(0, pageSize);
+  // Second pass: pick preferred variant or fallback to first
+  const allDedupedItems: products.Product[] = [];
+  for (const [baseName, variants] of Array.from(groupedByBase.entries())) {
+    const preferred = preferredColorOverrides[baseName];
+    if (preferred && variants.length > 1) {
+      const match = variants.find((v) => {
+        const colorPart = (v.name || "").split(" - ").slice(1).join(" - ").trim().toLowerCase();
+        return colorPart === preferred;
+      });
+      allDedupedItems.push(match || variants[0]);
+    } else {
+      allDedupedItems.push(variants[0]);
+    }
+  }
 
-  // hasNext is true if:
-  // 1) There are more deduped items beyond what we're showing on this page, OR
-  // 2) Wix has more raw items beyond our overfetch window
-  const hasNextPage = allDedupedItems.length > pageSize || res.hasNext();
-  const hasPrevPage = currentPage > 0;
+  if (categoryId === WIX_COLLECTION_IDS.allProducts && !searchParams?.sort) {
+    const priority = new Map<string, number>(
+      ALL_PRODUCTS_FEATURED_ORDER.map((name, index) => [name, index])
+    );
+
+    allDedupedItems.sort((a, b) => {
+      const aName = (a.name || "").split(" - ")[0].trim().toLowerCase();
+      const bName = (b.name || "").split(" - ")[0].trim().toLowerCase();
+      const aRank = priority.get(aName) ?? Number.MAX_SAFE_INTEGER;
+      const bRank = priority.get(bName) ?? Number.MAX_SAFE_INTEGER;
+
+      return aRank - bRank;
+    });
+  }
+
+  const pageStart = limit ? 0 : currentPage * pageSize;
+  const pageEnd = pageStart + pageSize;
+  const dedupedItems = allDedupedItems.slice(pageStart, pageEnd);
+
+  const hasNextPage = !limit && allDedupedItems.length > pageEnd;
+  const hasPrevPage = !limit && currentPage > 0;
 
   return (
     <div className="mt-12">
@@ -108,12 +127,13 @@ const ProductList = async ({
         </div>
       )}
 
-      {dedupedItems.length > 0 && (
+      {(hasPrevPage || hasNextPage) && (
         <div className="mt-12">
           <Pagination
             currentPage={currentPage}
             hasPrev={hasPrevPage}
             hasNext={hasNextPage}
+            searchParams={searchParams}
           />
         </div>
       )}

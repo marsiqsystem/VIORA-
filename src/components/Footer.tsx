@@ -92,13 +92,13 @@ const Footer = () => {
               />
             </Link>
             <p className="mb-6 max-w-xs text-sm leading-relaxed text-white/65">
-              Viora Jewels creates elegant, gift-ready pieces for everyday shine,
+              Viora Jewels creates elegant pieces for everyday shine,
               celebrations, and meaningful moments.
             </p>
             <div className="flex gap-3">
               {[
                 ["https://www.facebook.com/profile.php?id=61589962820647", "/facebook.png", "Facebook"],
-                ["https://www.instagram.com/_viorajewels", "/instagram.png", "Instagram"],
+                ["https://www.instagram.com/_viorajewels_?igsh=bGV3eTFjazIwejNs", "/instagram.png", "Instagram"],
               ].map(([href, src, label]) => (
                 <a
                   href={href}
@@ -108,19 +108,27 @@ const Footer = () => {
                   aria-label={label}
                   key={label}
                 >
-                  <Image src={src} alt="" width={18} height={18} className="h-[18px] w-[18px] brightness-0 invert" />
+                  <Image
+                    src={src}
+                    alt=""
+                    width={18}
+                    height={18}
+                    className={`h-[18px] w-[18px] object-contain ${
+                      label === "Facebook" ? "rounded-sm" : "brightness-0 invert"
+                    }`}
+                  />
                 </a>
               ))}
             </div>
           </div>
 
           <div>
-            <h4 className="mb-5 font-playfair text-lg font-semibold text-white">Shop</h4>
+            <h4 className="mb-5 font-playfair text-lg font-semibold text-white">Categories</h4>
             <ul className="space-y-3 text-sm text-white/65">
               <li><Link href="/list" className="hover:text-white">All Jewellery</Link></li>
-              <li><Link href="/new-arrivals" className="hover:text-white">New Arrivals</Link></li>
-              <li><Link href="/list?sort=desc+price" className="hover:text-white">Best Sellers</Link></li>
-              <li><Link href="/list" className="hover:text-white">Gifting</Link></li>
+              <li><Link href="/list?cat=new-arrivals#product-grid" className="hover:text-white">New Arrivals</Link></li>
+              <li><Link href="/list?cat=best-sellers#product-grid" className="hover:text-white">Best Sellers</Link></li>
+              <li><Link href="/list?cat=gifting#product-grid" className="hover:text-white">Gifting</Link></li>
             </ul>
           </div>
 
@@ -129,8 +137,6 @@ const Footer = () => {
             <ul className="space-y-3 text-sm text-white/65">
               <li><Link href="/about" className="hover:text-white">About Us</Link></li>
               <li><Link href="/contact" className="hover:text-white">Contact</Link></li>
-              <li><Link href="/about" className="hover:text-white">Craft Promise</Link></li>
-              <li><Link href="/contact" className="hover:text-white">Bulk Gifting</Link></li>
               <li><Link href="/privacy-policy" className="hover:text-white">Privacy Policy</Link></li>
               <li><Link href="/terms-and-conditions" className="hover:text-white">Terms &amp; Conditions</Link></li>
             </ul>
@@ -184,4 +190,3 @@ const Footer = () => {
 };
 
 export default Footer;
-

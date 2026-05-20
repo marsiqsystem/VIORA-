@@ -18,10 +18,12 @@ const BackButton = ({
       type="button"
       onClick={() => router.back()}
       aria-label={ariaLabel}
+      style={{ width: 36, height: 36, minWidth: 36, minHeight: 36 }}
       className={`inline-flex h-9 w-9 items-center justify-center rounded-full text-primary hover:bg-silver-light transition-colors cursor-pointer ${className}`}
     >
       <svg
         className="w-5 h-5"
+        style={{ width: 20, height: 20 }}
         fill="none"
         viewBox="0 0 24 24"
         stroke="currentColor"

@@ -2,9 +2,9 @@
 
 import { useWixClient } from "@/hooks/useWixClient";
 import { LoginState } from "@wix/sdk";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Cookies from "js-cookie";
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { trackCompleteRegistration } from "@/lib/metaPixel";
 import BackButton from "@/components/BackButton";
 
@@ -21,15 +21,23 @@ const isPhoneNumber = (value: string): boolean => {
   return /^\+?\d{10,15}$/.test(cleaned);
 };
 
-const LoginPage = () => {
+const LoginContent = () => {
   const wixClient = useWixClient();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const isLoggedIn = wixClient.auth.loggedIn();
+  const redirectParam = searchParams.get("redirectTo") || "/";
+  const redirectTo =
+    redirectParam.startsWith("/") && !redirectParam.startsWith("//")
+      ? redirectParam
+      : "/";
 
-  if (isLoggedIn) {
-    router.push("/");
-  }
+  useEffect(() => {
+    if (isLoggedIn) {
+      router.replace(redirectTo);
+    }
+  }, [isLoggedIn, redirectTo, router]);
 
   const [mode, setMode] = useState(MODE.LOGIN);
 
@@ -37,6 +45,7 @@ const LoginPage = () => {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [emailCode, setEmailCode] = useState("");
+  const [pendingVerificationState, setPendingVerificationState] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -73,7 +82,7 @@ const LoginPage = () => {
       isPhoneNumber(identifier)
     ) {
       setError(
-        "Wix authentication requires an email address. Please enter your email instead of a phone number."
+        "An email address is required for authentication. Please enter your email instead of a phone number."
       );
       setIsLoading(false);
       return;
@@ -104,9 +113,16 @@ const LoginPage = () => {
           setMessage("Password reset email sent. Please check your e-mail.");
           break;
         case MODE.EMAIL_VERIFICATION:
+          const code = emailCode.trim();
+          if (!/^\d{4,8}$/.test(code)) {
+            setError("Enter the verification code Wix emailed you. It is usually 6 digits.");
+            setIsLoading(false);
+            return;
+          }
           response = await wixClient.auth.processVerification({
-            verificationCode: emailCode,
-          });
+            verificationCode: code,
+            code,
+          } as any, pendingVerificationState || undefined);
           break;
         default:
           break;
@@ -114,21 +130,21 @@ const LoginPage = () => {
 
       // TASK 4 FIX: Detailed response state handling
       switch (response?.loginState) {
-        case LoginState.SUCCESS:
-          setMessage("Successful! You are being redirected.");
-          if (mode === MODE.REGISTER) {
-            trackCompleteRegistration("email");
-          }
+        case LoginState.SUCCESS: {
           const tokens = await wixClient.auth.getMemberTokensForDirectLogin(
             response.data.sessionToken!
           );
-
           Cookies.set("refreshToken", JSON.stringify(tokens.refreshToken), {
             expires: 2,
           });
           wixClient.auth.setTokens(tokens);
-          router.push("/");
+          if (mode === MODE.REGISTER) {
+            trackCompleteRegistration("email");
+          }
+          setMessage("Successful! You are being redirected.");
+          router.push(redirectTo);
           break;
+        }
         case LoginState.FAILURE:
           // TASK 4 FIX: Log the full error object for debugging
           console.log("WIX AUTH ERROR:", response);
@@ -152,7 +168,10 @@ const LoginPage = () => {
           }
           break; // TASK 4 FIX: Added missing break (was falling through to EMAIL_VERIFICATION)
         case LoginState.EMAIL_VERIFICATION_REQUIRED:
+          setPendingVerificationState(response);
+          setEmailCode("");
           setMode(MODE.EMAIL_VERIFICATION);
+          setMessage(`We sent a verification code to ${identifier}. Check your inbox and spam folder, then enter it here.`);
           break;
         case LoginState.OWNER_APPROVAL_REQUIRED:
           setMessage("Your account is pending approval");
@@ -161,16 +180,29 @@ const LoginPage = () => {
           break;
       }
     } catch (err: any) {
-      // TASK 4 FIX: Verbose console logging for debugging
-      console.log("WIX AUTH ERROR:", err);
-      console.log("Error message:", err?.message);
-      console.log("Error details:", err?.details);
-      console.log("Full error object:", JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
+      console.error("WIX AUTH ERROR:", err);
 
-      // Show more descriptive error to user
-      const errMessage =
-        err?.message || err?.details?.applicationError?.description || "Unknown error";
-      setError(`Authentication error: ${errMessage}. Check the browser console for full details.`);
+      const raw = err?.message || "";
+      const appDesc = err?.details?.applicationError?.description || "";
+      const code = err?.details?.applicationError?.code || "";
+
+      // Wix returns this when the headless client's underlying site is not
+      // published yet. The fix is in the Wix dashboard, not in the code.
+      const isUnpublishedSite =
+        code === "ASSERTION_FAILED" ||
+        /No Public URL Found/i.test(raw) ||
+        /No Public URL Found/i.test(appDesc) ||
+        /site is published/i.test(raw) ||
+        /site is published/i.test(appDesc);
+
+      if (isUnpublishedSite) {
+        setError(
+          "Authentication is unavailable because the Wix site backing this client has not been published yet. Open the Wix dashboard and click Publish, then try again."
+        );
+      } else {
+        const errMessage = raw || appDesc || "Unknown error";
+        setError(`Authentication error: ${errMessage}.`);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -213,7 +245,7 @@ const LoginPage = () => {
               onChange={(e) => setIdentifier(e.target.value)}
             />
             <p className="text-xs text-gray-400">
-              Wix authentication requires an email address.
+              An email address is required for authentication.
             </p>
           </div>
         ) : (
@@ -223,9 +255,16 @@ const LoginPage = () => {
               type="text"
               name="emailCode"
               placeholder="Code"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              required
+              value={emailCode}
               className="input"
-              onChange={(e) => setEmailCode(e.target.value)}
+              onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
             />
+            <p className="text-xs text-gray-400">
+              Check spam/promotions too. If no code arrives, your Wix member email verification settings may need adjustment.
+            </p>
           </div>
         )}
 
@@ -291,6 +330,14 @@ const LoginPage = () => {
         {message && <div className="text-green-600 text-sm bg-green-50 p-3 rounded-lg border border-green-200">{message}</div>}
       </form>
     </div>
+  );
+};
+
+const LoginPage = () => {
+  return (
+    <Suspense fallback={<div className="min-h-[calc(100vh-64px)] bg-platinum" />}>
+      <LoginContent />
+    </Suspense>
   );
 };
 

@@ -4,6 +4,7 @@ import Skeleton from "@/components/Skeleton";
 import Slider from "@/components/Slider";
 import Link from "next/link";
 import { Suspense } from "react";
+import { CATEGORY_LINKS, WIX_COLLECTION_IDS } from "@/lib/categories";
 // Below-the-fold product rails are already deferred via the existing Suspense
 // boundaries around ProductList (server-streamed), so no extra dynamic import
 // is needed on this route.
@@ -15,16 +16,14 @@ const trustItems = [
   ["Easy Exchange", "48-hour support on eligible pieces"],
 ];
 
-const occasionPills = [
-  "Wedding/Reception",
-  "Office parties",
-  "Gifting",
-];
+const occasionPills = CATEGORY_LINKS.filter((category) =>
+  ["wedding-reception", "office-parties", "gifting"].includes(category.slug)
+);
 
 const HomePage = async () => {
   return (
     // max-md:pb-28 reserves room at the bottom of the page on mobile so the
-    // fixed B2G1 banner (sitting above the mobile bottom-nav at z-[60]) never
+    // fixed offer banner (sitting above the mobile bottom-nav at z-[60]) never
     // clips the last section of content. Desktop is unaffected.
     <div className="bg-platinum text-primary max-md:pb-28">
       {/* Mobile top-padding now lives inside <Slider /> itself (max-md:pt-24)
@@ -34,7 +33,7 @@ const HomePage = async () => {
       <Slider />
 
       {/*
-        B2G1 banner — sibling of <Slider />, NOT a child of the hero.
+        Offer banner — sibling of <Slider />, NOT a child of the hero.
         - Desktop (md+): static block in normal document flow, sits in the
           cream area directly below the hero, above the Bestsellers section.
         - Mobile (<md): fixed bottom strip above the MobileBottomNav (which
@@ -45,24 +44,24 @@ const HomePage = async () => {
         className="w-full bg-[#9B1B30] text-white py-3 text-center text-sm md:text-base font-medium block
                    max-md:fixed max-md:left-0 max-md:right-0 max-md:bottom-[64px] max-md:z-[60]"
       >
-        ✨ B2G1 FREE! Buy 2 sets &amp; get 1 absolutely FREE! (On selected pieces)
+        ✨ FLAT 10% OFF on all orders above ₹999! Use Code: CLUBVIORA
       </div>
 
       <section className="py-14 md:py-18 px-4 md:px-8 lg:px-12 xl:px-16 2xl:px-24">
         <div className="flex items-end justify-between gap-6 mb-8">
           <div>
             <span className="inline-block rounded-full bg-[#f3ca7e] px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary">
-              BESTSELLERS
+              ALL PRODUCTS
             </span>
             <h2 className="mt-3 text-3xl md:text-4xl font-playfair font-bold text-primary">
-              Complete statement sets
+              Explore every Viora set
             </h2>
             <p className="mt-2 max-w-xl text-sm md:text-base text-gray-800">
-              Every set includes necklace, earrings & ring. No mix-matching. No guessing.
+              Browse all available necklace, earrings & ring sets in one place.
             </p>
           </div>
           <Link
-            href="/list#product-grid"
+            href="/list?cat=all-products#product-grid"
             className="hidden sm:inline-flex items-center gap-2 rounded-full border border-primary px-5 py-2.5 text-sm font-semibold text-primary transition-colors hover:bg-primary hover:text-white"
           >
             View all
@@ -71,7 +70,7 @@ const HomePage = async () => {
         </div>
         <Suspense fallback={<Skeleton />}>
           <ProductList
-            categoryId={process.env.FEATURED_PRODUCTS_FEATURED_CATEGORY_ID!}
+            categoryId={WIX_COLLECTION_IDS.allProducts}
             limit={4}
           />
         </Suspense>
@@ -88,21 +87,48 @@ const HomePage = async () => {
             </p>
           </div>
           <Link href="/list" className="text-sm font-semibold text-accent hover:text-primary">
-            Explore
+            All categories
           </Link>
         </div>
         <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory hide-scrollbar pb-1 md:flex-wrap md:overflow-visible md:snap-none">
-          {occasionPills.map((label, index) => (
+          {occasionPills.map((category, index) => (
             <Link
-              href="/list"
-              key={label}
+              href={`/list?cat=${category.slug}#product-grid`}
+              key={category.slug}
               className={`shrink-0 snap-center rounded-full border px-5 py-3 text-sm font-medium transition-colors min-h-[44px] inline-flex items-center ${
                 index === 0
                   ? "border-accent bg-accent text-white"
                   : "border-primary/20 bg-platinum text-primary hover:border-accent hover:text-accent"
               }`}
             >
-              {label}
+              {category.label}
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      <section className="bg-platinum px-4 py-10 md:px-8 lg:px-12 xl:px-16 2xl:px-24">
+        <div className="mb-5 flex items-center justify-between">
+          <div>
+            <h2 className="font-playfair text-2xl font-bold text-primary">
+              Categories
+            </h2>
+            <p className="mt-1 text-sm text-gray-600">
+              Browse every Viora collection.
+            </p>
+          </div>
+          <Link href="/list" className="text-sm font-semibold text-accent hover:text-primary">
+            View all
+          </Link>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {CATEGORY_LINKS.map((category) => (
+            <Link
+              href={`/list?cat=${category.slug}#product-grid`}
+              key={category.slug}
+              className="rounded-lg border border-silver-light bg-white px-5 py-4 font-playfair text-xl font-bold text-primary transition-colors hover:border-accent hover:text-accent"
+            >
+              {category.label}
             </Link>
           ))}
         </div>
@@ -137,18 +163,18 @@ const HomePage = async () => {
             </h2>
 
             <p className="mt-5 text-sm md:text-base leading-relaxed text-gray-300 max-w-md">
-              Necklace · Earrings · Ring — beautifully gift-packed
+              Necklace · Earrings · Ring, styled as a complete set
               and delivered to her door.
             </p>
 
             <div className="mt-4 flex items-baseline gap-3">
-              <span className="font-playfair text-3xl md:text-4xl font-bold text-silver">Under ₹700</span>
+              <span className="font-playfair text-3xl md:text-4xl font-bold text-silver">Under ₹649</span>
               <span className="text-[11px] font-medium uppercase tracking-wider text-gray-400">COD available · Fast delivery</span>
             </div>
 
             <div className="mt-8 flex items-center gap-5">
               <Link
-                href="/list"
+                href="/list?cat=gifting#product-grid"
                 className="inline-flex rounded-full bg-accent px-7 py-3 text-sm font-semibold text-white transition-all duration-300 hover:bg-white hover:text-primary"
               >
                 Shop Gifting Sets
@@ -175,7 +201,7 @@ const HomePage = async () => {
         </div>
         <Suspense fallback={<Skeleton />}>
           <ProductList
-            categoryId={process.env.FEATURED_PRODUCTS_NEW_CATEGORY_ID!}
+            categoryId={WIX_COLLECTION_IDS.freshFromViora}
             limit={4}
           />
         </Suspense>

@@ -2,6 +2,8 @@ import Link from "next/link";
 import ProductList from "@/components/ProductList";
 import Skeleton from "@/components/Skeleton";
 import { Suspense } from "react";
+import { WIX_COLLECTION_IDS } from "@/lib/categories";
+import BackButton from "@/components/BackButton";
 
 const trustItems: [string, string][] = [
   ["Trusted Quality", "Premium craftsmanship in every piece"],
@@ -12,7 +14,7 @@ const trustItems: [string, string][] = [
 
 export const metadata = {
   title: "Gifting | Viora Jewels",
-  description: "Thoughtful jewellery gifts with premium gift packaging.",
+  description: "Thoughtful jewellery gifts from Viora Jewels.",
 };
 
 const GiftingPage = () => {
@@ -20,6 +22,10 @@ const GiftingPage = () => {
     <div className="bg-platinum text-primary">
       {/* RELOCATED: Jewellery Gifts That Feel Personal — now at the top of /gifting */}
       <section className="px-4 pt-10 pb-14 md:px-8 md:pt-14 md:pb-18 lg:px-12 xl:px-16 2xl:px-24">
+        <div className="mb-6 flex items-center gap-2">
+          <BackButton className="bg-white shadow-sm" />
+          <span className="text-sm font-medium text-gray-500">Back</span>
+        </div>
         <div className="grid overflow-hidden rounded-lg border border-silver-light bg-platinum md:grid-cols-2">
           <div className="p-8 md:p-12 lg:p-16">
             <span className="inline-block rounded-full bg-platinum-warm px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary">
@@ -33,10 +39,10 @@ const GiftingPage = () => {
               keeps the buying path clear for shoppers who are ready now.
             </p>
             <Link
-              href="/gift-packaging"
+              href="/list?cat=gifting#product-grid"
               className="mt-8 inline-flex rounded-full bg-accent px-7 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary"
             >
-              Add Gift Packaging
+              Shop Gifting
             </Link>
           </div>
           <div className="bg-silver-light p-8 md:p-12 lg:p-16">
@@ -67,20 +73,20 @@ const GiftingPage = () => {
               Pieces they&apos;ll remember
             </h2>
             <p className="mt-2 max-w-xl text-sm md:text-base text-gray-800">
-              Pair any piece with our premium gift packaging service.
+              Discover polished picks for thoughtful gifting.
             </p>
           </div>
           <Link
-            href="/gift-packaging"
+            href="/list?cat=gifting#product-grid"
             className="hidden sm:inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary"
           >
-            Customize packaging
+            Shop gifting
             <span aria-hidden="true">&rarr;</span>
           </Link>
         </div>
         <Suspense fallback={<Skeleton />}>
           <ProductList
-            categoryId={process.env.FEATURED_PRODUCTS_FEATURED_CATEGORY_ID!}
+            categoryId={WIX_COLLECTION_IDS.gifting}
             limit={8}
           />
         </Suspense>

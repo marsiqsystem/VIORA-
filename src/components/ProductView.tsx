@@ -8,6 +8,7 @@ import ProductImages from "./ProductImages";
 import CustomizeProducts from "./CustomizeProducts";
 import Add from "./Add";
 import ColorVariantSwatches, { ColorSibling } from "./ColorVariantSwatches";
+import type { PublicReview } from "@/lib/reviewsTypes";
 
 // Below-the-fold / non-critical: defer JS so initial product page is faster.
 const TrustBadges = dynamic(() => import("./TrustBadges"), { ssr: true });
@@ -29,9 +30,10 @@ interface ProductViewProps {
     currentColor?: string;
     displayName?: string;
     isBestSeller?: boolean;
+    initialReviews?: PublicReview[];
 }
 
-const ProductView = ({ product, colorSiblings = [], currentColor = "", displayName, isBestSeller = false }: ProductViewProps) => {
+const ProductView = ({ product, colorSiblings = [], currentColor = "", displayName, isBestSeller = false, initialReviews = [] }: ProductViewProps) => {
     const [selectedOptions, setSelectedOptions] = useState<{
         [key: string]: string;
     }>({});
@@ -102,26 +104,20 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
         setSelectedOptions(options);
     };
 
-    // Pseudo-random deterministic logic based on product ID string
-    const getDeterministicHash = (id: string) => {
-        let hash = 0;
-        for (let i = 0; i < id.length; i++) {
-            hash = id.charCodeAt(i) + ((hash << 5) - hash);
-        }
-        return Math.abs(hash);
-    };
-
-    const hashVal = product._id ? getDeterministicHash(product._id) : 0;
-    
     const actualPrice = product.price?.price || 0;
     const discountedPrice = product.price?.discountedPrice || null;
     const hasDiscount = discountedPrice && discountedPrice < actualPrice;
     const currentSellingPrice = hasDiscount ? discountedPrice : actualPrice;
 
-    // Ratings & Reviews Count Generation
-    const ratingDecimals = [2, 3, 4, 5, 6, 7, 8, 9];
-    const generatedRating = `4.${ratingDecimals[hashVal % ratingDecimals.length]}`;
-    const generatedReviewCount = 14 + (hashVal % 143); // 14 to 156
+    // Real rating + count derived from initialReviews (Wix Reviews).
+    const realReviewCount = initialReviews.length;
+    const realAvgRating =
+        realReviewCount > 0
+            ? initialReviews.reduce((s, r) => s + (r.rating || 0), 0) / realReviewCount
+            : 0;
+    const hasRealReviews = realReviewCount > 0;
+    const ratingForDisplay = hasRealReviews ? realAvgRating.toFixed(1) : null;
+    const filledStars = hasRealReviews ? Math.round(realAvgRating) : 0;
 
     return (
         <div className="flex flex-col lg:flex-row lg:items-start gap-8 lg:gap-16">
@@ -137,7 +133,7 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
               Desktop (md+) restores normal in-flow column behavior.
             */}
             <div className="relative left-1/2 -translate-x-1/2 w-screen max-w-[100vw] overflow-hidden md:left-auto md:translate-x-0 md:w-full md:max-w-none md:overflow-visible lg:w-1/2 lg:sticky lg:top-32 lg:self-start lg:h-fit">
-                <ProductImages items={filteredMediaItems} isBestSeller={isBestSeller} rating={parseFloat(generatedRating)} />
+                <ProductImages items={filteredMediaItems} isBestSeller={isBestSeller} rating={hasRealReviews ? realAvgRating : undefined} />
             </div>
 
             {/* Details */}
@@ -153,10 +149,16 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                         {displayName || (product.name || "").split(" - ")[0].trim()}
                     </h1>
 
-                    {/* Social Proof Text */}
-                    <p className="mt-2 text-sm text-gray-600 font-medium">
-                        ⭐ {generatedRating} | 10k+ Units Sold
-                    </p>
+                    {/* Social Proof Text — rating shown only when real reviews exist */}
+                    {hasRealReviews ? (
+                        <p className="mt-2 text-sm text-gray-600 font-medium">
+                            ⭐ {ratingForDisplay} ({realReviewCount} {realReviewCount === 1 ? "review" : "reviews"})
+                        </p>
+                    ) : (
+                        <p className="mt-2 text-sm text-gray-500 font-medium">
+                            New arrival
+                        </p>
+                    )}
                 </div>
 
                 {/* Highlight Pills */}
@@ -171,22 +173,24 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                     ))}
                 </div>
 
-                {/* Rating */}
-                <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-0.5">
-                        {[1, 2, 3, 4, 5].map((star) => (
-                            <svg
-                                key={star}
-                                className={`w-5 h-5 ${star <= 4 ? "text-accent" : "text-gray-200"}`}
-                                fill="currentColor"
-                                viewBox="0 0 20 20"
-                            >
-                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                            </svg>
-                        ))}
+                {/* Rating — shown only when real reviews exist */}
+                {hasRealReviews && (
+                    <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-0.5">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                                <svg
+                                    key={star}
+                                    className={`w-5 h-5 ${star <= filledStars ? "text-accent" : "text-gray-200"}`}
+                                    fill="currentColor"
+                                    viewBox="0 0 20 20"
+                                >
+                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                                </svg>
+                            ))}
+                        </div>
+                        <span className="text-sm text-gray-500 font-medium">({realReviewCount} {realReviewCount === 1 ? "review" : "reviews"})</span>
                     </div>
-                    <span className="text-sm text-gray-500 font-medium">({generatedReviewCount} reviews)</span>
-                </div>
+                )}
 
                 {/* Description */}
                 <div
@@ -279,7 +283,7 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                             <circle cx="7.5" cy="17.5" r="1.5" />
                             <circle cx="17.5" cy="17.5" r="1.5" />
                         </svg>
-                        🚚 Delivery within 4-5 days
+                        🚚 Delivery within 6-7 days
                     </div>
                     <div className="flex flex-wrap gap-4">
                         <div className="flex items-center gap-1.5 text-xs text-gray-600">
@@ -343,7 +347,11 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                 ))}
 
                 {/* Reviews */}
-                <ReviewsSection productName={product.name || undefined} productIdHash={hashVal} />
+                <ReviewsSection
+                    productId={product._id || undefined}
+                    productName={product.name || undefined}
+                    reviews={initialReviews}
+                />
 
                 {/* Delivery Info */}
                 <div className="bg-viora-gradient rounded-xl p-6 mt-4">

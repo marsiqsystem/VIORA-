@@ -55,11 +55,6 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
   },
-  twitter: {
-    card: "summary_large_image",
-    title: "Viora Jewels - Everyday Jewellery & Gifts",
-    description: "Discover elegant jewellery and thoughtful gifts at Viora Jewels.",
-  },
   robots: {
     index: true,
     follow: true,

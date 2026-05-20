@@ -4,7 +4,7 @@ import { useCartStore } from "@/hooks/useCartStore";
 import { useWixClient } from "@/hooks/useWixClient";
 import { useToast } from "@/components/Toast";
 import { trackMetaEvent } from "@/lib/metaEvents";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import dynamic from "next/dynamic";
@@ -28,24 +28,59 @@ const Add = ({
   productPrice: number;
   selectedOptions?: Record<string, string>;
 }) => {
-  const [quantity, setQuantity] = useState(1);
+  const [localQuantity, setLocalQuantity] = useState(1);
   const [isAdded, setIsAdded] = useState(false);
   const [isBuyingNow, setIsBuyingNow] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
 
-  const handleQuantity = (type: "i" | "d") => {
-    if (type === "d" && quantity > 1) {
-      setQuantity((prev) => prev - 1);
-    }
-    if (type === "i" && quantity < stockNumber) {
-      setQuantity((prev) => prev + 1);
-    }
-  };
-
   const wixClient = useWixClient();
   const router = useRouter();
-  const { addItem, isLoading } = useCartStore();
+  const { addItem, updateQuantity, cart, isLoading } = useCartStore();
   const { showToast } = useToast();
+
+  const hasRealVariant =
+    !!variantId && variantId !== "00000000-0000-0000-0000-000000000000";
+
+  // Find the cart line item matching this product/variant/options combo.
+  const matchingLineItem = useMemo(() => {
+    const lineItems = (cart as any)?.lineItems || [];
+    return lineItems.find((item: any) => {
+      if (item?.catalogReference?.catalogItemId !== productId) return false;
+      const opts = item?.catalogReference?.options || {};
+      if (hasRealVariant) {
+        if (opts.variantId !== variantId) return false;
+      }
+      if (selectedOptions && Object.keys(selectedOptions).length > 0) {
+        const itemOpts = opts.options || {};
+        for (const [k, v] of Object.entries(selectedOptions)) {
+          if (itemOpts[k] !== v) return false;
+        }
+      }
+      return true;
+    });
+  }, [cart, productId, variantId, hasRealVariant, selectedOptions]);
+
+  // When the item is already in cart, the selector reflects the cart line
+  // quantity and +/- updates the cart live. Otherwise it's local state for
+  // the next Add-to-Cart click.
+  const quantity = matchingLineItem
+    ? matchingLineItem.quantity || 1
+    : localQuantity;
+
+  const handleQuantity = async (type: "i" | "d") => {
+    const next =
+      type === "i"
+        ? Math.min(stockNumber, quantity + 1)
+        : Math.max(1, quantity - 1);
+    if (next === quantity) return;
+
+    if (matchingLineItem) {
+      if (type === "d" && quantity === 1) return; // floor at 1; use remove to delete
+      await updateQuantity(wixClient, matchingLineItem._id, next);
+    } else {
+      setLocalQuantity(next);
+    }
+  };
 
   const handleAddToCart = async () => {
     try {

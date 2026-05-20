@@ -6,8 +6,8 @@ import { useCartStore } from "@/hooks/useCartStore";
 import { useWixClient } from "@/hooks/useWixClient";
 import { media as wixMedia } from "@wix/sdk";
 import { trackMetaEvent } from "@/lib/metaEvents";
+import BackButton from "@/components/BackButton";
 // import GiftWrapUpsell from "@/components/GiftWrapUpsell"; // Gift wrap upsell paused — see banner comment below.
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import nextDynamic from "next/dynamic";
 
@@ -17,7 +17,6 @@ const CheckoutModal = nextDynamic(() => import("@/components/CheckoutModal"), {
 
 const CartPage = () => {
     const wixClient = useWixClient();
-    const router = useRouter();
     const { cart, isLoading, getCart, removeItem, updateQuantity } = useCartStore();
     const [checkoutOpen, setCheckoutOpen] = useState(false);
 
@@ -73,16 +72,68 @@ const CartPage = () => {
         return savings + (fullPrice - currentPrice) * (item.quantity || 1);
     }, 0) || 0;
 
-    // Base savings: shipping ₹99 + processing fee ₹50 = ₹149. Prepaid bonus shown in checkout modal.
-    const totalSavings = 149 + mrpSavings;
+    // --- Real Wix coupon data ---
+    const CLUB_VIORA_CODE = "CLUBVIORA";
+    const CLUB_VIORA_MINIMUM = 999;
+    const [couponCode, setCouponCode] = useState("");
+    const [applyingCoupon, setApplyingCoupon] = useState(false);
+    const [removingCoupon, setRemovingCoupon] = useState(false);
+    const { couponApplied, couponError, applyCoupon, removeCoupon } = useCartStore();
 
-    // Display-only inflated subtotal — frontend optics only. `subtotal` (the real
-    // cart items total) is what gets sent to the backend / payment gateway.
+    const appliedDiscounts = (cart as any)?.appliedDiscounts || [];
+    const appliedCoupon = appliedDiscounts.find((d: any) => d.coupon);
+    const appliedCouponCode = appliedCoupon?.coupon?.code || "";
+    // Trust Wix's own discountAmount whenever it's returned; fall back to a
+    // 10%-of-subtotal calculation only for the CLUBVIORA code when Wix hasn't
+    // populated discountAmount yet (some Wix responses on shared / non-checkout
+    // contexts don't return it).
+    const wixCouponDiscount = appliedDiscounts.reduce((sum: number, d: any) => {
+        if (!d.coupon) return sum;
+        const reported = Number(d.coupon?.amount?.amount ?? d.discountAmount?.amount ?? 0);
+        if (reported > 0) return sum + reported;
+        if (d.coupon.code?.toUpperCase() === CLUB_VIORA_CODE && subtotal >= CLUB_VIORA_MINIMUM) {
+            return sum + subtotal * 0.1;
+        }
+        return sum;
+    }, 0);
+    const amountToUnlockCoupon = Math.max(0, CLUB_VIORA_MINIMUM - subtotal);
+    const finalTotal = Math.max(0, subtotal - wixCouponDiscount);
+    const totalSavings = 149 + mrpSavings + wixCouponDiscount;
+
+    const handleApplyCoupon = async () => {
+        const code = couponCode.trim().toUpperCase();
+        if (!code) return;
+        setApplyingCoupon(true);
+        await applyCoupon(wixClient, code);
+        setApplyingCoupon(false);
+        setCouponCode("");
+    };
+
+    const handleRemoveCoupon = async () => {
+        setRemovingCoupon(true);
+        await removeCoupon(wixClient);
+        setRemovingCoupon(false);
+        setCouponCode("");
+    };
+
+    // Display-only inflated subtotal — frontend optics only.
     const displaySubtotal = subtotal + 99 + 50;
+
+    let couponMessage = "";
+    if (couponError) {
+        couponMessage = couponError;
+    } else if (couponApplied) {
+        couponMessage = "Coupon applied! You save ₹" + wixCouponDiscount.toFixed(0) + ".";
+    } else if (couponCode.toUpperCase() === CLUB_VIORA_CODE && amountToUnlockCoupon > 0) {
+        couponMessage = "Add ₹" + amountToUnlockCoupon.toFixed(0) + " more to unlock this offer.";
+    }
 
     return (
         <div className="min-h-[calc(100vh-180px)] px-4 md:px-8 lg:px-16 xl:px-32 2xl:px-64 py-12">
-            <h1 className="text-3xl font-semibold mb-8">Shopping Cart</h1>
+            <div className="mb-8 flex items-center gap-3">
+                <BackButton className="bg-white shadow-sm hover:shadow-md" />
+                <h1 className="text-3xl font-semibold">Shopping Cart</h1>
+            </div>
 
             {!cart.lineItems || cart.lineItems.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 gap-6">
@@ -221,18 +272,99 @@ const CartPage = () => {
                                 </svg>
                                 <div>
                                     <p className="text-green-600 text-sm font-medium">
-                                        You are saving ₹149 on this order!
+                                        You are saving ₹{totalSavings.toFixed(0)} on this order!
                                     </p>
-                                    <span className="block text-xs font-normal text-green-700/80 mt-1">
-                                        Choose a prepaid method at checkout for ₹50 extra off.
-                                    </span>
+                                    {!couponApplied && (
+                                        <span className="block text-xs font-normal text-green-700/80 mt-1">
+                                            Add items above ₹999 and use CLUBVIORA for 10% extra off.
+                                        </span>
+                                    )}
                                 </div>
                             </div>
 
+                            {/* Coupon */}
+                            <div className="border-t pt-4 mb-4">
+                                {couponApplied && appliedCouponCode ? (
+                                    <div className="rounded-lg border border-green-200 bg-green-50/60 p-3">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="flex items-center gap-2">
+                                                <svg className="w-4 h-4 text-green-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                                </svg>
+                                                <div>
+                                                    <p className="text-sm font-semibold text-green-800">
+                                                        Coupon &quot;{appliedCouponCode}&quot; applied
+                                                    </p>
+                                                    {wixCouponDiscount > 0 && (
+                                                        <p className="text-xs text-green-700/80">
+                                                            You save ₹{wixCouponDiscount.toFixed(0)}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={handleRemoveCoupon}
+                                                disabled={removingCoupon}
+                                                className="text-xs font-semibold uppercase tracking-wider text-red-600 hover:text-red-700 disabled:opacity-50"
+                                            >
+                                                {removingCoupon ? "Removing…" : "Remove"}
+                                            </button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div>
+                                        <label className="text-xs font-semibold uppercase tracking-wider text-gray-600">
+                                            Have a coupon?
+                                        </label>
+                                        <div className="mt-2 flex gap-2">
+                                            <input
+                                                type="text"
+                                                value={couponCode}
+                                                onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === "Enter") {
+                                                        e.preventDefault();
+                                                        handleApplyCoupon();
+                                                    }
+                                                }}
+                                                placeholder="Enter code"
+                                                className="flex-1 min-w-0 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm tracking-wider uppercase outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={handleApplyCoupon}
+                                                disabled={applyingCoupon || !couponCode.trim()}
+                                                className="rounded-md bg-[#9B1B30] px-4 py-2 text-xs font-semibold uppercase tracking-wider text-white hover:bg-[#7d1527] disabled:cursor-not-allowed disabled:opacity-50"
+                                            >
+                                                {applyingCoupon ? "..." : "Apply"}
+                                            </button>
+                                        </div>
+                                        {couponError ? (
+                                            <p className="mt-2 text-xs text-red-600">{couponError}</p>
+                                        ) : amountToUnlockCoupon > 0 ? (
+                                            <p className="mt-2 text-xs text-gray-500">
+                                                Use <span className="font-semibold tracking-wider">{CLUB_VIORA_CODE}</span> for 10% off — add ₹{amountToUnlockCoupon.toFixed(0)} more to unlock.
+                                            </p>
+                                        ) : (
+                                            <p className="mt-2 text-xs text-green-700">
+                                                Eligible! Use <span className="font-semibold tracking-wider">{CLUB_VIORA_CODE}</span> for 10% off.
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
                             <div className="border-t pt-4 mb-6">
+                                {couponApplied && wixCouponDiscount > 0 && (
+                                    <div className="mb-3 flex justify-between text-sm font-medium text-green-700">
+                                        <span>Coupon ({appliedCouponCode})</span>
+                                        <span>-₹{wixCouponDiscount.toFixed(2)}</span>
+                                    </div>
+                                )}
                                 <div className="flex justify-between text-lg font-semibold">
                                     <span>Estimated Total</span>
-                                    <span>₹{subtotal.toFixed(2)}</span>
+                                    <span>₹{finalTotal.toFixed(2)}</span>
                                 </div>
                                 <p className="text-xs text-gray-500 mt-1">
                                     Taxes calculated at checkout

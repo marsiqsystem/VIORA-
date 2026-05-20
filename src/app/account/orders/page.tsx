@@ -6,6 +6,8 @@ import { useWixClient } from "@/hooks/useWixClient";
 import { useEffect, useState } from "react";
 import { orders } from "@wix/ecom";
 import ExchangeModal from "@/components/ExchangeModal";
+import BackButton from "@/components/BackButton";
+import { useRouter } from "next/navigation";
 
 
 const formatINR = (n: number) =>
@@ -40,20 +42,35 @@ const SIDEBAR = [
 const MyOrdersPage = () => {
   const [exchangeOrderId, setExchangeOrderId] = useState<string | null>(null);
   const wixClient = useWixClient();
+  const router = useRouter();
   const [realOrders, setRealOrders] = useState<orders.Order[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchOrders = async () => {
       try {
-        if (wixClient.auth.loggedIn()) {
-          // In a real scenario, use searchOrders to get list. 
-          // (User prompt mentioned getOrder(orderId), but searchOrders is correct for a list)
-          const res = await wixClient.orders.searchOrders({
-            cursorPaging: { limit: 20 },
-          });
-          setRealOrders(res.orders || []);
+        if (!wixClient.auth.loggedIn()) {
+          router.replace("/login?redirectTo=/account/orders");
+          return;
         }
+
+        const memberData = await wixClient.members.getCurrentMember({
+          fieldsets: ["FULL"],
+        } as any);
+        const member = memberData.member;
+
+        if (!member?._id) {
+          router.replace("/login?redirectTo=/account/orders");
+          return;
+        }
+
+        const res = await wixClient.orders.searchOrders({
+          filter: member.contactId
+            ? { "buyerInfo.contactId": { $eq: member.contactId } }
+            : { "buyerInfo.memberId": { $eq: member._id } },
+          cursorPaging: { limit: 20 },
+        });
+        setRealOrders(res.orders || []);
       } catch (err) {
         console.error("Failed to fetch orders", err);
       } finally {
@@ -61,12 +78,16 @@ const MyOrdersPage = () => {
       }
     };
     fetchOrders();
-  }, [wixClient]);
+  }, [router, wixClient]);
 
   return (
     <div className="min-h-screen bg-platinum text-[#1A1410]">
       <section className="px-4 pt-10 pb-6 md:px-8 lg:px-12 xl:px-16 2xl:px-24">
         <div className="mx-auto max-w-6xl">
+          <div className="mb-6 flex items-center gap-2">
+            <BackButton className="bg-white shadow-sm" />
+            <span className="text-sm font-medium text-gray-500">Back</span>
+          </div>
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#9B1B30]">
             My Account
           </p>

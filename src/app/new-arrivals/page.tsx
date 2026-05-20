@@ -3,8 +3,10 @@ import Skeleton from "@/components/Skeleton";
 import Link from "next/link";
 import Image from "next/image";
 import { Suspense } from "react";
+import { WIX_COLLECTION_IDS } from "@/lib/categories";
+import BackButton from "@/components/BackButton";
 
-const NewArrivalsPage = () => {
+const NewArrivalsPage = ({ searchParams }: { searchParams: any }) => {
   return (
     <div className="min-h-screen bg-platinum">
       {/* Hero Banner */}
@@ -24,6 +26,10 @@ const NewArrivalsPage = () => {
         </div>
 
         <div className="container-responsive relative z-10 w-full">
+          <div className="mb-5 flex items-center gap-2">
+            <BackButton className="bg-white/80 shadow-sm backdrop-blur" />
+            <span className="text-sm font-medium text-gray-600">Back</span>
+          </div>
           {/* Breadcrumb */}
           <nav className="flex items-center gap-2 text-sm text-gray-600 mb-6">
             <Link href="/" className="hover:text-primary transition-colors">
@@ -53,8 +59,8 @@ const NewArrivalsPage = () => {
         {/* Products */}
         <Suspense fallback={<Skeleton />}>
           <ProductList
-            categoryId=""
-            searchParams={{ sort: "desc lastUpdated" }}
+            categoryId={WIX_COLLECTION_IDS.newArrivals}
+            searchParams={searchParams}
           />
         </Suspense>
       </div>

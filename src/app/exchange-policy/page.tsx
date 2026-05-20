@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import BackButton from "@/components/BackButton";
 
 export const metadata: Metadata = {
   title: "Exchange Policy",
@@ -10,6 +11,10 @@ const ExchangePolicyPage = () => {
   return (
     <main className="min-h-[calc(100vh-180px)] bg-platinum">
       <div className="max-w-4xl mx-auto py-12 md:py-16 px-4 md:px-8">
+        <div className="mb-6 flex items-center gap-2">
+          <BackButton className="bg-white shadow-sm" />
+          <span className="text-sm font-medium text-gray-500">Back</span>
+        </div>
         <header className="mb-10 border-b border-primary/10 pb-8">
           <p className="text-xs uppercase tracking-[0.2em] text-accent">
             Orders
@@ -115,9 +120,9 @@ const ExchangePolicyPage = () => {
               Email us at{" "}
               <a
                 className="text-accent underline"
-                href="mailto:support@viorajewels.com"
+                href="mailto:viorajewels6@gmail.com"
               >
-                support@viorajewels.com
+                viorajewels6@gmail.com
               </a>{" "}
               with your order ID and we&apos;ll take it from there.
             </p>

@@ -22,6 +22,7 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
+  const [pendingVerificationState, setPendingVerificationState] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -40,6 +41,7 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
       setMessage("");
       setPassword("");
       setVerificationCode("");
+      setPendingVerificationState(null);
       setMode("LOGIN");
     }
     return () => {
@@ -87,7 +89,8 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
         }
         const verifyResponse = await wixClient.auth.processVerification({
           verificationCode: code,
-        });
+          code,
+        } as any, pendingVerificationState || undefined);
         if (verifyResponse?.loginState === LoginState.SUCCESS) {
           setMessage("Verified! Logging you in...");
           await finalizeLogin(verifyResponse.data.sessionToken!, true);
@@ -132,6 +135,8 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
           }
           break;
         case LoginState.EMAIL_VERIFICATION_REQUIRED:
+          setPendingVerificationState(response);
+          setVerificationCode("");
           // Switch the modal into the OTP-entry step so the user can finish
           // signup inline instead of being told "check your email" with no
           // place to type the code.
@@ -144,9 +149,24 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
         default:
           break;
       }
-    } catch (err) {
-      console.error(err);
-      setError("Something went wrong. Please try again.");
+    } catch (err: any) {
+      console.error("WIX AUTH ERROR:", err);
+      const raw = err?.message || "";
+      const appDesc = err?.details?.applicationError?.description || "";
+      const code = err?.details?.applicationError?.code || "";
+      const isUnpublishedSite =
+        code === "ASSERTION_FAILED" ||
+        /No Public URL Found/i.test(raw) ||
+        /No Public URL Found/i.test(appDesc) ||
+        /site is published/i.test(raw) ||
+        /site is published/i.test(appDesc);
+      if (isUnpublishedSite) {
+        setError(
+          "Login is unavailable — the Wix site needs to be Published from the Wix dashboard before authentication will work."
+        );
+      } else {
+        setError("Something went wrong. Please try again.");
+      }
     } finally {
       setIsLoading(false);
     }

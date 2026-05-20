@@ -52,6 +52,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("COD");
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
+  const [showPrepaidNotice, setShowPrepaidNotice] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -98,9 +99,22 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   );
 
   const isPrepaid = paymentMethod !== "COD";
-  // Prepaid discount disabled while Razorpay is paused. Total = subtotal.
-  // const total = Math.max(0, subtotal - (isPrepaid ? PREPAID_DISCOUNT : 0));
-  const total = subtotal;
+  
+  const wixCouponDiscount = useMemo(() => {
+    const appliedDiscounts = (cart as any)?.appliedDiscounts || [];
+    return appliedDiscounts.reduce((sum: number, d: any) => {
+      if (d.coupon) {
+        if (d.coupon.code?.toUpperCase() === "CLUBVIORA" && subtotal >= 999) {
+          return sum + (subtotal * 0.1);
+        }
+        return sum + (Number(d.discountAmount?.amount) || 0);
+      }
+      return sum;
+    }, 0);
+  }, [cart, subtotal]);
+
+  // Prepaid discount disabled while Razorpay is paused. Total = subtotal - coupon.
+  const total = Math.max(0, subtotal - wixCouponDiscount);
 
   // Display-only inflated subtotal. Frontend optics only. `total`/`subtotal`
   // (the real cart items total) is what's sent to /api/razorpay and used for
@@ -130,7 +144,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
 
   const handlePayment = async () => {
     if (paymentMethod === "PREPAID") {
-      setError("Prepaid checkout is coming soon. Please choose Cash on Delivery for now.");
+      setShowPrepaidNotice(true);
       return;
     }
 
@@ -283,7 +297,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
     sub?: string;
   }> = [
     { id: "COD", label: "Cash on Delivery (COD)", sub: "Pay when you receive your order" },
-    { id: "PREPAID", label: "Prepaid (UPI / Cards)", sub: "Get ₹50 OFF on Prepaid Orders (Coming Soon)" },
+    { id: "PREPAID", label: "Prepaid (UPI / Cards)", sub: "Online payments launching soon — please use COD for now." },
   ];
 
   const modal = (
@@ -429,15 +443,25 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                 <div className="flex flex-col gap-2">
                   {paymentOptions.map((opt) => {
                     const selected = paymentMethod === opt.id;
+                    const isPrepaidComingSoon = opt.id === "PREPAID";
                     return (
                       <button
                         key={opt.id}
                         type="button"
-                        onClick={() => setPaymentMethod(opt.id)}
+                        onClick={() => {
+                          if (isPrepaidComingSoon) {
+                            setShowPrepaidNotice(true);
+                            return;
+                          }
+                          setPaymentMethod(opt.id);
+                        }}
+                        aria-disabled={isPrepaidComingSoon}
                         className={`flex items-center gap-3 rounded-lg border px-4 py-3 text-left transition-all ${
                           selected
                             ? "border-[#9B1B30] bg-[#9B1B30]/5 ring-2 ring-[#9B1B30]/20"
-                            : "border-gray-200 hover:border-gray-300"
+                            : isPrepaidComingSoon
+                              ? "border-gray-200 bg-gray-50/60 opacity-70 cursor-not-allowed"
+                              : "border-gray-200 hover:border-gray-300"
                         }`}
                       >
                         <span
@@ -450,9 +474,14 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                             <span className="font-semibold text-sm text-primary">
                               {opt.label}
                             </span>
+                            {isPrepaidComingSoon && (
+                              <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-2 py-0.5">
+                                Coming Soon
+                              </span>
+                            )}
                           </span>
                           {opt.sub && (
-                            <span className={`block text-xs mt-0.5 ${opt.id === "PREPAID" ? "text-green-600 font-medium" : "text-gray-500"}`}>
+                            <span className={`block text-xs mt-0.5 ${isPrepaidComingSoon ? "text-gray-500" : "text-gray-500"}`}>
                               {opt.sub}
                             </span>
                           )}
@@ -489,9 +518,23 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                   <p className="text-green-600 text-sm font-medium">
-                    You are saving ₹149 on this order!
+                    You are saving ₹{(149 + wixCouponDiscount).toFixed(0)} on this order!
                   </p>
                 </div>
+
+                {wixCouponDiscount > 0 && (
+                  <div className="flex justify-between text-green-700 font-medium">
+                    <span>
+                      Coupon{" "}
+                      {(() => {
+                        const appliedDiscounts = (cart as any)?.appliedDiscounts || [];
+                        const code = appliedDiscounts.find((d: any) => d.coupon)?.coupon?.code;
+                        return code ? `(${code})` : "";
+                      })()}
+                    </span>
+                    <span>- ₹{wixCouponDiscount.toFixed(2)}</span>
+                  </div>
+                )}
 
                 {/* Prepaid discount row hidden while prepaid is paused.
                 {isPrepaid && (
@@ -531,6 +574,52 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
             </p>
           )}
         </div>
+
+        {/* Prepaid coming-soon polite notice */}
+        {showPrepaidNotice && (
+          <div
+            className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 p-5"
+            onClick={() => setShowPrepaidNotice(false)}
+          >
+            <div
+              className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5 text-amber-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <h4 className="text-base font-playfair font-bold text-primary">
+                  Online payments coming soon
+                </h4>
+              </div>
+              <p className="text-sm text-gray-600 leading-relaxed">
+                We&apos;re still setting up our secure payment gateway. For the
+                moment, the only way to place an order is{" "}
+                <span className="font-semibold text-primary">Cash on Delivery</span>
+                {" "}— you&apos;ll pay your friendly delivery partner when the
+                package reaches you. UPI &amp; cards will be live very soon.
+              </p>
+              <p className="mt-2 text-xs text-gray-500">
+                Thank you for your patience 💛
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setPaymentMethod("COD");
+                  setShowPrepaidNotice(false);
+                }}
+                className="mt-5 w-full rounded-lg bg-[#9B1B30] py-3 text-sm font-semibold uppercase tracking-wider text-white hover:bg-[#7d1527]"
+              >
+                Continue with COD
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

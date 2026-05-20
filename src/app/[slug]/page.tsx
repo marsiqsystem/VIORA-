@@ -1,5 +1,6 @@
 import ProductView from "@/components/ProductView";
 import { wixClientServer } from "@/lib/wixClientServer";
+import { fetchProductReviews } from "@/lib/reviewsActions";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { ColorSibling } from "@/components/ColorVariantSwatches";
@@ -83,6 +84,11 @@ const SinglePage = async ({ params }: { params: { slug: string } }) => {
     siblings = matched;
   }
 
+  // Fetch real Wix Reviews for this product (server-side).
+  const initialReviews = product._id
+    ? await fetchProductReviews(product._id)
+    : [];
+
   // Check if product belongs to the "featured" (bestseller) collection.
   let isBestSeller = false;
   try {
@@ -138,6 +144,7 @@ const SinglePage = async ({ params }: { params: { slug: string } }) => {
           currentColor={currentColor}
           displayName={baseName}
           isBestSeller={isBestSeller}
+          initialReviews={initialReviews}
         />
       </div>
     </div>

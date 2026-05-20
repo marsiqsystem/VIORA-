@@ -4,14 +4,16 @@ import UpdateButton from "@/components/UpdateButton";
 import { updateUser } from "@/lib/actions";
 import { useWixClient } from "@/hooks/useWixClient";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, Suspense } from "react";
 import { format } from "timeago.js";
+import BackButton from "@/components/BackButton";
 
 const ProfileContent = () => {
   const searchParams = useSearchParams();
   const activeTab = searchParams.get("tab") || "profile";
   const wixClient = useWixClient();
+  const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -22,6 +24,8 @@ const ProfileContent = () => {
         setUser(null);
         setOrders([]);
         setLoading(false);
+        const redirectTo = `/profile${activeTab === "profile" ? "" : `?tab=${activeTab}`}`;
+        router.replace(`/login?redirectTo=${encodeURIComponent(redirectTo)}`);
         return;
       }
 
@@ -45,7 +49,7 @@ const ProfileContent = () => {
     };
 
     fetchData();
-  }, [wixClient]);
+  }, [activeTab, router, wixClient]);
 
   if (loading) {
     return (
@@ -83,6 +87,10 @@ const ProfileContent = () => {
       {/* Hero Section */}
       <div className="bg-viora-gradient py-12 md:py-16">
         <div className="container-responsive">
+          <div className="mb-6 flex items-center gap-2">
+            <BackButton className="bg-white shadow-sm" />
+            <span className="text-sm font-medium text-gray-500">Back</span>
+          </div>
           <div className="flex items-center gap-6">
             <div className="w-20 h-20 md:w-24 md:h-24 rounded-full bg-white flex items-center justify-center shadow-premium">
               <span className="text-3xl md:text-4xl font-playfair font-bold text-primary">

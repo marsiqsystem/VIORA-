@@ -1,8 +1,10 @@
 "use client";
 import React, { useState } from "react";
-import emailjs from "emailjs-com";
 import Image from "next/image";
 import { trackContact, trackLead } from "@/lib/metaPixel";
+import BackButton from "@/components/BackButton";
+
+const CONTACT_EMAIL = "viorajewels6@gmail.com";
 
 const ContactPage = () => {
   const [formData, setFormData] = useState({
@@ -10,11 +12,11 @@ const ContactPage = () => {
     firstName: "",
     lastName: "",
     email: "",
-    phone: "",
     query: "",
   });
   const [showPopup, setShowPopup] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
   const handleChange = (
     e: React.ChangeEvent<
@@ -27,41 +29,37 @@ const ContactPage = () => {
     });
   };
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setIsSubmitting(true);
+    if (submitting) return;
+    setSubmitError("");
+    setSubmitting(true);
 
-    emailjs
-      .send(
-        process.env.NEXT_PUBLIC_EMAILJS_SERVICE_ID!,
-        process.env.NEXT_PUBLIC_EMAILJS_TEMPLATE_ID!,
-        {
-          title: formData.title,
-          firstName: formData.firstName,
-          lastName: formData.lastName,
-          email: formData.email,
-          phone: formData.phone,
-          query: formData.query,
-        },
-        process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY!
-      )
-      .then(() => {
-        trackLead();
-        setShowPopup(true);
-        setFormData({
-          title: "",
-          firstName: "",
-          lastName: "",
-          email: "",
-          phone: "",
-          query: "",
-        });
-        setIsSubmitting(false);
-      })
-      .catch((error) => {
-        console.error("Failed to send email:", error);
-        setIsSubmitting(false);
+    try {
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to send your message.");
+      }
+
+      trackLead();
+      setShowPopup(true);
+      setFormData({
+        title: "",
+        firstName: "",
+        lastName: "",
+        email: "",
+        query: "",
+      });
+    } catch (err: any) {
+      setSubmitError(err?.message || "Failed to send. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -80,6 +78,10 @@ const ContactPage = () => {
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/40 to-transparent" />
         <div className="absolute inset-0 flex items-center justify-center text-center">
           <div className="max-w-3xl px-6">
+            <div className="mb-6 flex items-center justify-center gap-2">
+              <BackButton className="bg-white/80 shadow-sm backdrop-blur" />
+              <span className="text-sm font-medium text-white/80">Back</span>
+            </div>
             <h1 className="text-4xl md:text-6xl lg:text-7xl font-playfair font-bold text-white mb-4 animate-fade-in-up">
               Contact Us
             </h1>
@@ -179,22 +181,6 @@ const ContactPage = () => {
                 />
               </div>
 
-              {/* Phone */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Phone Number
-                </label>
-                <input
-                  type="tel"
-                  name="phone"
-                  value={formData.phone}
-                  onChange={handleChange}
-                  required
-                  className="input"
-                  placeholder="+91 98765 43210"
-                />
-              </div>
-
               {/* Query */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -214,18 +200,17 @@ const ContactPage = () => {
               {/* Submit Button */}
               <button
                 type="submit"
-                disabled={isSubmitting}
-                className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={submitting}
+                className="w-full btn-primary disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {isSubmitting ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <div className="loading-spinner w-5 h-5 border-white border-t-transparent"></div>
-                    Sending...
-                  </span>
-                ) : (
-                  "Send Message"
-                )}
+                {submitting ? "Sending..." : "Send Message"}
               </button>
+
+              {submitError && (
+                <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+                  {submitError}
+                </p>
+              )}
             </form>
           </div>
 
@@ -244,7 +229,7 @@ const ContactPage = () => {
             <div className="space-y-4">
               {/* Instagram */}
               <a
-                href="https://www.instagram.com/viorajewels/"
+                href="https://www.instagram.com/_viorajewels_?igsh=bGV3eTFjazIwejNs"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="block p-6 bg-viora-gradient rounded-xl hover:shadow-premium transition-all duration-300 group"
@@ -287,37 +272,18 @@ const ContactPage = () => {
 
               {/* Email */}
               <a
-                href="mailto:support@viorajewels.com"
+                href={`mailto:${CONTACT_EMAIL}`}
                 onClick={() => trackContact()}
                 className="block p-6 bg-viora-gradient rounded-xl hover:shadow-premium transition-all duration-300 group"
               >
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-gray-500 mb-1">Send us an email</p>
-                    <p className="text-xl font-playfair font-bold text-primary">support@viorajewels.com</p>
+                    <p className="text-xl font-playfair font-bold text-primary">{CONTACT_EMAIL}</p>
                   </div>
                   <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-md group-hover:scale-110 transition-transform">
                     <svg className="w-6 h-6 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                    </svg>
-                  </div>
-                </div>
-              </a>
-
-              {/* Phone */}
-              <a
-                href="tel:+911234567890"
-                onClick={() => trackContact()}
-                className="block p-6 bg-viora-gradient rounded-xl hover:shadow-premium transition-all duration-300 group"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-500 mb-1">Call us at</p>
-                    <p className="text-xl font-playfair font-bold text-primary">+91 123 456 7890</p>
-                  </div>
-                  <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-md group-hover:scale-110 transition-transform">
-                    <svg className="w-6 h-6 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
                     </svg>
                   </div>
                 </div>
@@ -357,7 +323,7 @@ const ContactPage = () => {
             </div>
             <h3 className="text-2xl font-playfair font-bold text-primary mb-2">Thank You!</h3>
             <p className="text-gray-600 mb-6">
-              Your message has been received. We will get back to you within 24 hours.
+              Your message has been delivered to our team. We&apos;ll get back to you shortly.
             </p>
             <button
               onClick={() => setShowPopup(false)}

@@ -104,7 +104,7 @@ const Navbar = () => {
                   href="/list"
                   className="text-sm font-medium text-gray-700 hover:text-primary transition-colors relative group"
                 >
-                  Shop
+                  Categories
                   <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-primary transition-all duration-300 group-hover:w-full"></span>
                 </Link>
                 {/* Gifting link hidden — feature on hold. Restore by uncommenting.

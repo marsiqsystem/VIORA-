@@ -1,6 +1,7 @@
 import React from "react";
 import Image from "next/image";
 import Link from "next/link";
+import BackButton from "@/components/BackButton";
 
 const AboutPage = () => {
   return (
@@ -18,6 +19,10 @@ const AboutPage = () => {
         <div className="absolute inset-0 bg-gradient-to-t from-primary/80 via-primary/35 to-transparent" />
         <div className="absolute inset-0 flex items-center justify-center text-center">
           <div className="max-w-3xl px-6">
+            <div className="mb-6 flex items-center justify-center gap-2">
+              <BackButton className="bg-white/80 shadow-sm backdrop-blur" />
+              <span className="text-sm font-medium text-white/80">Back</span>
+            </div>
             <h1 className="mb-6 font-playfair text-5xl font-bold text-white md:text-7xl">
               Our Story
             </h1>
@@ -35,7 +40,7 @@ const AboutPage = () => {
           </h2>
           <p className="text-lg leading-relaxed text-gray-600">
             Viora Jewels is built for shoppers who want beauty without confusion.
-            Our pieces are curated to feel polished, gift-ready, and easy to
+            Our pieces are curated to feel polished and easy to
             style, whether the cart is for a personal treat or a meaningful
             moment.
           </p>
@@ -50,7 +55,7 @@ const AboutPage = () => {
           <div className="grid gap-8 md:grid-cols-3">
             {[
               ["Considered Design", "Elegant pieces with clean detail, made to work across outfits and occasions."],
-              ["Gift-Ready Experience", "Every Viora piece is meticulously crafted and arrives in our signature premium packaging, making it a perfect, unforgettable gift straight out of the box."],
+              ["Thoughtful Experience", "Every Viora piece is selected with care, from clean design details to a smooth shopping journey."],
               ["Customer First", "Responsive support, secure payment, and a smoother buying journey from browse to cart."],
             ].map(([title, desc]) => (
               <div
@@ -76,7 +81,7 @@ const AboutPage = () => {
         <div className="grid grid-cols-2 gap-8 text-center md:grid-cols-4">
           {[
             ["10K+", "Happy Customers"],
-            ["500+", "Gift-Ready Pieces"],
+            ["500+", "Curated Pieces"],
             ["50+", "Cities Served"],
             ["4.8", "Average Rating"],
           ].map(([stat, label]) => (

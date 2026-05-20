@@ -35,11 +35,16 @@ const NavIcons = () => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Close cart dropdown when clicking outside (mousedown on anything that's not the cart container)
+  // Close cart dropdown when clicking outside (mousedown on anything that's not the cart container).
+  // Skip clicks that originate inside an open dialog/modal (e.g. CheckoutModal,
+  // which portals to document.body and would otherwise be treated as "outside"
+  // the cart — closing the cart and unmounting the dialog mid-interaction).
   useEffect(() => {
     if (!isCartOpen) return;
 
     const handleClickOutsideCart = (event: MouseEvent) => {
+      const target = event.target as Element | null;
+      if (target && target.closest('[role="dialog"]')) return;
       if (cartRef.current && !cartRef.current.contains(event.target as Node)) {
         setIsCartOpen(false);
       }

@@ -29,7 +29,7 @@ const Slider = () => {
           Viora Jewels
         </p>
         <h1 className="max-w-3xl font-playfair text-4xl font-semibold leading-[1.05] md:text-7xl md:font-bold md:leading-[0.95] lg:text-8xl">
-          Jewellery That Sells The Moment.
+          Jewellery That Sells The Moment
         </h1>
         <p className="mt-6 max-w-xl text-base leading-7 text-gray-200 md:text-lg">
           Discover polished everyday jewels, meaningful gifts, and occasion-ready
