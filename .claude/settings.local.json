@@ -16,7 +16,9 @@
       "Bash(grep -nA15 \"interface Stock \" node_modules/@wix/auto_sdk_stores_products/build/cjs/index.typings.d.ts)",
       "Bash(powershell *)",
       "Bash(npx tsc *)",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "WebFetch(domain:viorajewel.in)",
+      "Bash(grep -iE '\\\\.\\(jpg|jpeg|png|webp\\)$')"
     ]
   }
 }

@@ -30,6 +30,7 @@ const Add = ({
 }) => {
   const [localQuantity, setLocalQuantity] = useState(1);
   const [isAdded, setIsAdded] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
   const [isBuyingNow, setIsBuyingNow] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
 
@@ -83,6 +84,7 @@ const Add = ({
   };
 
   const handleAddToCart = async () => {
+    setIsAdding(true);
     try {
       await addItem(wixClient, productId, variantId, quantity, selectedOptions);
       trackMetaEvent("AddToCart", {
@@ -100,6 +102,8 @@ const Add = ({
     } catch (err) {
       console.error("Detailed Wix Cart Error:", err);
       showToast("Failed to add item to cart. Please try again.", "error");
+    } finally {
+      setIsAdding(false);
     }
   };
 
@@ -189,7 +193,7 @@ const Add = ({
         {/* Add to Cart */}
         <button
           onClick={handleAddToCart}
-          disabled={isLoading || isOutOfStock}
+          disabled={isAdding || isOutOfStock}
           className={`flex-1 py-4 px-6 rounded-lg font-semibold text-sm uppercase tracking-wider transition-all duration-300 flex items-center justify-center gap-2 ${isAdded
               ? "bg-green-500 text-white"
               : isOutOfStock
@@ -197,7 +201,7 @@ const Add = ({
                 : "bg-primary text-white hover:bg-primary-light hover:shadow-lg"
             }`}
         >
-          {isLoading ? (
+          {isAdding ? (
             <>
               <svg
                 className="animate-spin w-5 h-5"

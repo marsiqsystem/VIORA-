@@ -246,7 +246,7 @@ const CartPage = () => {
 
                             <div className="space-y-3 mb-5">
                                 <div className="flex justify-between text-gray-600 text-sm">
-                                    <span>Subtotal ({cart.lineItems.length} items)</span>
+                                    <span>Subtotal ({cart.lineItems.length} {cart.lineItems.length === 1 ? "item" : "items"})</span>
                                     <span>₹{displaySubtotal.toFixed(2)}</span>
                                 </div>
                                 <div className="flex justify-between text-gray-600 text-sm">

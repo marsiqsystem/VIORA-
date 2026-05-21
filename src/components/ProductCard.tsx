@@ -2,7 +2,7 @@
 
 import { products } from "@wix/stores";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { memo, useState } from "react";
 import nextDynamic from "next/dynamic";
 import { trackAddToWishlist } from "@/lib/metaPixel";
@@ -19,8 +19,6 @@ const ProductCard = ({
   product: products.Product;
   index: number;
 }) => {
-  const router = useRouter();
-  const [isLoading, setIsLoading] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const wixClient = useWixClient();
 
@@ -68,26 +66,20 @@ const ProductCard = ({
   // Strip color suffix: "Base Name - Color" → "Base Name"
   const displayName = (product.name || "").split(" - ")[0].trim();
 
-  const handleNavigate = () => {
-    setIsLoading(true);
-    router.push(href);
+  const handleProductLinkClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault();
+    window.location.assign(href);
   };
 
   return (
     <div
-      className="product-card group"
+      className="product-card group relative"
     >
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={handleNavigate}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            handleNavigate();
-          }
-        }}
-        className="block w-full cursor-pointer text-left"
+      <Link
+        href={href}
+        aria-label={displayName}
+        onClick={handleProductLinkClick}
+        className="block"
       >
         <div className="product-card-image">
           <Image
@@ -100,54 +92,41 @@ const ProductCard = ({
             loading={index < 4 ? undefined : "lazy"}
             className="object-cover transition-transform duration-300 md:group-hover:scale-[1.02]"
           />
-
-          {/* Badge hidden 
-          <div className="absolute top-3 left-3 z-10 flex flex-col gap-2">
-            <span className="bg-gray-900 text-white text-xs font-bold px-2 py-1 rounded shadow-sm">
-              -{fakeDiscountPercent}%
-            </span>
-          </div>
-          */}
-
-          <button
-            type="button"
-            onClick={handleWishlistToggle}
-            aria-label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
-            aria-pressed={isWishlisted}
-            title={isWishlisted ? "Saved to wishlist" : "Add to wishlist"}
-            className="absolute top-3 right-3 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-md hover:bg-white transition-transform duration-200 active:scale-90"
-          >
-            <svg
-              className={`w-5 h-5 transition-colors duration-200 ${
-                isWishlisted
-                  ? "text-[#9B1B30] fill-current"
-                  : "text-[#1A1410] fill-transparent"
-              }`}
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.8}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
-              />
-            </svg>
-          </button>
-
         </div>
-      </div>
+      </Link>
+
+      <button
+        type="button"
+        onClick={handleWishlistToggle}
+        aria-label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
+        aria-pressed={isWishlisted}
+        title={isWishlisted ? "Saved to wishlist" : "Add to wishlist"}
+        className="absolute top-3 right-3 z-20 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-md hover:bg-white transition-transform duration-200 active:scale-90"
+      >
+        <svg
+          className={`w-5 h-5 transition-colors duration-200 ${
+            isWishlisted
+              ? "text-[#9B1B30] fill-current"
+              : "text-[#1A1410] fill-transparent"
+          }`}
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={1.8}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
+          />
+        </svg>
+      </button>
 
       <div className="p-3 md:p-4">
-        <button
-          type="button"
-          onClick={handleNavigate}
-          className="text-left"
-        >
-          <h3 className="font-medium text-xs md:text-base text-gray-800 hover:text-accent transition-colors line-clamp-1">
+        <Link href={href} onClick={handleProductLinkClick} className="block">
+          <h3 className="font-medium text-xs md:text-base text-gray-800 group-hover:text-accent transition-colors line-clamp-1">
             {displayName}
           </h3>
-        </button>
+        </Link>
 
         {product.additionalInfoSections && (
           <p
@@ -191,13 +170,16 @@ const ProductCard = ({
           </p>
         )}
 
-        <button
-          type="button"
-          onClick={handleNavigate}
-          className="mt-3 w-full py-2 md:py-2.5 text-xs md:text-sm font-medium text-center border border-accent text-accent rounded-full hover:bg-accent hover:text-white transition-all duration-300 block min-h-[44px]"
+        {/* Visual CTA only — the stretched link above handles the actual
+            navigation. group-hover keeps the fill effect since this span
+            sits beneath the link and won't receive its own :hover. */}
+        <Link
+          href={href}
+          onClick={handleProductLinkClick}
+          className="mt-3 w-full py-2 md:py-2.5 text-xs md:text-sm font-medium text-center border border-accent text-accent rounded-full hover:bg-accent hover:text-white transition-all duration-300 flex items-center justify-center min-h-[44px]"
         >
           View Product
-        </button>
+        </Link>
       </div>
 
       <LoginModal

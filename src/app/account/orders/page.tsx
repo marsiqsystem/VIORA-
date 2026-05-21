@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useWixClient } from "@/hooks/useWixClient";
 import { useEffect, useState } from "react";
 import { orders } from "@wix/ecom";
+import { media as wixMedia } from "@wix/sdk";
 import ExchangeModal from "@/components/ExchangeModal";
 import BackButton from "@/components/BackButton";
 import { useRouter } from "next/navigation";
@@ -199,7 +200,7 @@ const MyOrdersPage = () => {
                           <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-platinum">
                             {item.image ? (
                               <Image
-                                src={item.image}
+                                src={wixMedia.getScaledToFillImageUrl(item.image, 64, 64, {})}
                                 alt={item.productName?.original || "Item"}
                                 fill
                                 sizes="64px"

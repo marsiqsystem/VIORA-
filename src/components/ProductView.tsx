@@ -194,7 +194,7 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
 
                 {/* Description */}
                 <div
-                    className="text-gray-600 leading-relaxed prose prose-sm max-w-none"
+                    className="text-gray-700 leading-relaxed font-sans tracking-wide prose prose-stone prose-sm max-w-none prose-p:my-2 prose-headings:font-playfair"
                     dangerouslySetInnerHTML={{
                         __html: product.description || "",
                     }}

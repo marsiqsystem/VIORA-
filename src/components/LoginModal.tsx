@@ -9,6 +9,15 @@ import { trackCompleteRegistration } from "@/lib/metaPixel";
 
 type Mode = "LOGIN" | "REGISTER" | "VERIFY";
 
+// Guard Wix auth calls so a hung request can't leave the modal stuck loading.
+const withTimeout = <T,>(promise: Promise<T>, ms = 25000): Promise<T> =>
+  Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error("AUTH_TIMEOUT")), ms)
+    ),
+  ]);
+
 interface LoginModalProps {
   open: boolean;
   onClose: () => void;
@@ -64,7 +73,9 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
   // persists the refresh token, and finishes the modal flow. Called both on
   // direct LOGIN success and on successful OTP verification.
   const finalizeLogin = async (sessionToken: string, justRegistered: boolean) => {
-    const tokens = await wixClient.auth.getMemberTokensForDirectLogin(sessionToken);
+    const tokens = await withTimeout(
+      wixClient.auth.getMemberTokensForDirectLogin(sessionToken)
+    );
     Cookies.set("refreshToken", JSON.stringify(tokens.refreshToken), { expires: 2 });
     wixClient.auth.setTokens(tokens);
     if (justRegistered) trackCompleteRegistration("email");
@@ -87,10 +98,12 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
           setIsLoading(false);
           return;
         }
-        const verifyResponse = await wixClient.auth.processVerification({
-          verificationCode: code,
-          code,
-        } as any, pendingVerificationState || undefined);
+        const verifyResponse = await withTimeout(
+          wixClient.auth.processVerification({
+            verificationCode: code,
+            code,
+          } as any, pendingVerificationState || undefined)
+        );
         if (verifyResponse?.loginState === LoginState.SUCCESS) {
           setMessage("Verified! Logging you in...");
           await finalizeLogin(verifyResponse.data.sessionToken!, true);
@@ -107,12 +120,14 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
       // LOGIN or REGISTER mode.
       const response =
         mode === "LOGIN"
-          ? await wixClient.auth.login({ email: identifier, password })
-          : await wixClient.auth.register({
-              email: identifier,
-              password,
-              profile: { nickname: username },
-            });
+          ? await withTimeout(wixClient.auth.login({ email: identifier, password }))
+          : await withTimeout(
+              wixClient.auth.register({
+                email: identifier,
+                password,
+                profile: { nickname: username },
+              })
+            );
 
       switch (response?.loginState) {
         case LoginState.SUCCESS: {
@@ -154,6 +169,12 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
       const raw = err?.message || "";
       const appDesc = err?.details?.applicationError?.description || "";
       const code = err?.details?.applicationError?.code || "";
+      if (raw === "AUTH_TIMEOUT") {
+        setError(
+          "This is taking longer than expected. Please check your connection and try again."
+        );
+        return;
+      }
       const isUnpublishedSite =
         code === "ASSERTION_FAILED" ||
         /No Public URL Found/i.test(raw) ||

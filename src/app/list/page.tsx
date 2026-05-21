@@ -5,12 +5,15 @@ import { wixClientServer } from "@/lib/wixClientServer";
 import Link from "next/link";
 import Image from "next/image";
 import { Suspense } from "react";
-import { CATEGORY_IDS, CATEGORY_LABELS, CATEGORY_LINKS } from "@/lib/categories";
+import { CATEGORY_IDS, CATEGORY_LABELS } from "@/lib/categories";
 import BackButton from "@/components/BackButton";
+import CategoryStrip from "@/components/CategoryStrip";
+import { getCategoryImageMap } from "@/lib/getCategoryImageMap";
 
 const ListPage = async ({ searchParams }: { searchParams: any }) => {
   const wixClient = await wixClientServer();
   const categorySlug = searchParams.cat || "all-products";
+  const categoryImageBySlug = await getCategoryImageMap(wixClient);
 
   // Get category ID from mapping, or fetch by slug
   let categoryId = CATEGORY_IDS[categorySlug];
@@ -130,21 +133,10 @@ const ListPage = async ({ searchParams }: { searchParams: any }) => {
               All Jewellery
             </Link>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {CATEGORY_LINKS.map((category) => (
-              <Link
-                href={`/list?cat=${category.slug}#product-grid`}
-                key={category.slug}
-                className={`rounded-lg border px-5 py-4 font-playfair text-xl font-bold transition-colors ${
-                  categorySlug === category.slug
-                    ? "border-accent bg-accent text-white"
-                    : "border-silver-light bg-white text-primary hover:border-accent hover:text-accent"
-                }`}
-              >
-                {category.label}
-              </Link>
-            ))}
-          </div>
+          <CategoryStrip
+            activeSlug={categorySlug}
+            imageBySlug={categoryImageBySlug}
+          />
         </section>
 
         <div id="product-grid" className="flex items-center justify-between mt-10 mb-6 scroll-mt-24">

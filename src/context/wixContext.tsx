@@ -9,7 +9,24 @@ import Cookies from "js-cookie";
 import { createContext, ReactNode } from "react";
 import { redirects } from '@wix/redirects';
 
-const refreshToken = JSON.parse(Cookies.get("refreshToken") || "{}");
+// Parse the persisted refresh token defensively. A corrupted/half-written
+// cookie would otherwise make JSON.parse throw at module load, which crashes
+// the entire Wix client — breaking login, cart, and every other Wix call.
+const parseRefreshToken = () => {
+  try {
+    const raw = Cookies.get("refreshToken");
+    if (!raw) return {};
+    return JSON.parse(raw);
+  } catch {
+    // Drop the bad cookie so the next session starts clean.
+    try {
+      Cookies.remove("refreshToken");
+    } catch {}
+    return {};
+  }
+};
+
+const refreshToken = parseRefreshToken();
 
 const wixClient = createClient({
   modules: {

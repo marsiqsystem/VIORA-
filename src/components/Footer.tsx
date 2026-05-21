@@ -8,6 +8,8 @@ import { trackSubscribe, trackLead } from "@/lib/metaPixel";
 const Footer = () => {
   const [email, setEmail] = useState("");
   const [subscribed, setSubscribed] = useState(false);
+  const [subscribing, setSubscribing] = useState(false);
+  const [subscribeError, setSubscribeError] = useState("");
   const [showBackToTop, setShowBackToTop] = useState(false);
 
   useEffect(() => {
@@ -26,14 +28,30 @@ const Footer = () => {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  const handleSubscribe = (e: React.FormEvent) => {
+  const handleSubscribe = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (email) {
+    if (!email || subscribing) return;
+    setSubscribeError("");
+    setSubscribing(true);
+    try {
+      const res = await fetch("/api/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || "Could not subscribe. Please try again.");
+      }
       trackSubscribe("INR", 0);
       trackLead();
       setSubscribed(true);
       setEmail("");
       setTimeout(() => setSubscribed(false), 3000);
+    } catch (err: any) {
+      setSubscribeError(err?.message || "Could not subscribe. Please try again.");
+    } finally {
+      setSubscribing(false);
     }
   };
 
@@ -54,26 +72,37 @@ const Footer = () => {
                 Early access to new drops, gifting edits, and private offers.
               </p>
             </div>
-            <form onSubmit={handleSubscribe} className="flex w-full min-w-0 max-w-md md:w-auto">
-              <input
-                type="email"
-                placeholder="Enter your email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="min-w-0 flex-1 rounded-l-lg border border-white/20 bg-white/10 px-3 py-3.5 text-white placeholder:text-white/45 transition-colors focus:border-white/40 focus:outline-none sm:px-5"
-                required
-              />
-              <button
-                type="submit"
-                className={`shrink-0 rounded-r-lg px-4 py-3.5 text-sm font-semibold transition-all duration-300 sm:px-6 sm:text-base ${
-                  subscribed
-                    ? "bg-green-500 text-white"
-                    : "bg-accent text-white hover:bg-silver hover:text-primary"
-                }`}
-              >
-                {subscribed ? "Done" : "Subscribe"}
-              </button>
-            </form>
+            <div className="w-full min-w-0 max-w-md md:w-auto">
+              <form onSubmit={handleSubscribe} className="flex w-full">
+                <input
+                  type="email"
+                  placeholder="Enter your email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="min-w-0 flex-1 rounded-l-lg border border-white/20 bg-white/10 px-3 py-3.5 text-white placeholder:text-white/45 transition-colors focus:border-white/40 focus:outline-none sm:px-5"
+                  required
+                />
+                <button
+                  type="submit"
+                  disabled={subscribing}
+                  className={`shrink-0 rounded-r-lg px-4 py-3.5 text-sm font-semibold transition-all duration-300 sm:px-6 sm:text-base disabled:opacity-70 ${
+                    subscribed
+                      ? "bg-green-500 text-white"
+                      : "bg-accent text-white hover:bg-silver hover:text-primary"
+                  }`}
+                >
+                  {subscribing ? "..." : subscribed ? "Done" : "Subscribe"}
+                </button>
+              </form>
+              {subscribed && (
+                <p className="mt-2 text-sm text-green-300">
+                  You&apos;re on the list! Check your inbox for Viora updates.
+                </p>
+              )}
+              {subscribeError && (
+                <p className="mt-2 text-sm text-red-300">{subscribeError}</p>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -166,7 +195,9 @@ const Footer = () => {
             <div className="flex items-center gap-4">
               <Image src="/visa.png" alt="Visa" width={40} height={24} className="h-6 w-auto opacity-70 transition-opacity hover:opacity-100" style={{ width: "auto" }} />
               <Image src="/mastercard.png" alt="Mastercard" width={40} height={24} className="h-6 w-auto opacity-70 transition-opacity hover:opacity-100" style={{ width: "auto" }} />
-              <Image src="/paypal.png" alt="PayPal" width={40} height={24} className="h-6 w-auto opacity-70 transition-opacity hover:opacity-100" style={{ width: "auto" }} />
+              <span className="rounded border border-white/20 px-2 py-0.5 text-xs font-semibold text-white/70">UPI</span>
+              <span className="rounded border border-white/20 px-2 py-0.5 text-xs font-semibold text-white/70">RuPay</span>
+              <span className="rounded border border-white/20 px-2 py-0.5 text-xs font-semibold text-white/70">COD</span>
             </div>
           </div>
         </div>

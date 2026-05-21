@@ -18,9 +18,11 @@ const ProductList = async ({
 }) => {
   const wixClient = await wixClientServer();
 
+  // Note: name search is applied in-memory (case-insensitive substring) below,
+  // NOT via .startsWith here. Wix's startsWith is case-sensitive and prefix-only,
+  // so searching "blue" would never match "Eternal Shine ... - Blue".
   let productQuery = wixClient.products
     .queryProducts()
-    .startsWith("name", searchParams?.q || "")
     .hasSome(
       "productType",
       searchParams?.type ? [searchParams.type] : ["physical", "digital"]
@@ -44,6 +46,15 @@ const ProductList = async ({
 
   const res = await productQuery.limit(PRODUCT_FETCH_LIMIT).find();
 
+  // Case-insensitive substring search across the product name. Matches any
+  // word (e.g. "blue" hits "Eternal Shine Jewelry Set - Blue").
+  const searchTerm = (searchParams?.q || "").trim().toLowerCase();
+  const searchedItems = searchTerm
+    ? res.items.filter((item) =>
+        (item.name || "").toLowerCase().includes(searchTerm)
+      )
+    : res.items;
+
   // Override which color variant is shown on the listing page for specific
   // products. Key = lowercase base name, value = lowercase color suffix.
   const preferredColorOverrides: Record<string, string> = {
@@ -53,7 +64,7 @@ const ProductList = async ({
 
   // First pass: group all items by base name
   const groupedByBase = new Map<string, products.Product[]>();
-  for (const item of res.items) {
+  for (const item of searchedItems) {
     const baseName = (item.name || "").split(" - ")[0].trim().toLowerCase();
     if (!baseName) {
       // Products without a base name pattern get added directly

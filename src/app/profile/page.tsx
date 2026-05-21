@@ -314,21 +314,13 @@ const ProfileContent = () => {
           {activeTab === "coupons" && (
             <div className="animate-fade-in">
               <h2 className="text-xl font-playfair font-bold text-primary mb-6">Coupons & Offers</h2>
-              <div className="grid md:grid-cols-2 gap-4">
+              <div className="grid gap-4">
                 <div className="p-4 rounded-lg border-2 border-dashed border-silver bg-silver-light/30">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-lg font-bold text-primary">WELCOME10</span>
-                    <span className="badge badge-new">New User</span>
-                  </div>
-                  <p className="text-sm text-gray-600 mb-3">Get 10% off on your first order</p>
-                  <button className="text-sm font-medium text-primary hover:underline">Copy Code</button>
-                </div>
-                <div className="p-4 rounded-lg border-2 border-dashed border-silver bg-silver-light/30">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-lg font-bold text-primary">FREESHIP</span>
+                    <span className="text-lg font-bold text-primary">CLUBVIORA</span>
                     <span className="badge badge-bestseller">Popular</span>
                   </div>
-                  <p className="text-sm text-gray-600 mb-3">Free shipping on orders above ₹999</p>
+                  <p className="text-sm text-gray-600 mb-3">Flat 10% OFF on every order above ₹999</p>
                   <button className="text-sm font-medium text-primary hover:underline">Copy Code</button>
                 </div>
               </div>
@@ -404,4 +396,3 @@ const ProfilePage = () => {
 };
 
 export default ProfilePage;
-

@@ -21,6 +21,17 @@ const isPhoneNumber = (value: string): boolean => {
   return /^\+?\d{10,15}$/.test(cleaned);
 };
 
+// Guard every Wix auth network call so a hung request can never leave the
+// button stuck on "Loading...". If the call doesn't settle in time we reject
+// with a TIMEOUT error that the catch block turns into a friendly message.
+const withTimeout = <T,>(promise: Promise<T>, ms = 25000): Promise<T> =>
+  Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error("AUTH_TIMEOUT")), ms)
+    ),
+  ]);
+
 const LoginContent = () => {
   const wixClient = useWixClient();
   const router = useRouter();
@@ -93,22 +104,28 @@ const LoginContent = () => {
 
       switch (mode) {
         case MODE.LOGIN:
-          response = await wixClient.auth.login({
-            email: identifier,
-            password,
-          });
+          response = await withTimeout(
+            wixClient.auth.login({
+              email: identifier,
+              password,
+            })
+          );
           break;
         case MODE.REGISTER:
-          response = await wixClient.auth.register({
-            email: identifier,
-            password,
-            profile: { nickname: username },
-          });
+          response = await withTimeout(
+            wixClient.auth.register({
+              email: identifier,
+              password,
+              profile: { nickname: username },
+            })
+          );
           break;
         case MODE.RESET_PASSWORD:
-          response = await wixClient.auth.sendPasswordResetEmail(
-            identifier,
-            window.location.href
+          response = await withTimeout(
+            wixClient.auth.sendPasswordResetEmail(
+              identifier,
+              window.location.href
+            )
           );
           setMessage("Password reset email sent. Please check your e-mail.");
           break;
@@ -119,10 +136,12 @@ const LoginContent = () => {
             setIsLoading(false);
             return;
           }
-          response = await wixClient.auth.processVerification({
-            verificationCode: code,
-            code,
-          } as any, pendingVerificationState || undefined);
+          response = await withTimeout(
+            wixClient.auth.processVerification({
+              verificationCode: code,
+              code,
+            } as any, pendingVerificationState || undefined)
+          );
           break;
         default:
           break;
@@ -131,8 +150,10 @@ const LoginContent = () => {
       // TASK 4 FIX: Detailed response state handling
       switch (response?.loginState) {
         case LoginState.SUCCESS: {
-          const tokens = await wixClient.auth.getMemberTokensForDirectLogin(
-            response.data.sessionToken!
+          const tokens = await withTimeout(
+            wixClient.auth.getMemberTokensForDirectLogin(
+              response.data.sessionToken!
+            )
           );
           Cookies.set("refreshToken", JSON.stringify(tokens.refreshToken), {
             expires: 2,
@@ -185,6 +206,14 @@ const LoginContent = () => {
       const raw = err?.message || "";
       const appDesc = err?.details?.applicationError?.description || "";
       const code = err?.details?.applicationError?.code || "";
+
+      // The auth request never settled within the timeout window.
+      if (raw === "AUTH_TIMEOUT") {
+        setError(
+          "This is taking longer than expected. Please check your internet connection and try again. If it keeps happening, the Wix site may need to be republished."
+        );
+        return;
+      }
 
       // Wix returns this when the headless client's underlying site is not
       // published yet. The fix is in the Wix dashboard, not in the code.
@@ -244,9 +273,12 @@ const LoginContent = () => {
               className="input"
               onChange={(e) => setIdentifier(e.target.value)}
             />
-            <p className="text-xs text-gray-400">
-              An email address is required for authentication.
-            </p>
+            <div className="mt-1.5 flex items-start gap-2 rounded-lg border border-silver-light/35 bg-platinum/40 p-2.5 text-[11px] text-gray-600 font-medium leading-relaxed">
+              <svg className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>An email address is required for authentication.</span>
+            </div>
           </div>
         ) : (
           <div className="flex flex-col gap-2">
@@ -304,20 +336,28 @@ const LoginContent = () => {
         )}
 
         {mode === MODE.LOGIN && (
-          <div
-            className="text-sm underline cursor-pointer text-center text-gray-600 hover:text-primary transition-colors"
-            onClick={() => setMode(MODE.REGISTER)}
-          >
-            {"Don't"} have an account?
-          </div>
+          <p className="text-sm text-center text-gray-600">
+            Don&apos;t have an account?{" "}
+            <button
+              type="button"
+              onClick={() => setMode(MODE.REGISTER)}
+              className="font-semibold text-accent underline hover:text-primary transition-colors"
+            >
+              Create Account
+            </button>
+          </p>
         )}
         {mode === MODE.REGISTER && (
-          <div
-            className="text-sm underline cursor-pointer text-center text-gray-600 hover:text-primary transition-colors"
-            onClick={() => setMode(MODE.LOGIN)}
-          >
-            Have an account?
-          </div>
+          <p className="text-sm text-center text-gray-600">
+            Already have an account?{" "}
+            <button
+              type="button"
+              onClick={() => setMode(MODE.LOGIN)}
+              className="font-semibold text-accent underline hover:text-primary transition-colors"
+            >
+              Log In
+            </button>
+          </p>
         )}
         {mode === MODE.RESET_PASSWORD && (
           <div
