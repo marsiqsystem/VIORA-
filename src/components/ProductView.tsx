@@ -467,6 +467,7 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                     Object.keys(selectedOptions).length <
                         (product.productOptions?.length || 0)
                 }
+                selectedOptions={selectedOptions}
                 triggerSelector={`#${STICKY_TRIGGER_ID}`}
             />
         </div>

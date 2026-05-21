@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useEffect, useState } from "react";
 import { useCartStore } from "@/hooks/useCartStore";
 import { useWixClient } from "@/hooks/useWixClient";
+import { useToast } from "@/components/Toast";
 import { trackMetaEvent } from "@/lib/metaEvents";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -20,6 +21,7 @@ type Props = {
   isOutOfStock: boolean;
   hasUnselectedVariants: boolean;
   triggerSelector: string;
+  selectedOptions?: Record<string, string>;
 };
 
 const StickyAddToCart = ({
@@ -31,10 +33,12 @@ const StickyAddToCart = ({
   isOutOfStock,
   hasUnselectedVariants,
   triggerSelector,
+  selectedOptions,
 }: Props) => {
   const wixClient = useWixClient();
   const router = useRouter();
   const { addItem } = useCartStore();
+  const { showToast } = useToast();
   const [visible, setVisible] = useState(false);
   const [isBuyingNow, setIsBuyingNow] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
@@ -63,8 +67,10 @@ const StickyAddToCart = ({
 
     setIsBuyingNow(true);
     try {
-      // Add to cart and wait for Wix API to confirm
-      await addItem(wixClient, productId, variantId, 1);
+      // Add to cart and wait for Wix API to confirm. Pass selectedOptions so
+      // variant products (color/size) are added with the chosen options —
+      // otherwise Wix rejects the line item and Buy Now fails.
+      await addItem(wixClient, productId, variantId, 1, selectedOptions);
 
       // Verify cart actually has items before navigating
       const verifyCart = await wixClient.currentCart.getCurrentCart();
@@ -86,10 +92,16 @@ const StickyAddToCart = ({
 
       // Open the Checkout OTP Modal popup right on the product page
       setCheckoutOpen(true);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Sticky Buy Now failed:", err);
+      const cause =
+        err?.details?.applicationError?.description ||
+        err?.message ||
+        "Please try again.";
+      showToast(`Buy Now failed: ${cause}`, "error");
+    } finally {
+      setIsBuyingNow(false);
     }
-    setIsBuyingNow(false);
   };
 
   return (
