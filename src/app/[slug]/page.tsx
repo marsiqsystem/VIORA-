@@ -5,6 +5,12 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { ColorSibling } from "@/components/ColorVariantSwatches";
 import BackButton from "@/components/BackButton";
+import ProductJsonLd from "@/components/ProductJsonLd";
+
+// Canonical site origin — kept in sync with sitemap.ts / robots.ts.
+const BASE_URL = (
+  process.env.NEXT_PUBLIC_SITE_URL || "https://viorajewel.in"
+).replace(/\/$/, "");
 
 const splitBaseAndColor = (name: string): { base: string; color: string } => {
   const idx = name.indexOf(" - ");
@@ -106,6 +112,29 @@ const SinglePage = async ({ params }: { params: { slug: string } }) => {
     // Non-critical — badge just won't show
   }
 
+  // ---- Structured data (JSON-LD) inputs, derived from the Wix product ----
+  const productImages =
+    product.media?.items
+      ?.map((item) => item.image?.url)
+      .filter((url): url is string => Boolean(url)) ?? [];
+  if (productImages.length === 0 && product.media?.mainMedia?.image?.url) {
+    productImages.push(product.media.mainMedia.image.url);
+  }
+
+  // Mirror ProductView's sold-out logic: only out of stock when Wix says so.
+  const isOutOfStock =
+    product.stock?.inStock === false ||
+    (product.stock?.trackInventory === true &&
+      (product.stock?.quantity ?? 0) < 1);
+
+  // Aggregate rating from the reviews already fetched above.
+  const reviewCount = initialReviews.length;
+  const ratingValue =
+    reviewCount > 0
+      ? initialReviews.reduce((sum, r) => sum + (r.rating || 0), 0) /
+        reviewCount
+      : 0;
+
   // Server-side trace so missing/empty groups are easy to debug from the Next.js server log.
   console.log("[ColorGroup]", {
     slug: params.slug,
@@ -118,6 +147,19 @@ const SinglePage = async ({ params }: { params: { slug: string } }) => {
 
   return (
     <div className="min-h-screen bg-white">
+      {/* SEO: Product structured data for Google Rich Results */}
+      <ProductJsonLd
+        name={product.name || baseName}
+        description={product.description || ""}
+        images={productImages}
+        price={product.price?.discountedPrice || product.price?.price || 0}
+        currency={product.price?.currency || "INR"}
+        availability={!isOutOfStock}
+        url={`${BASE_URL}/${product.slug || params.slug}`}
+        sku={product.sku || product._id || undefined}
+        aggregateRating={{ ratingValue, reviewCount }}
+      />
+
       {/* Breadcrumb with Back button */}
       <div className="container-responsive py-4 border-b border-gray-100">
         <nav className="flex items-center gap-2 text-sm text-gray-500">
