@@ -31,7 +31,7 @@ const PrivacyPolicyPage = () => {
           <p>
             Viora Jewels (&ldquo;Viora&rdquo;, &ldquo;we&rdquo;, &ldquo;us&rdquo;)
             respects your privacy. This Privacy Policy explains what personal
-            information we collect when you visit viorajewels.co or purchase from
+            information we collect when you visit viorajewel.in or purchase from
             us, how we use it, and the choices you have.
           </p>
 

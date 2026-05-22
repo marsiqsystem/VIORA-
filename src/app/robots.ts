@@ -3,7 +3,7 @@ import type { MetadataRoute } from "next";
 // Canonical site origin. Mirrors app/sitemap.ts and the openGraph URL in
 // app/layout.tsx; overridable per-environment with NEXT_PUBLIC_SITE_URL.
 const BASE_URL = (
-  process.env.NEXT_PUBLIC_SITE_URL || "https://viorajewels.co"
+  process.env.NEXT_PUBLIC_SITE_URL || "https://viorajewel.in"
 ).replace(/\/$/, "");
 
 export default function robots(): MetadataRoute.Robots {

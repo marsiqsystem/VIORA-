@@ -29,7 +29,7 @@ const TermsAndConditionsPage = () => {
 
         <div className="space-y-8 text-[15px] leading-relaxed text-gray-700">
           <p>
-            These terms govern your access to and use of viorajewels.co and
+            These terms govern your access to and use of viorajewel.in and
             any related services (the &ldquo;Site&rdquo;). By using the Site
             you agree to these terms in full.
           </p>

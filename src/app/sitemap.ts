@@ -8,7 +8,7 @@ export const revalidate = 3600;
 // Canonical site origin. Mirrors the openGraph URL in app/layout.tsx; can be
 // overridden per-environment with NEXT_PUBLIC_SITE_URL (no trailing slash).
 const BASE_URL = (
-  process.env.NEXT_PUBLIC_SITE_URL || "https://viorajewels.co"
+  process.env.NEXT_PUBLIC_SITE_URL || "https://viorajewel.in"
 ).replace(/\/$/, "");
 
 // Public, indexable routes. Transactional/auth pages (cart, checkout, success,

@@ -50,7 +50,7 @@ export const metadata: Metadata = {
     title: "Viora Jewels - Everyday Jewellery & Gifts",
     description:
       "Discover elegant jewellery and thoughtful gifts at Viora Jewels with secure checkout and fast delivery.",
-    url: "https://viorajewels.co",
+    url: "https://viorajewel.in",
     siteName: "Viora Jewels",
     type: "website",
     locale: "en_US",
