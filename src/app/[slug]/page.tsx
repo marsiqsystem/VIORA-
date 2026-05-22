@@ -6,6 +6,8 @@ import Link from "next/link";
 import type { ColorSibling } from "@/components/ColorVariantSwatches";
 import BackButton from "@/components/BackButton";
 import ProductJsonLd from "@/components/ProductJsonLd";
+import RelatedProducts from "@/components/RelatedProducts";
+import { Suspense } from "react";
 
 // Canonical site origin — kept in sync with sitemap.ts / robots.ts.
 const BASE_URL = (
@@ -189,6 +191,15 @@ const SinglePage = async ({ params }: { params: { slug: string } }) => {
           initialReviews={initialReviews}
         />
       </div>
+
+      {/* Related products — same collection, current product excluded */}
+      <Suspense fallback={null}>
+        <RelatedProducts
+          currentProductId={product._id || ""}
+          currentName={product.name || ""}
+          collectionIds={product.collectionIds || []}
+        />
+      </Suspense>
     </div>
   );
 };
