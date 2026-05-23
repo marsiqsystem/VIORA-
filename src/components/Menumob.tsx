@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useState, useEffect } from "react";
 import { CATEGORY_LINKS } from "@/lib/categories";
 
-const Menu = () => {
+const Menumob = () => {
   const [open, setOpen] = useState(false);
 
   // Lock body scroll when menu is open
@@ -39,7 +39,7 @@ const Menu = () => {
         className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
         aria-label="Open menu"
       >
-        <svg className="w-6 h-6 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <svg width="24" height="24" className="w-6 h-6 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6h16M4 12h16M4 18h16" />
         </svg>
       </button>
@@ -70,7 +70,7 @@ const Menu = () => {
             className="p-2 rounded-full hover:bg-gray-100 transition-colors"
             aria-label="Close menu"
           >
-            <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg width="20" height="20" className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -95,11 +95,11 @@ const Menu = () => {
                 animationDelay: `${index * 50}ms`,
               }}
             >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg width="20" height="20" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={item.icon} />
               </svg>
               <span className="text-base font-medium">{item.label}</span>
-              <svg className="w-4 h-4 ml-auto text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg width="16" height="16" className="w-4 h-4 ml-auto text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
             </Link>
@@ -132,5 +132,5 @@ const Menu = () => {
   );
 };
 
-export default Menu;
+export default Menumob;
 

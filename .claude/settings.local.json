@@ -18,7 +18,13 @@
       "Bash(npx tsc *)",
       "Bash(npm install *)",
       "WebFetch(domain:viorajewel.in)",
-      "Bash(grep -iE '\\\\.\\(jpg|jpeg|png|webp\\)$')"
+      "Bash(grep -iE '\\\\.\\(jpg|jpeg|png|webp\\)$')",
+      "WebFetch(domain:dev.wix.com)",
+      "Bash(npx next *)",
+      "Bash(node -e \"const s=require\\('sharp'\\);\\(async\\(\\)=>{for\\(const f of ['UPI.jpg','RuPay Logo.jpg','cash on delivery.jpg','facebook new.jpg']\\){try{const m=await s\\('public/'+f\\).metadata\\(\\);console.log\\(f, m.width+'x'+m.height\\);}catch\\(e\\){console.log\\(f,'ERR',e.message\\)}}}\\)\\(\\)\")",
+      "Bash(mv \"RuPay Logo.jpg\" \"rupay.jpg\")",
+      "Bash(mv \"cash on delivery.jpg\" \"cod.jpg\")",
+      "Bash(mv \"facebook new.jpg\" \"facebook-blue.jpg\")"
     ]
   }
 }

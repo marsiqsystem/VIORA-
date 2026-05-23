@@ -126,7 +126,7 @@ const Footer = () => {
             </p>
             <div className="flex gap-3">
               {[
-                ["https://www.facebook.com/profile.php?id=61589962820647", "/facebook.png", "Facebook"],
+                ["https://www.facebook.com/profile.php?id=61589962820647", "/facebook new.jpg copy.png", "Facebook"],
                 ["https://www.instagram.com/_viorajewels_?igsh=bGV3eTFjazIwejNs", "/instagram.png", "Instagram"],
               ].map(([href, src, label]) => (
                 <a
@@ -142,9 +142,7 @@ const Footer = () => {
                     alt=""
                     width={18}
                     height={18}
-                    className={`h-[18px] w-[18px] object-contain ${
-                      label === "Facebook" ? "rounded-sm" : "brightness-0 invert"
-                    }`}
+                    className="h-[18px] w-[18px] object-contain brightness-0 invert"
                   />
                 </a>
               ))}
@@ -195,9 +193,9 @@ const Footer = () => {
             <div className="flex items-center gap-4">
               <Image src="/visa.png" alt="Visa" width={40} height={24} className="h-6 w-auto opacity-70 transition-opacity hover:opacity-100" style={{ width: "auto" }} />
               <Image src="/mastercard.png" alt="Mastercard" width={40} height={24} className="h-6 w-auto opacity-70 transition-opacity hover:opacity-100" style={{ width: "auto" }} />
-              <span className="rounded border border-white/20 px-2 py-0.5 text-xs font-semibold text-white/70">UPI</span>
-              <span className="rounded border border-white/20 px-2 py-0.5 text-xs font-semibold text-white/70">RuPay</span>
-              <span className="rounded border border-white/20 px-2 py-0.5 text-xs font-semibold text-white/70">COD</span>
+              <Image src="/UPI.jpg copy.png" alt="UPI" width={40} height={24} className="h-5 w-auto opacity-70 transition-opacity hover:opacity-100" style={{ width: "auto" }} />
+              <Image src="/RuPay Logo.jpg copy.png" alt="RuPay" width={40} height={24} className="h-5 w-auto opacity-70 transition-opacity hover:opacity-100" style={{ width: "auto" }} />
+              <Image src="/cash on delivery.jpg copy.png" alt="Cash on Delivery" width={40} height={24} className="h-8 w-auto opacity-100 transition-opacity" style={{ width: "auto" }} />
             </div>
           </div>
         </div>

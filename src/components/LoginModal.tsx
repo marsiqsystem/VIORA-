@@ -3,11 +3,24 @@
 import { useWixClient } from "@/hooks/useWixClient";
 import { LoginState } from "@wix/sdk";
 import Cookies from "js-cookie";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { trackCompleteRegistration } from "@/lib/metaPixel";
+import {
+  getInvisibleCaptchaToken,
+  getVisibleCaptchaResponse,
+  renderVisibleCaptcha,
+  resetVisibleCaptcha,
+} from "@/lib/wixCaptcha";
 
 type Mode = "LOGIN" | "REGISTER" | "VERIFY";
+
+// Helper: detect if running on localhost (where reCAPTCHA keys won't work)
+const isLocalhost = (): boolean => {
+  if (typeof window === "undefined") return false;
+  const h = window.location.hostname;
+  return h === "localhost" || h === "127.0.0.1" || h === "[::1]";
+};
 
 // Guard Wix auth calls so a hung request can't leave the modal stuck loading.
 const withTimeout = <T,>(promise: Promise<T>, ms = 25000): Promise<T> =>
@@ -36,6 +49,15 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [mounted, setMounted] = useState(false);
+  const [isCaptchaRequired, setIsCaptchaRequired] = useState(false);
+  // Seconds left before the customer may request a fresh OTP again.
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  const captchaVisibleSiteKey = wixClient.auth.captchaVisibleSiteKey;
+  const captchaInvisibleSiteKey = wixClient.auth.captchaInvisibleSiteKey;
+
+  const captchaContainerRef = useRef<HTMLDivElement>(null);
+  const captchaWidgetIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -44,6 +66,7 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
   useEffect(() => {
     if (open) {
       document.body.style.overflow = "hidden";
+      setIsCaptchaRequired(false);
     } else {
       document.body.style.overflow = "";
       setError("");
@@ -52,11 +75,34 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
       setVerificationCode("");
       setPendingVerificationState(null);
       setMode("LOGIN");
+      captchaWidgetIdRef.current = null;
+      setIsCaptchaRequired(false);
     }
     return () => {
       document.body.style.overflow = "";
     };
   }, [open]);
+
+  useEffect(() => {
+    setIsCaptchaRequired(false);
+    setError("");
+    setMessage("");
+  }, [mode]);
+
+  useEffect(() => {
+    if (mode !== "REGISTER" || !captchaContainerRef.current || !captchaVisibleSiteKey || !isCaptchaRequired) return;
+    let cancelled = false;
+    renderVisibleCaptcha(captchaContainerRef.current, captchaVisibleSiteKey)
+      .then((id) => {
+        if (!cancelled) captchaWidgetIdRef.current = id;
+      })
+      .catch((err) => {
+        console.error("[captcha] Failed to render reCAPTCHA:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, captchaVisibleSiteKey, isCaptchaRequired]);
 
   useEffect(() => {
     if (!open) return;
@@ -66,6 +112,16 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  // Tick the resend cooldown down to zero, once per second.
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const t = setInterval(
+      () => setResendCooldown((s) => (s <= 1 ? 0 : s - 1)),
+      1000
+    );
+    return () => clearInterval(t);
+  }, [resendCooldown]);
 
   if (!mounted || !open) return null;
 
@@ -118,16 +174,41 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
       }
 
       // LOGIN or REGISTER mode.
-      const response =
-        mode === "LOGIN"
-          ? await withTimeout(wixClient.auth.login({ email: identifier, password }))
-          : await withTimeout(
-              wixClient.auth.register({
-                email: identifier,
-                password,
-                profile: { nickname: username },
-              })
-            );
+      let response;
+      if (mode === "LOGIN") {
+        const captchaTokens = (captchaInvisibleSiteKey && !isLocalhost())
+          ? { invisibleRecaptchaToken: await getInvisibleCaptchaToken(captchaInvisibleSiteKey, "login") }
+          : undefined;
+        response = await withTimeout(
+          wixClient.auth.login({
+            email: identifier,
+            password,
+            captchaTokens,
+          })
+        );
+      } else {
+        let captchaTokens;
+        if (captchaVisibleSiteKey && isCaptchaRequired && !isLocalhost()) {
+          const recaptchaToken =
+            captchaWidgetIdRef.current !== null
+              ? getVisibleCaptchaResponse(captchaWidgetIdRef.current)
+              : "";
+          if (!recaptchaToken) {
+            setError("Please complete the “I’m not a robot” check before registering.");
+            setIsLoading(false);
+            return;
+          }
+          captchaTokens = { recaptchaToken };
+        }
+        response = await withTimeout(
+          wixClient.auth.register({
+            email: identifier,
+            password,
+            profile: { nickname: username },
+            captchaTokens,
+          })
+        );
+      }
 
       switch (response?.loginState) {
         case LoginState.SUCCESS: {
@@ -145,6 +226,22 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
             setError("That email is already registered.");
           } else if (response.errorCode === "resetPassword") {
             setError("You need to reset your password.");
+          } else if (
+            response.errorCode === "missingCaptchaToken" ||
+            response.errorCode === "invalidCaptchaToken"
+          ) {
+            if (isLocalhost()) {
+              setError(
+                "Wix is still requiring reCAPTCHA even though you may have disabled it. This happens when the site hasn't been re-published after changing the setting. Please go to your Wix Dashboard → (1) Settings → Site Member Settings → Signup & Login Security → make sure reCAPTCHA is OFF, (2) click Save, (3) then click the Publish button at the top of the dashboard. After publishing, come back and try registering again."
+              );
+            } else if (!isCaptchaRequired) {
+              setIsCaptchaRequired(true);
+              setError("Security check required. Please complete the checkbox below and click Create Account again.");
+            } else {
+              setError(
+                "Security check failed. Please try again or contact support."
+              );
+            }
           } else {
             setError("Something went wrong. Please try again.");
           }
@@ -169,6 +266,36 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
       const raw = err?.message || "";
       const appDesc = err?.details?.applicationError?.description || "";
       const code = err?.details?.applicationError?.code || "";
+
+      const isCaptchaError =
+        code === "missingCaptchaToken" ||
+        code === "invalidCaptchaToken" ||
+        raw.includes("missingCaptchaToken") ||
+        raw.includes("invalidCaptchaToken") ||
+        appDesc.includes("missingCaptchaToken") ||
+        appDesc.includes("invalidCaptchaToken");
+
+      if (raw === "RECAPTCHA_LOAD_FAILED") {
+        setError(
+          "Couldn't load the security check. Please disable any ad-blocker for this site and try again."
+        );
+        return;
+      }
+      if (isCaptchaError) {
+        if (isLocalhost()) {
+          setError(
+            "Wix is still requiring reCAPTCHA even though you may have disabled it. This happens when the site hasn't been re-published after changing the setting. Please go to your Wix Dashboard → (1) Settings → Site Member Settings → Signup & Login Security → make sure reCAPTCHA is OFF, (2) click Save, (3) then click the Publish button at the top of the dashboard. After publishing, come back and try registering again."
+          );
+        } else if (!isCaptchaRequired) {
+          setIsCaptchaRequired(true);
+          setError("Security check required. Please complete the checkbox below and click Create Account again.");
+        } else {
+          setError(
+            "Security check failed. Please try again or contact support."
+          );
+        }
+        return;
+      }
       if (raw === "AUTH_TIMEOUT") {
         setError(
           "This is taking longer than expected. Please check your connection and try again."
@@ -188,6 +315,61 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
       } else {
         setError("Something went wrong. Please try again.");
       }
+    } finally {
+      setIsLoading(false);
+      if (mode === "REGISTER" && captchaWidgetIdRef.current !== null) {
+        resetVisibleCaptcha(captchaWidgetIdRef.current);
+      }
+    }
+  };
+
+  // Resend the OTP. Wix headless has no standalone "resend" endpoint, so we
+  // re-run register() with the same details — Wix re-issues the code and hands
+  // back a fresh verification state. Guarded by a 30s cooldown.
+  const handleResend = async () => {
+    if (isLoading || resendCooldown > 0) return;
+    if (!identifier || !password) {
+      setError("Your session expired. Tap “Use a different email” and sign up again.");
+      return;
+    }
+    setError("");
+    setMessage("");
+    setIsLoading(true);
+    try {
+      let captchaTokens;
+      if (captchaVisibleSiteKey && isCaptchaRequired && !isLocalhost()) {
+        const recaptchaToken =
+          captchaWidgetIdRef.current !== null
+            ? getVisibleCaptchaResponse(captchaWidgetIdRef.current)
+            : "";
+        if (recaptchaToken) captchaTokens = { recaptchaToken };
+      }
+      const response = await withTimeout(
+        wixClient.auth.register({
+          email: identifier,
+          password,
+          profile: { nickname: username },
+          captchaTokens,
+        })
+      );
+      if (response?.loginState === LoginState.EMAIL_VERIFICATION_REQUIRED) {
+        setPendingVerificationState(response);
+        setVerificationCode("");
+        setMessage(`A new code was sent to ${identifier}. Check your inbox and spam folder.`);
+        setResendCooldown(30);
+      } else if (response?.loginState === LoginState.SUCCESS) {
+        setMessage("Verified! Logging you in...");
+        await finalizeLogin(response.data.sessionToken!, true);
+      } else if (
+        response?.loginState === LoginState.FAILURE &&
+        response.errorCode === "emailAlreadyExists"
+      ) {
+        setError("This email is already verified. Please log in instead.");
+      } else {
+        setError("Couldn't resend the code. Please try again in a moment.");
+      }
+    } catch {
+      setError("Couldn't resend the code. Please check your connection and try again.");
     } finally {
       setIsLoading(false);
     }
@@ -290,6 +472,11 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
               </>
             )}
 
+            {/* Visible reCAPTCHA — hidden on localhost since keys are bound to production domain. */}
+            {mode === "REGISTER" && captchaVisibleSiteKey && isCaptchaRequired && !isLocalhost() && (
+              <div ref={captchaContainerRef} className="flex justify-center my-2" />
+            )}
+
             {/* OTP-only code input */}
             {mode === "VERIFY" && (
               <div className="flex flex-col gap-1.5">
@@ -310,6 +497,16 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
                 <p className="text-xs text-gray-500">
                   Sent to <span className="font-medium">{identifier}</span>. Check your spam folder if you don&apos;t see it.
                 </p>
+                <button
+                  type="button"
+                  onClick={handleResend}
+                  disabled={isLoading || resendCooldown > 0}
+                  className="self-start text-xs font-medium text-[#9B1B30] hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline"
+                >
+                  {resendCooldown > 0
+                    ? `Resend code in ${resendCooldown}s`
+                    : "Didn't get it? Resend code"}
+                </button>
               </div>
             )}
 
