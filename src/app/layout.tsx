@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { Montserrat, Cormorant_Garamond } from "next/font/google";
 import { GoogleAnalytics } from "@next/third-parties/google";
+import "lenis/dist/lenis.css";
 import "./globals.css";
 import dynamic from "next/dynamic";
 import Navbar from "@/components/Navbar";
 import MetaPixel from "@/components/MetaPixel";
+import SmoothScroll from "@/components/SmoothScroll";
 
 // Below-the-fold / non-critical → defer JS to shrink the initial bundle.
 const Footer = dynamic(() => import("@/components/Footer"));
@@ -72,6 +74,7 @@ export default function RootLayout({
       className={`${montserrat.variable} ${cormorant.variable} w-full max-w-[100vw]`}
     >
       <body className={`${montserrat.className} w-full max-w-[100vw]`}>
+        <SmoothScroll />
         <WixClientContextProvider>
           <ToastProvider>
             <AnnouncementMarquee />
