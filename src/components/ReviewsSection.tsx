@@ -58,9 +58,32 @@ const ReviewsSection = ({ productId, productName, reviews = [] }: Props) => {
 
         <div className="mt-4 space-y-5">
           {localReviews.length === 0 && (
-            <div className="rounded-xl border border-dashed border-gray-200 bg-platinum/30 p-6 text-center">
-              <p className="text-sm text-gray-500">
-                No reviews yet. Be the first to share your thoughts.
+            <div
+              className="relative rounded-2xl border border-accent/20 bg-gradient-to-br from-platinum/40 via-white to-platinum/30 px-8 py-8 text-center shadow-sm"
+              style={{
+                backgroundImage:
+                  "linear-gradient(135deg, rgba(183,110,121,0.04) 0%, transparent 60%)",
+              }}
+            >
+              <p
+                className="font-playfair italic leading-relaxed text-primary/80"
+                style={{ fontSize: "0.95rem", letterSpacing: "0.01em" }}
+              >
+                ✨ Viora is a new chapter in timeless elegance. Our reviews are
+                yet to be written, but our promise already stands — every jewel
+                is carefully checked and delivered with the quality and finish
+                showcased.
+              </p>
+              <span
+                className="mt-4 inline-block h-px w-16 bg-accent/30"
+                aria-hidden="true"
+              />
+              <p
+                className="mt-5 font-playfair italic leading-relaxed text-primary/60"
+                style={{ fontSize: "0.88rem", letterSpacing: "0.015em" }}
+              >
+                Your journey with Viora is special to us. We invite you to share
+                your experience and become a part of our story.
               </p>
             </div>
           )}
