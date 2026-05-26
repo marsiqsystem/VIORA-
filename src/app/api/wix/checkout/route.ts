@@ -10,6 +10,8 @@ type CheckoutAddressPayload = {
   state: string;
   postalCode: string;
   paymentMethod: "COD" | "PREPAID";
+  razorpayPaymentId?: string;
+  razorpayAmount?: string;
 };
 
 const getWixErrorMessage = (err: any) =>
@@ -121,6 +123,8 @@ export async function POST(req: Request) {
     const state = normalizeText(details?.state);
     const postalCode = normalizeText(details?.postalCode);
     const paymentMethod = details?.paymentMethod === "PREPAID" ? "PREPAID" : "COD";
+    const razorpayPaymentId = normalizeText(details?.razorpayPaymentId);
+    const razorpayAmount = normalizeText(details?.razorpayAmount);
 
     if (!email || !fullName || !phone || !addressLine1 || !city || !state || !postalCode) {
       return NextResponse.json(
@@ -156,10 +160,18 @@ export async function POST(req: Request) {
         buyerNote:
           paymentMethod === "COD"
             ? `Payment: Cash on Delivery (COD). Phone: ${phone}. Pincode: ${postalCode}.`
-            : `Payment: Prepaid. Phone: ${phone}. Pincode: ${postalCode}.`,
+            : `Payment: Prepaid (Razorpay). Phone: ${phone}. Pincode: ${postalCode}.${
+                razorpayPaymentId ? ` Razorpay Payment ID: ${razorpayPaymentId}.` : ""
+              }${razorpayAmount ? ` Amount paid via Razorpay: ₹${razorpayAmount}.` : ""}`,
         customFields: [
-          { title: "Payment Method", value: paymentMethod === "COD" ? "Cash on Delivery" : "Prepaid" },
+          { title: "Payment Method", value: paymentMethod === "COD" ? "Cash on Delivery" : "Prepaid (Razorpay)" },
           { title: "Customer Phone", value: phone },
+          ...(razorpayPaymentId
+            ? [{ title: "Razorpay Payment ID", value: razorpayPaymentId }]
+            : []),
+          ...(razorpayAmount
+            ? [{ title: "Amount Paid (Razorpay)", value: `₹${razorpayAmount}` }]
+            : []),
         ],
       } as any
     );
@@ -207,9 +219,51 @@ export async function POST(req: Request) {
       "APPROVED"
     );
 
+    // For PREPAID orders the customer has already paid through Razorpay (and the
+    // signature was verified before we got here), so record a payment on the Wix
+    // order to flip its payment status to PAID. We record the Wix order total
+    // (which already reflects any applied coupon like SHINE50) so the order shows
+    // as fully paid with no phantom balance. The exact Razorpay amount can differ
+    // by the automatic prepaid ₹50 — that and the payment ID are kept in the
+    // order note/custom fields for reconciliation against the Razorpay dashboard.
+    let paymentMarkedPaid = false;
+    if (paymentMethod === "PREPAID" && razorpayPaymentId) {
+      try {
+        const totalAmount =
+          (updatedCheckout as any)?.priceSummary?.total?.amount ??
+          (approvedOrderResult as any)?.order?.priceSummary?.total?.amount ??
+          (orderResult as any)?.order?.priceSummary?.total?.amount;
+
+        if (totalAmount) {
+          await (wixClient.orderTransactions as any).addPayments(orderId, [
+            {
+              amount: { amount: String(totalAmount) },
+              regularPaymentDetails: {
+                offlinePayment: true,
+                status: "APPROVED",
+                paymentMethod: "Razorpay",
+                providerTransactionId: razorpayPaymentId,
+              },
+            },
+          ]);
+          paymentMarkedPaid = true;
+        } else {
+          console.warn(
+            "Prepaid order: could not resolve a total to mark as paid for order",
+            orderId
+          );
+        }
+      } catch (payErr) {
+        // Don't fail the whole request — the order exists and the payment was
+        // genuinely taken. Surface it in logs so it can be marked paid manually.
+        console.error("Failed to mark prepaid Wix order as paid:", payErr);
+      }
+    }
+
     return NextResponse.json({
       checkoutId,
       orderId,
+      paymentMarkedPaid,
       order: approvedOrderResult?.order || (orderResult as any)?.order,
     });
   } catch (err: any) {

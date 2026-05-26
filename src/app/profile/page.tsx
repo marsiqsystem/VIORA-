@@ -11,6 +11,59 @@ import { format } from "timeago.js";
 import BackButton from "@/components/BackButton";
 import { useWishlistStore } from "@/hooks/useWishlistStore";
 
+// Digital coupon card with a working "Copy Code" button.
+const CouponCard = ({
+  code,
+  title,
+  badge,
+}: {
+  code: string;
+  title: string;
+  badge?: string;
+}) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+    } catch {
+      // Clipboard API unavailable (older browsers / insecure context) — fall
+      // back to a temporary textarea selection so copy still works.
+      const ta = document.createElement("textarea");
+      ta.value = code;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+      } catch {}
+      document.body.removeChild(ta);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="relative overflow-hidden p-4 rounded-lg border-2 border-dashed border-silver bg-silver-light/30">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-lg font-bold tracking-wider text-primary">{code}</span>
+        {badge && <span className="badge badge-bestseller">{badge}</span>}
+      </div>
+      <p className="text-sm text-gray-600 mb-3">{title}</p>
+      <button
+        type="button"
+        onClick={handleCopy}
+        className={`text-sm font-medium transition-colors ${
+          copied ? "text-green-600" : "text-primary hover:underline"
+        }`}
+      >
+        {copied ? "✓ Copied!" : "Copy Code"}
+      </button>
+    </div>
+  );
+};
+
 const ProfileContent = () => {
   const searchParams = useSearchParams();
   const activeTab = searchParams.get("tab") || "profile";
@@ -314,15 +367,17 @@ const ProfileContent = () => {
           {activeTab === "coupons" && (
             <div className="animate-fade-in">
               <h2 className="text-xl font-playfair font-bold text-primary mb-6">Coupons & Offers</h2>
-              <div className="grid gap-4">
-                <div className="p-4 rounded-lg border-2 border-dashed border-silver bg-silver-light/30">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-lg font-bold text-primary">CLUBVIORA</span>
-                    <span className="badge badge-bestseller">Popular</span>
-                  </div>
-                  <p className="text-sm text-gray-600 mb-3">Flat 10% OFF on every order above ₹999</p>
-                  <button className="text-sm font-medium text-primary hover:underline">Copy Code</button>
-                </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <CouponCard
+                  code="SHINE50"
+                  title="Flat ₹50 OFF on orders above ₹700"
+                  badge="New"
+                />
+                <CouponCard
+                  code="CLUBVIORA"
+                  title="10% DISCOUNT on orders above ₹999"
+                  badge="Popular"
+                />
               </div>
             </div>
           )}

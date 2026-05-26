@@ -161,9 +161,28 @@ const LoginContent = () => {
       switch (mode) {
         case MODE.LOGIN: {
           // Skip invisible reCAPTCHA on localhost — keys are bound to production domain
-          const captchaTokens = (captchaInvisibleSiteKey && !isLocalhost())
-            ? { invisibleRecaptchaToken: await getInvisibleCaptchaToken(captchaInvisibleSiteKey, "login") }
-            : undefined;
+          let captchaTokens;
+          if (captchaInvisibleSiteKey && !isLocalhost()) {
+            try {
+              captchaTokens = {
+                invisibleRecaptchaToken: await getInvisibleCaptchaToken(
+                  captchaInvisibleSiteKey,
+                  "login"
+                ),
+              };
+            } catch (captchaErr) {
+              // reCAPTCHA Enterprise rejected the site key or failed to load
+              // ("Invalid site key or not loaded in api.js"). Don't hard-fail
+              // the login — attempt without a token. If Wix actually enforces
+              // CAPTCHA it returns `missingCaptchaToken`, which the handlers
+              // below turn into actionable guidance.
+              console.warn(
+                "[captcha] invisible token unavailable, attempting login without it:",
+                captchaErr
+              );
+              captchaTokens = undefined;
+            }
+          }
           response = await withTimeout(
             wixClient.auth.login({
               email: identifier,
@@ -267,11 +286,12 @@ const LoginContent = () => {
             response.errorCode === "missingCaptchaToken" ||
             response.errorCode === "invalidCaptchaToken"
           ) {
-            if (isLocalhost()) {
-              // On localhost, Wix still demands a token but Google will reject it.
-              // Tell the user to disable CAPTCHA in the Wix dashboard.
+            if (isLocalhost() || mode === MODE.LOGIN) {
+              // Login uses INVISIBLE reCAPTCHA (no checkbox the user can solve),
+              // so if Wix still demands a token but the key won't validate, the
+              // only fix is in the Wix dashboard. Same guidance on localhost.
               setError(
-                "Wix is still requiring reCAPTCHA even though you may have disabled it. This happens when the site hasn't been re-published after changing the setting. Please go to your Wix Dashboard → (1) Settings → Site Member Settings → Signup & Login Security → make sure reCAPTCHA is OFF, (2) click Save, (3) then click the Publish button at the top of the dashboard. After publishing, come back and try registering again."
+                "Login is blocked by reCAPTCHA. In your Wix Dashboard go to Settings → Login & Security (Site Members) → turn reCAPTCHA OFF (or re-check it), click Save, then click Publish at the top. After publishing, try logging in again."
               );
             } else if (!isCaptchaRequired) {
               setIsCaptchaRequired(true);
@@ -324,9 +344,9 @@ const LoginContent = () => {
       }
 
       if (isCaptchaError) {
-        if (isLocalhost()) {
+        if (isLocalhost() || mode === MODE.LOGIN) {
           setError(
-            "Wix is still requiring reCAPTCHA even though you may have disabled it. This happens when the site hasn't been re-published after changing the setting. Please go to your Wix Dashboard → (1) Settings → Site Member Settings → Signup & Login Security → make sure reCAPTCHA is OFF, (2) click Save, (3) then click the Publish button at the top of the dashboard. After publishing, come back and try registering again."
+            "Login is blocked by reCAPTCHA. In your Wix Dashboard go to Settings → Login & Security (Site Members) → turn reCAPTCHA OFF (or re-check it), click Save, then click Publish at the top. After publishing, try logging in again."
           );
         } else if (!isCaptchaRequired) {
           setIsCaptchaRequired(true);

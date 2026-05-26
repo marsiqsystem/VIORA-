@@ -9,6 +9,7 @@ const AnnouncementMarquee = () => {
     "🔄 Easy Exchange",
     "✨ Premium Quality",
     "💸 ₹50 OFF on Prepaid Orders",
+    "✨ FLAT ₹50 DISCOUNT on orders above ₹700 (Code: SHINE50) ✨",
   ];
 
   return (

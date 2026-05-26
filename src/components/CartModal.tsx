@@ -15,6 +15,9 @@ const CheckoutModal = nextDynamic(() => import("./CheckoutModal"), { ssr: false 
 
 const CLUB_VIORA_CODE = "CLUBVIORA";
 const CLUB_VIORA_MINIMUM = 999;
+const SHINE_50_CODE = "SHINE50";
+const SHINE_50_MINIMUM = 700;
+const SHINE_50_DISCOUNT = 50;
 
 const CartModal = () => {
   const wixClient = useWixClient();
@@ -101,12 +104,18 @@ const CartModal = () => {
     if (!d.coupon) return sum;
     const reported = Number(d.coupon?.amount?.amount ?? d.discountAmount?.amount ?? 0);
     if (reported > 0) return sum + reported;
-    if (d.coupon.code?.toUpperCase() === CLUB_VIORA_CODE && subtotal >= CLUB_VIORA_MINIMUM) {
+    const couponCode = d.coupon.code?.toUpperCase();
+    if (couponCode === CLUB_VIORA_CODE && subtotal >= CLUB_VIORA_MINIMUM) {
       return sum + subtotal * 0.1;
+    }
+    // SHINE50: flat ₹50 off on orders ≥ ₹700 (matches the Wix coupon rules).
+    if (couponCode === "SHINE50" && subtotal >= 700) {
+      return sum + 50;
     }
     return sum;
   }, 0);
   const amountToUnlockCoupon = Math.max(0, CLUB_VIORA_MINIMUM - subtotal);
+  const amountToUnlockShine = Math.max(0, SHINE_50_MINIMUM - subtotal);
   const estimatedTotal = Math.max(0, subtotal - wixCouponDiscount);
 
   const handleApplyCoupon = async () => {
@@ -329,12 +338,22 @@ const CartModal = () => {
                   {couponError ? (
                     <p className="mt-1.5 text-[11px] text-red-600">{couponError}</p>
                   ) : (
-                    <p className="mt-1.5 text-[11px] text-gray-500">
-                      Try <span className="font-semibold tracking-wider">{CLUB_VIORA_CODE}</span>
-                      {amountToUnlockCoupon > 0
-                        ? ` — add ₹${amountToUnlockCoupon.toFixed(0)} more to unlock 10% off.`
-                        : ` for 10% off.`}
-                    </p>
+                    <div className="mt-1.5 space-y-1">
+                      <p className={`text-[11px] ${amountToUnlockShine > 0 ? "text-gray-500" : "text-green-600 font-medium"}`}>
+                        {amountToUnlockShine > 0 ? (
+                          <>Add ₹{amountToUnlockShine.toFixed(0)} more to use <span className="font-semibold tracking-wider">{SHINE_50_CODE}</span> (₹{SHINE_50_DISCOUNT} off).</>
+                        ) : (
+                          <>✅ Eligible! Use <span className="font-semibold tracking-wider">{SHINE_50_CODE}</span> for ₹{SHINE_50_DISCOUNT} off.</>
+                        )}
+                      </p>
+                      <p className={`text-[11px] ${amountToUnlockCoupon > 0 ? "text-gray-500" : "text-green-600 font-medium"}`}>
+                        {amountToUnlockCoupon > 0 ? (
+                          <>Add ₹{amountToUnlockCoupon.toFixed(0)} more to use <span className="font-semibold tracking-wider">{CLUB_VIORA_CODE}</span> (10% off).</>
+                        ) : (
+                          <>✅ Eligible! Use <span className="font-semibold tracking-wider">{CLUB_VIORA_CODE}</span> for 10% off.</>
+                        )}
+                      </p>
+                    </div>
                   )}
                 </div>
               )}

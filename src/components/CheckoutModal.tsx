@@ -52,7 +52,6 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("COD");
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
-  const [showPrepaidNotice, setShowPrepaidNotice] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -121,18 +120,22 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   const wixCouponDiscount = useMemo(() => {
     const appliedDiscounts = (cart as any)?.appliedDiscounts || [];
     return appliedDiscounts.reduce((sum: number, d: any) => {
-      if (d.coupon) {
-        if (d.coupon.code?.toUpperCase() === "CLUBVIORA" && subtotal >= 999) {
-          return sum + (subtotal * 0.1);
-        }
-        return sum + (Number(d.discountAmount?.amount) || 0);
-      }
+      if (!d.coupon) return sum;
+      // Trust Wix's reported discount amount when present; otherwise fall back
+      // to the known coupon rules so the Razorpay charge stays in sync with the
+      // Wix order total.
+      const reported = Number(d.coupon?.amount?.amount ?? d.discountAmount?.amount ?? 0);
+      if (reported > 0) return sum + reported;
+      const code = d.coupon.code?.toUpperCase();
+      if (code === "CLUBVIORA" && subtotal >= 999) return sum + subtotal * 0.1;
+      if (code === "SHINE50" && subtotal >= 700) return sum + 50;
       return sum;
     }, 0);
   }, [cart, subtotal]);
 
-  // Prepaid discount disabled while Razorpay is paused. Total = subtotal - coupon.
-  const total = Math.max(0, subtotal - wixCouponDiscount);
+  // Flat ₹50 off when the customer pays online (prepaid via Razorpay).
+  const prepaidDiscount = isPrepaid ? PREPAID_DISCOUNT : 0;
+  const total = Math.max(0, subtotal - wixCouponDiscount - prepaidDiscount);
 
   // Display-only inflated subtotal. Frontend optics only. `total`/`subtotal`
   // (the real cart items total) is what's sent to /api/razorpay and used for
@@ -163,12 +166,176 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
     return "";
   };
 
-  const handlePayment = async () => {
-    if (paymentMethod === "PREPAID") {
-      setShowPrepaidNotice(true);
-      return;
+  // Convert the current Wix cart into a finalized, approved Wix order via the
+  // server route (API-key permissions). Used by both COD and prepaid flows so
+  // the order lands in Wix Orders/Payments/analytics identically. For prepaid,
+  // `razorpayPaymentId` is recorded on the order for reconciliation.
+  const finalizeWixOrder = async (
+    method: PaymentMethod,
+    razorpayPaymentId?: string
+  ): Promise<string> => {
+    const checkoutResult = await wixClient.currentCart.createCheckoutFromCurrentCart({
+      channelType: currentCart.ChannelType.WEB,
+    });
+    const checkoutId = checkoutResult.checkoutId;
+    if (!checkoutId) throw new Error("Wix returned an empty checkoutId.");
+
+    const finalizeResponse = await fetch("/api/wix/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        checkoutId,
+        details: {
+          email: email.trim(),
+          fullName: fullName.trim(),
+          phone: mobile.replace(/\D/g, ""),
+          addressLine1: address.trim(),
+          city: city.trim(),
+          state: state.trim(),
+          postalCode: pincode.trim(),
+          paymentMethod: method,
+          razorpayPaymentId,
+          // Actual amount charged via Razorpay (includes the prepaid ₹50 off),
+          // recorded on the Wix order for reconciliation.
+          razorpayAmount: method === "PREPAID" ? total.toFixed(2) : undefined,
+        },
+      }),
+    });
+
+    const finalizeResult = await finalizeResponse.json();
+    if (!finalizeResponse.ok) {
+      throw new Error(finalizeResult?.error || "Wix order creation failed.");
+    }
+    const wixOrderId = finalizeResult.orderId;
+    if (!wixOrderId) throw new Error("Wix did not return an order ID.");
+    return wixOrderId;
+  };
+
+  // Clear the cart (Wix + local store), fire purchase tracking, and route to
+  // the success page. Shared by both payment flows.
+  const completeOrder = (wixOrderId: string, contentIds: string[]) => {
+    // Reset local state synchronously so the cart icon/CartModal reflect the
+    // empty state immediately, even if the network call hiccups.
+    clearCart();
+    wixClient.currentCart
+      .deleteCurrentCart()
+      .catch((clearErr) =>
+        console.warn("Failed to delete Wix cart after order:", clearErr)
+      );
+    // Re-fetch in the background to keep local state honest.
+    getCart(wixClient).catch(() => {});
+
+    try {
+      window.sessionStorage.setItem(
+        "vioraPendingPurchase",
+        JSON.stringify({ value: total, currency: "INR", content_ids: contentIds })
+      );
+    } catch {}
+    trackPurchase(total, "INR", contentIds, wixOrderId);
+
+    // Close the modal BEFORE navigating so the parent (CartModal / cart page)
+    // doesn't keep painting it over the success page.
+    onClose();
+    router.push(`/success?orderId=${encodeURIComponent(wixOrderId)}`);
+  };
+
+  // Prepaid flow: create a Razorpay order, open the checkout modal, verify the
+  // signature server-side on success, then finalize the Wix order. The Wix
+  // order is created ONLY after payment is verified, so unpaid carts never
+  // become orders. Note: rzp.open() returns immediately — completion happens in
+  // the handler/dismiss/failure callbacks, which own setProcessing(false).
+  const runPrepaidOrder = async (contentIds: string[]) => {
+    // 1. Create the Razorpay order on the server (KEY_SECRET stays server-side).
+    const orderResponse = await fetch("/api/razorpay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        amount: total,
+        currency: "INR",
+        receipt: `viora_${Date.now()}`,
+        notes: { email: email.trim(), phone: mobile.replace(/\D/g, "") },
+      }),
+    });
+    const orderData = await orderResponse.json();
+    if (!orderResponse.ok || !orderData?.order_id) {
+      throw new Error(orderData?.error || "Could not start the payment. Please try again.");
     }
 
+    // 2. Load the Razorpay checkout script.
+    const scriptOk = await loadRazorpayScript();
+    if (!scriptOk || !window.Razorpay) {
+      throw new Error("Could not load the payment gateway. Check your connection and try again.");
+    }
+
+    // 3. Open the Razorpay modal.
+    const rzp = new window.Razorpay({
+      key: orderData.key_id,
+      amount: orderData.amount,
+      currency: orderData.currency,
+      order_id: orderData.order_id,
+      name: "Viora Jewels",
+      description: "Order payment",
+      image: "/logo%20compressed.png",
+      prefill: {
+        name: fullName.trim(),
+        email: email.trim(),
+        contact: mobile.replace(/\D/g, ""),
+      },
+      notes: { address: address.trim() },
+      theme: { color: "#9B1B30" },
+      handler: async (response: any) => {
+        try {
+          // 4. Verify the signature server-side before trusting the payment.
+          const verifyResponse = await fetch("/api/verify-payment", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            }),
+          });
+          const verifyData = await verifyResponse.json();
+          if (!verifyResponse.ok || !verifyData?.verified) {
+            throw new Error(
+              "Payment verification failed. If money was deducted it will be refunded automatically."
+            );
+          }
+
+          // 5. Payment confirmed — finalize the Wix order and finish up.
+          const wixOrderId = await finalizeWixOrder("PREPAID", response.razorpay_payment_id);
+          completeOrder(wixOrderId, contentIds);
+        } catch (err: any) {
+          console.error("Prepaid order finalization failed:", err);
+          setError(
+            `Payment received but order could not be completed: ${
+              err?.message || "Unknown error"
+            }. Please contact support with your payment ID.`
+          );
+          showToast("Could not complete order after payment", "error");
+          setProcessing(false);
+        }
+      },
+      modal: {
+        // User dismissed the Razorpay window without paying.
+        ondismiss: () => {
+          setProcessing(false);
+          showToast("Payment cancelled.", "info");
+        },
+      },
+    });
+
+    rzp.on("payment.failed", (resp: any) => {
+      console.error("Razorpay payment.failed:", resp?.error);
+      setError(`Payment failed: ${resp?.error?.description || "Please try again."}`);
+      showToast("Payment failed", "error");
+      setProcessing(false);
+    });
+
+    rzp.open();
+  };
+
+  const handlePayment = async () => {
     const validationError = validateDelivery();
     if (validationError) {
       setError(validationError);
@@ -201,105 +368,19 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
     trackInitiateCheckout(total, "INR", totalQuantity);
 
     try {
-      // 1. Convert the current Wix cart to a checkout.
-      let checkoutId: string;
-      try {
-        const checkoutResult = await wixClient.currentCart.createCheckoutFromCurrentCart({
-          channelType: currentCart.ChannelType.WEB,
-        });
-        checkoutId = checkoutResult.checkoutId!;
-        if (!checkoutId) throw new Error("Wix returned an empty checkoutId.");
-        console.log("[COD] Step 1 OK - Checkout created:", checkoutId);
-      } catch (stepErr: any) {
-        console.error("[COD] Step 1 Failed (createCheckoutFromCurrentCart):", stepErr);
-        throw new Error(`Checkout creation failed: ${stepErr?.details?.applicationError?.description || stepErr?.message || "Unknown"}`);
+      if (paymentMethod === "PREPAID") {
+        // Razorpay flow keeps `processing` true until its callbacks resolve.
+        await runPrepaidOrder(contentIds);
+        return;
       }
 
-      // 2. Finalize the Wix checkout/order on the server with API-key
-      // permissions so the order lands in Wix Orders, Payments, and analytics
-      // the same way a Wix checkout-created order does.
-      let wixOrderId: string;
-      try {
-        const finalizeResponse = await fetch("/api/wix/checkout", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            checkoutId,
-            details: {
-              email: email.trim(),
-              fullName: fullName.trim(),
-              phone: mobile.replace(/\D/g, ""),
-              addressLine1: address.trim(),
-              city: city.trim(),
-              state: state.trim(),
-              postalCode: pincode.trim(),
-              paymentMethod,
-            },
-          }),
-        });
-
-        const finalizeResult = await finalizeResponse.json();
-
-        if (!finalizeResponse.ok) {
-          throw new Error(finalizeResult?.error || "Wix order creation failed.");
-        }
-
-        wixOrderId = finalizeResult.orderId;
-        if (!wixOrderId) throw new Error("Wix did not return an order ID.");
-        console.log("[COD] Step 2 OK - Wix checkout finalized:", finalizeResult);
-      } catch (stepErr: any) {
-        console.error("[COD] Step 2 Failed (finalize Wix checkout):", stepErr);
-        throw new Error(`Wix order finalization failed: ${stepErr?.message || "Unknown"}`);
-      }
-
-      // NOTE: For COD / manual payments, NO explicit payment processing call is
-      // needed from the frontend. The Wix backend automatically handles the
-      // order's payment status based on the "Manual Payments" configuration in
-      // your Wix Dashboard (Settings > Accept Payments > Manual Payments).
-      // The order will appear in the dashboard as "Pending Payment" - which is
-      // the correct COD workflow. Mark it as paid manually in the dashboard
-      // once you collect the cash.
-      console.log("[COD] Step 3.5 - Skipping frontend payment processing (handled by Wix backend for manual payments).");
-
-      // 4. Clear the user's Wix cart AND the local Zustand store.
-      //    deleteCurrentCart() removes the cart on Wix's side. getCart() right
-      //    after it used to throw OWNED_CART_NOT_FOUND silently, leaving the
-      //    purchased items lingering in the local store. That is the "cart not"
-      //    clearing" bug. Reset local state synchronously via clearCart() so
-      //    the cart icon/CartModal reflect the empty state immediately, even
-      //    if the network call hiccups.
-      clearCart();
-      try {
-        await wixClient.currentCart.deleteCurrentCart();
-      } catch (clearErr) {
-        console.warn("Failed to delete Wix cart after COD order:", clearErr);
-      }
-      // Re-fetch in the background. If the backend confirms empty (or throws
-      // OWNED_CART_NOT_FOUND, which getCart() now handles by resetting), local
-      // state stays clean. If a fresh cart was somehow created mid-flow, this
-      // pulls it down so the UI is honest.
-      getCart(wixClient).catch(() => {});
-
-      // 5. Tracking + redirect to success page.
-      try {
-        window.sessionStorage.setItem(
-          "vioraPendingPurchase",
-          JSON.stringify({
-            value: total,
-            currency: "INR",
-            content_ids: contentIds,
-          })
-        );
-      } catch {}
-      trackPurchase(total, "INR", contentIds, wixOrderId);
-
-      // Close the modal BEFORE navigating so the parent (CartModal / cart
-      // page) doesn't keep painting it over the success page.
-      onClose();
-      router.push(`/success?orderId=${encodeURIComponent(wixOrderId)}`);
-      return;
+      // COD flow: finalize the Wix order immediately. Wix keeps it as "Pending
+      // Payment" per the Manual Payments config — mark it paid in the dashboard
+      // once cash is collected.
+      const wixOrderId = await finalizeWixOrder("COD");
+      completeOrder(wixOrderId, contentIds);
     } catch (err: any) {
-      // Surface the full Wix API error so the developer can debug.
+      // Surface the full Wix/Razorpay error so it can be debugged.
       console.error("Order placement failed:", err);
       const cause =
         err?.details?.applicationError?.description ||
@@ -318,7 +399,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
     sub?: string;
   }> = [
     { id: "COD", label: "Cash on Delivery (COD)", sub: "Pay when you receive your order" },
-    { id: "PREPAID", label: "Prepaid (UPI / Cards)", sub: "Online payments launching soon — please use COD for now." },
+    { id: "PREPAID", label: "Prepaid (UPI / Cards)", sub: `Pay online & save ₹${PREPAID_DISCOUNT} instantly` },
   ];
 
   const modal = (
@@ -328,6 +409,9 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
       role="dialog"
       aria-modal="true"
       aria-label="Checkout"
+      // Tell Lenis (global smooth-scroll) to ignore gestures inside the modal so
+      // the panel scrolls natively instead of scrolling the page behind it.
+      data-lenis-prevent
     >
       <div
         className="relative w-full md:max-w-lg max-h-[95vh] overflow-y-auto rounded-t-2xl md:rounded-2xl bg-white shadow-2xl"
@@ -360,11 +444,9 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
           </span>
         </div>
 
-        {/* Offer banner hidden while prepaid is paused. Restore with prepaid relaunch.
         <div className="bg-green-600 text-white text-center text-sm font-semibold py-2 px-4">
-          Get Extra ₹50 Off on Prepaid Payments
+          Get Extra ₹{PREPAID_DISCOUNT} Off on Prepaid Payments
         </div>
-        */}
 
         <div className="p-5 space-y-5">
           {/* Step 1 - Contact */}
@@ -465,25 +547,16 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                 <div className="flex flex-col gap-2">
                   {paymentOptions.map((opt) => {
                     const selected = paymentMethod === opt.id;
-                    const isPrepaidComingSoon = opt.id === "PREPAID";
+                    const isPrepaid = opt.id === "PREPAID";
                     return (
                       <button
                         key={opt.id}
                         type="button"
-                        onClick={() => {
-                          if (isPrepaidComingSoon) {
-                            setShowPrepaidNotice(true);
-                            return;
-                          }
-                          setPaymentMethod(opt.id);
-                        }}
-                        aria-disabled={isPrepaidComingSoon}
+                        onClick={() => setPaymentMethod(opt.id)}
                         className={`flex items-center gap-3 rounded-lg border px-4 py-3 text-left transition-all ${
                           selected
                             ? "border-[#9B1B30] bg-[#9B1B30]/5 ring-2 ring-[#9B1B30]/20"
-                            : isPrepaidComingSoon
-                              ? "border-gray-200 bg-gray-50/60 opacity-70 cursor-not-allowed"
-                              : "border-gray-200 hover:border-gray-300"
+                            : "border-gray-200 hover:border-gray-300"
                         }`}
                       >
                         <span
@@ -496,14 +569,14 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                             <span className="font-semibold text-sm text-primary">
                               {opt.label}
                             </span>
-                            {isPrepaidComingSoon && (
-                              <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-2 py-0.5">
-                                Coming Soon
+                            {isPrepaid && (
+                              <span className="text-[10px] font-semibold uppercase tracking-wider bg-green-100 text-green-800 border border-green-200 rounded-full px-2 py-0.5">
+                                ₹{PREPAID_DISCOUNT} OFF
                               </span>
                             )}
                           </span>
                           {opt.sub && (
-                            <span className={`block text-xs mt-0.5 ${isPrepaidComingSoon ? "text-gray-500" : "text-gray-500"}`}>
+                            <span className="block text-xs mt-0.5 text-gray-500">
                               {opt.sub}
                             </span>
                           )}
@@ -540,7 +613,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                   <p className="text-green-600 text-sm font-medium">
-                    You are saving ₹{(149 + wixCouponDiscount).toFixed(0)} on this order!
+                    You are saving ₹{(149 + wixCouponDiscount + prepaidDiscount).toFixed(0)} on this order!
                   </p>
                 </div>
 
@@ -558,14 +631,12 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                   </div>
                 )}
 
-                {/* Prepaid discount row hidden while prepaid is paused.
                 {isPrepaid && (
                   <div className="flex justify-between text-green-700 font-medium">
                     <span>Prepaid Discount</span>
                     <span>- ₹{PREPAID_DISCOUNT}</span>
                   </div>
                 )}
-                */}
                 <div className="flex justify-between text-base font-bold text-primary pt-3 border-t border-gray-200 mt-3">
                   <span>Estimated Total</span>
                   <span>₹{total.toFixed(2)}</span>
@@ -597,51 +668,6 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
           )}
         </div>
 
-        {/* Prepaid coming-soon polite notice */}
-        {showPrepaidNotice && (
-          <div
-            className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 p-5"
-            onClick={() => setShowPrepaidNotice(false)}
-          >
-            <div
-              className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-              role="dialog"
-              aria-modal="true"
-            >
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-5 h-5 text-amber-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <h4 className="text-base font-playfair font-bold text-primary">
-                  Online payments coming soon
-                </h4>
-              </div>
-              <p className="text-sm text-gray-600 leading-relaxed">
-                We&apos;re still setting up our secure payment gateway. For the
-                moment, the only way to place an order is{" "}
-                <span className="font-semibold text-primary">Cash on Delivery</span>
-                {" "}— you&apos;ll pay your friendly delivery partner when the
-                package reaches you. UPI &amp; cards will be live very soon.
-              </p>
-              <p className="mt-2 text-xs text-gray-500">
-                Thank you for your patience 💛
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  setPaymentMethod("COD");
-                  setShowPrepaidNotice(false);
-                }}
-                className="mt-5 w-full rounded-lg bg-[#9B1B30] py-3 text-sm font-semibold uppercase tracking-wider text-white hover:bg-[#7d1527]"
-              >
-                Continue with COD
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
