@@ -342,24 +342,59 @@ export async function POST(req: Request) {
           li?.productName?.translated ||
           "Item",
         quantity: Number(li?.quantity) || 1,
+        sku: li?.physicalProperties?.sku || li?.catalogReference?.options?.sku || undefined,
+        options: ((li?.descriptionLines as any[]) || [])
+          .map((dl) => ({
+            name: dl?.name?.original || dl?.name?.translated || "",
+            value:
+              dl?.colorInfo?.original ||
+              dl?.colorInfo?.translated ||
+              dl?.plainText?.original ||
+              dl?.plainText?.translated ||
+              "",
+          }))
+          .filter((o) => o.name && o.value),
+        unitPrice: li?.price?.amount || undefined,
         lineTotal:
           li?.totalPriceAfterTax?.amount ||
           li?.totalPriceBeforeTax?.amount ||
           li?.price?.amount ||
           undefined,
+        image: li?.image || undefined,
       }));
       const orderNumber = finalOrder?.number
         ? `#${finalOrder.number}`
         : `#${String(orderId).slice(-8)}`;
 
+      const ps = (finalOrder?.priceSummary as any) || {};
+      const summary = {
+        subtotal: ps?.subtotal?.amount || undefined,
+        shipping: ps?.shipping?.amount || undefined,
+        tax: ps?.tax?.amount || undefined,
+        discount: ps?.discount?.amount || undefined,
+        total:
+          ps?.total?.amount ||
+          (Number.isFinite(emailAmount) ? emailAmount.toFixed(2) : undefined),
+      };
+
+      const createdDate =
+        finalOrder?._createdDate || finalOrder?.createdDate || Date.now();
+      const orderDate = new Date(createdDate).toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      });
+
       await sendOrderConfirmationEmail({
         to: email,
         customerName: fullName,
         orderNumber,
+        orderDate,
         paymentMethod,
         amount: (Number.isFinite(emailAmount) ? emailAmount : 0).toFixed(2),
         razorpayPaymentId: razorpayPaymentId || undefined,
         items,
+        summary,
         address: {
           line1: addressLine1,
           city,
