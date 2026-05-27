@@ -66,8 +66,13 @@ const OrderPage = async ({ params }: { params: { id: string } }) => {
             <span>{order.buyerInfo?.email || "N/A"}</span>
           </div>
           <div>
-            <span className="font-medium">Price: </span>
-            <span>{order.priceSummary?.subtotal?.amount || "N/A"}</span>
+            <span className="font-medium">Amount Paid: </span>
+            <span>
+              ₹
+              {order.priceSummary?.total?.amount ||
+                order.priceSummary?.subtotal?.amount ||
+                "N/A"}
+            </span>
           </div>
           <div>
             <span className="font-medium">Payment Status: </span>

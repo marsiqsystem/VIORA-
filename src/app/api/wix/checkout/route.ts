@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { wixAdminClientServer } from "@/lib/wixAdminClientServer";
+import { sendOrderConfirmationEmail } from "@/lib/orderEmail";
 
 type CheckoutAddressPayload = {
   email: string;
@@ -219,25 +220,89 @@ export async function POST(req: Request) {
       "APPROVED"
     );
 
-    // For PREPAID orders the customer has already paid through Razorpay (and the
-    // signature was verified before we got here), so record a payment on the Wix
-    // order to flip its payment status to PAID. We record the Wix order total
-    // (which already reflects any applied coupon like SHINE50) so the order shows
-    // as fully paid with no phantom balance. The exact Razorpay amount can differ
-    // by the automatic prepaid ₹50 — that and the payment ID are kept in the
-    // order note/custom fields for reconciliation against the Razorpay dashboard.
+    // The total Wix computed for the order (already reflects any coupon like
+    // SHINE50). This is the pre-prepaid-discount figure.
+    const wixOrderTotal = Number(
+      (updatedCheckout as any)?.priceSummary?.total?.amount ??
+        (approvedOrderResult as any)?.order?.priceSummary?.total?.amount ??
+        (orderResult as any)?.order?.priceSummary?.total?.amount
+    );
+
+    // For PREPAID orders the customer pays online via Razorpay, after a flat ₹50
+    // "pay online" discount that Wix's coupon system can't represent (it stacks
+    // on top of any coupon). To make the Wix order TOTAL equal what was actually
+    // charged — so the admin amount, the My Orders total, and the email all show
+    // the real figure — we apply that difference as a custom discount through a
+    // draft-order edit, then commit it back onto this same order.
+    //
+    // This whole block is best-effort: if anything fails the original order is
+    // untouched and we simply record the real amount paid (the order may then
+    // show a small balance in the admin, but it is never blocked).
+    let finalTotal = wixOrderTotal; // amount we record as paid
+    let committedOrder: any = null;
+    let discountApplied = false;
+
+    if (paymentMethod === "PREPAID" && razorpayPaymentId) {
+      const amountPaid = Number(razorpayAmount);
+      if (
+        Number.isFinite(amountPaid) &&
+        Number.isFinite(wixOrderTotal) &&
+        amountPaid > 0 &&
+        amountPaid < wixOrderTotal
+      ) {
+        const discount = Number((wixOrderTotal - amountPaid).toFixed(2));
+        try {
+          const draftRes = await (wixClient.draftOrders as any).createDraftOrder({
+            sourceOrderId: orderId,
+          });
+          const draftId =
+            draftRes?.calculatedDraftOrder?.draftOrder?._id ||
+            draftRes?.draftOrder?._id;
+          if (!draftId) throw new Error("Draft order id missing from response.");
+
+          await (wixClient.draftOrders as any).createCustomDiscounts(draftId, {
+            discounts: [
+              {
+                priceAmount: { amount: discount.toFixed(2) },
+                discountType: "GLOBAL",
+                applyToDraftOrder: true,
+                description: "Online payment discount",
+              },
+            ],
+          });
+
+          const commitRes = await (wixClient.draftOrders as any).commitDraftOrder(
+            draftId,
+            {
+              commitSettings: {
+                sendNotificationsToBuyer: false,
+                sendNotificationsToBusiness: false,
+              },
+              reason: "Online payment (prepaid) discount",
+            }
+          );
+
+          committedOrder = commitRes?.orderAfterCommit || null;
+          const committedTotal =
+            committedOrder?.priceSummary?.total?.amount;
+          finalTotal =
+            committedTotal != null ? Number(committedTotal) : amountPaid;
+          discountApplied = true;
+        } catch (discErr) {
+          console.error("Prepaid discount (draft edit) failed:", discErr);
+          finalTotal = amountPaid;
+        }
+      }
+    }
+
+    // Record the payment so the order shows as paid for `finalTotal`.
     let paymentMarkedPaid = false;
     if (paymentMethod === "PREPAID" && razorpayPaymentId) {
       try {
-        const totalAmount =
-          (updatedCheckout as any)?.priceSummary?.total?.amount ??
-          (approvedOrderResult as any)?.order?.priceSummary?.total?.amount ??
-          (orderResult as any)?.order?.priceSummary?.total?.amount;
-
-        if (totalAmount) {
+        if (Number.isFinite(finalTotal) && finalTotal > 0) {
           await (wixClient.orderTransactions as any).addPayments(orderId, [
             {
-              amount: { amount: String(totalAmount) },
+              amount: { amount: finalTotal.toFixed(2) },
               regularPaymentDetails: {
                 offlinePayment: true,
                 status: "APPROVED",
@@ -260,11 +325,60 @@ export async function POST(req: Request) {
       }
     }
 
+    // Send our own branded confirmation email (correct amount + payment status).
+    // Wix's automatic order email should be turned off in the dashboard so the
+    // customer doesn't also receive the misleading "pay cash to courier" one.
+    try {
+      const finalOrder =
+        committedOrder ||
+        (approvedOrderResult as any)?.order ||
+        (orderResult as any)?.order;
+      const emailAmount = Number.isFinite(finalTotal)
+        ? finalTotal
+        : wixOrderTotal;
+      const items = ((finalOrder?.lineItems as any[]) || []).map((li) => ({
+        name:
+          li?.productName?.original ||
+          li?.productName?.translated ||
+          "Item",
+        quantity: Number(li?.quantity) || 1,
+        lineTotal:
+          li?.totalPriceAfterTax?.amount ||
+          li?.totalPriceBeforeTax?.amount ||
+          li?.price?.amount ||
+          undefined,
+      }));
+      const orderNumber = finalOrder?.number
+        ? `#${finalOrder.number}`
+        : `#${String(orderId).slice(-8)}`;
+
+      await sendOrderConfirmationEmail({
+        to: email,
+        customerName: fullName,
+        orderNumber,
+        paymentMethod,
+        amount: (Number.isFinite(emailAmount) ? emailAmount : 0).toFixed(2),
+        razorpayPaymentId: razorpayPaymentId || undefined,
+        items,
+        address: {
+          line1: addressLine1,
+          city,
+          state,
+          postalCode,
+        },
+        phone,
+      });
+    } catch (emailErr) {
+      console.error("Order confirmation email step failed:", emailErr);
+    }
+
     return NextResponse.json({
       checkoutId,
       orderId,
       paymentMarkedPaid,
-      order: approvedOrderResult?.order || (orderResult as any)?.order,
+      discountApplied,
+      finalTotal: Number.isFinite(finalTotal) ? finalTotal : undefined,
+      order: committedOrder || approvedOrderResult?.order || (orderResult as any)?.order,
     });
   } catch (err: any) {
     console.error("Wix checkout finalization failed:", err);
