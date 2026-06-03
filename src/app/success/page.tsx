@@ -2,7 +2,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import Confetti from "react-confetti";
-import { trackPurchase } from "@/lib/metaPixel";
+import { trackMetaEvent } from "@/lib/metaEvents";
 
 const SuccessContent = () => {
   const searchParams = useSearchParams();
@@ -40,7 +40,13 @@ const SuccessContent = () => {
             ? parsed.content_ids
             : undefined;
         }
-        trackPurchase(value, currency, content_ids, orderId);
+        void trackMetaEvent("Purchase", {
+          value,
+          currency,
+          content_ids,
+          content_type: "product",
+          transaction_id: orderId,
+        });
         window.sessionStorage.setItem(firedKey, "1");
         window.sessionStorage.removeItem("vioraPendingPurchase");
       }
@@ -95,4 +101,3 @@ const SuccessPage = () => {
 };
 
 export default SuccessPage;
-

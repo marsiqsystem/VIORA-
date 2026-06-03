@@ -1,5 +1,7 @@
 "use client";
 
+import { trackMetaEvent, type MetaEventName } from "@/lib/metaEvents";
+
 export interface ContentParams {
   content_ids?: string[];
   content_name?: string;
@@ -36,8 +38,15 @@ const safeTrack = (event: string, params?: Record<string, unknown>): void => {
   }
 };
 
+const safeTrackMeta = (
+  event: MetaEventName,
+  params?: Record<string, unknown>
+): void => {
+  void trackMetaEvent(event, params || {});
+};
+
 export const trackSearch = (search_string: string): void => {
-  safeTrack("Search", { search_string });
+  safeTrackMeta("Search", { search_string });
 };
 
 export const trackViewContent = (
@@ -46,7 +55,7 @@ export const trackViewContent = (
   value?: number,
   currency: string = "INR"
 ): void => {
-  safeTrack("ViewContent", {
+  safeTrackMeta("ViewContent", {
     content_ids,
     content_name,
     content_type: "product",
@@ -61,7 +70,7 @@ export const trackAddToWishlist = (
   value?: number,
   currency: string = "INR"
 ): void => {
-  safeTrack("AddToWishlist", {
+  safeTrackMeta("AddToWishlist", {
     content_ids,
     content_name,
     content_type: "product",
@@ -76,7 +85,7 @@ export const trackAddToCart = (
   value?: number,
   currency: string = "INR"
 ): void => {
-  safeTrack("AddToCart", {
+  safeTrackMeta("AddToCart", {
     content_ids,
     content_name,
     content_type: "product",
@@ -90,14 +99,14 @@ export const trackInitiateCheckout = (
   currency: string = "INR",
   num_items?: number
 ): void => {
-  safeTrack("InitiateCheckout", { value, currency, num_items });
+  safeTrackMeta("InitiateCheckout", { value, currency, num_items });
 };
 
 export const trackAddPaymentInfo = (
   value: number,
   currency: string = "INR"
 ): void => {
-  safeTrack("AddPaymentInfo", { value, currency });
+  safeTrackMeta("AddPaymentInfo", { value, currency });
 };
 
 export const trackPurchase = (
@@ -106,7 +115,7 @@ export const trackPurchase = (
   content_ids?: string[],
   transaction_id?: string
 ): void => {
-  safeTrack("Purchase", {
+  safeTrackMeta("Purchase", {
     value,
     currency,
     content_ids,
@@ -116,17 +125,17 @@ export const trackPurchase = (
 };
 
 export const trackCompleteRegistration = (method?: string): void => {
-  safeTrack("CompleteRegistration", method ? { method } : undefined);
+  safeTrackMeta("CompleteRegistration", method ? { method } : undefined);
 };
 
 export const trackSubscribe = (currency: string = "INR", value: number = 0): void => {
-  safeTrack("Subscribe", { currency, value });
+  safeTrackMeta("Subscribe", { currency, value });
 };
 
 export const trackContact = (): void => {
-  safeTrack("Contact");
+  safeTrackMeta("Contact");
 };
 
 export const trackLead = (): void => {
-  safeTrack("Lead");
+  safeTrackMeta("Lead");
 };

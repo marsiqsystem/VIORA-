@@ -11,8 +11,8 @@ import { useToast } from "@/components/Toast";
 import {
   trackAddPaymentInfo,
   trackInitiateCheckout,
-  trackPurchase,
 } from "@/lib/metaPixel";
+import { trackMetaEvent } from "@/lib/metaEvents";
 
 type PaymentMethod = "PREPAID" | "COD";
 
@@ -213,7 +213,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
 
   // Clear the cart (Wix + local store), fire purchase tracking, and route to
   // the success page. Shared by both payment flows.
-  const completeOrder = (wixOrderId: string, contentIds: string[]) => {
+  const completeOrder = async (wixOrderId: string, contentIds: string[]) => {
     // Reset local state synchronously so the cart icon/CartModal reflect the
     // empty state immediately, even if the network call hiccups.
     clearCart();
@@ -231,7 +231,17 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
         JSON.stringify({ value: total, currency: "INR", content_ids: contentIds })
       );
     } catch {}
-    trackPurchase(total, "INR", contentIds, wixOrderId);
+    await trackMetaEvent("Purchase", {
+      value: total,
+      currency: "INR",
+      content_ids: contentIds,
+      content_type: "product",
+      transaction_id: wixOrderId,
+    });
+    try {
+      window.sessionStorage.setItem(`viora_purchase_fired_${wixOrderId}`, "1");
+      window.sessionStorage.removeItem("vioraPendingPurchase");
+    } catch {}
 
     // Close the modal BEFORE navigating so the parent (CartModal / cart page)
     // doesn't keep painting it over the success page.
@@ -268,6 +278,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
     }
 
     // 3. Open the Razorpay modal.
+    trackAddPaymentInfo(total, "INR");
     const rzp = new window.Razorpay({
       key: orderData.key_id,
       amount: orderData.amount,

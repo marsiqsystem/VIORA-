@@ -232,6 +232,7 @@ const ContactPage = () => {
                 href="https://www.instagram.com/_viorajewels_?igsh=bGV3eTFjazIwejNs"
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={() => trackContact()}
                 className="block p-6 bg-viora-gradient rounded-xl hover:shadow-premium transition-all duration-300 group"
               >
                 <div className="flex items-center justify-between">
@@ -255,6 +256,7 @@ const ContactPage = () => {
                 href="https://www.facebook.com/profile.php?id=61589962820647"
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={() => trackContact()}
                 className="block p-6 bg-viora-gradient rounded-xl hover:shadow-premium transition-all duration-300 group"
               >
                 <div className="flex items-center justify-between">

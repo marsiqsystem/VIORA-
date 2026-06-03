@@ -9,6 +9,7 @@ import { useWixClient } from "@/hooks/useWixClient";
 import Cookies from "js-cookie";
 import { useCartStore } from "@/hooks/useCartStore";
 import SearchBar from "./SearchBar";
+import { trackContact } from "@/lib/metaPixel";
 
 const NavIcons = () => {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -143,6 +144,7 @@ const NavIcons = () => {
       {/* Contact / Support Icon */}
       <Link
         href="/contact"
+        onClick={() => trackContact()}
         className="relative group flex items-center justify-center w-10 h-10 rounded-full hover:bg-silver-light transition-colors duration-200"
         aria-label="Contact support"
         title="Contact Support"

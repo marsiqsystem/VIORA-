@@ -3,9 +3,16 @@
 export type MetaEventName =
   | "ViewContent"
   | "AddToCart"
+  | "AddToWishlist"
   | "InitiateCheckout"
+  | "AddPaymentInfo"
   | "Purchase"
-  | "Search";
+  | "CustomizeProduct"
+  | "Search"
+  | "CompleteRegistration"
+  | "Subscribe"
+  | "Contact"
+  | "Lead";
 
 export type MetaCustomData = {
   currency?: string;
@@ -16,6 +23,8 @@ export type MetaCustomData = {
   contents?: Array<{ id: string; quantity: number; item_price?: number }>;
   num_items?: number;
   search_string?: string;
+  transaction_id?: string;
+  method?: string;
 };
 
 const generateEventId = () => {
@@ -23,6 +32,48 @@ const generateEventId = () => {
     return crypto.randomUUID();
   }
   return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+};
+
+const trackBrowserPixel = (
+  eventName: MetaEventName,
+  customData: MetaCustomData,
+  eventId: string,
+  attemptsLeft = 8
+) => {
+  if (typeof window === "undefined") return;
+
+  if (typeof window.fbq === "function") {
+    window.fbq("track", eventName, customData, { eventID: eventId });
+    return;
+  }
+
+  if (attemptsLeft > 0) {
+    window.setTimeout(
+      () => trackBrowserPixel(eventName, customData, eventId, attemptsLeft - 1),
+      250
+    );
+  }
+};
+
+const sendCapiEvent = (payload: Record<string, unknown>) => {
+  const body = JSON.stringify(payload);
+
+  if (typeof navigator !== "undefined" && "sendBeacon" in navigator) {
+    const sent = navigator.sendBeacon(
+      "/api/capi",
+      new Blob([body], { type: "application/json" })
+    );
+    if (sent) return Promise.resolve();
+  }
+
+  return fetch("/api/capi", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+    keepalive: true,
+  }).catch((err) => {
+    console.warn("Meta CAPI send failed:", err);
+  });
 };
 
 /**
@@ -38,25 +89,15 @@ export async function trackMetaEvent(
 
   const eventId = generateEventId();
 
-  // Client-side Pixel
-  if (window.fbq) {
-    window.fbq("track", eventName, customData, { eventID: eventId });
-  }
+  // Client-side Pixel. Retry briefly because user clicks can happen before
+  // fbevents.js has finished replacing the bootstrap stub.
+  trackBrowserPixel(eventName, customData, eventId);
 
   // Server-side Conversions API
-  try {
-    await fetch("/api/capi", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        eventName,
-        eventId,
-        eventSourceUrl: window.location.href,
-        customData,
-      }),
-      keepalive: true,
-    });
-  } catch (err) {
-    console.warn("Meta CAPI send failed:", err);
-  }
+  await sendCapiEvent({
+    eventName,
+    eventId,
+    eventSourceUrl: window.location.href,
+    customData,
+  });
 }

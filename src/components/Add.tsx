@@ -121,6 +121,15 @@ const Add = ({
       }
 
       // Step 3: Track event
+      trackMetaEvent("AddToCart", {
+        currency: "INR",
+        value: productPrice * quantity,
+        content_ids: [productId],
+        content_name: productName,
+        content_type: "product",
+        contents: [{ id: productId, quantity, item_price: productPrice }],
+        num_items: quantity,
+      });
       trackMetaEvent("InitiateCheckout", {
         currency: "INR",
         value: productPrice * quantity,

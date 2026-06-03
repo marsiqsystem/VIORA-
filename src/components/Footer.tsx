@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { trackSubscribe, trackLead } from "@/lib/metaPixel";
+import { trackSubscribe, trackLead, trackContact } from "@/lib/metaPixel";
 
 const Footer = () => {
   const [email, setEmail] = useState("");
@@ -133,6 +133,7 @@ const Footer = () => {
                   href={href}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={() => trackContact()}
                   className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 transition-all duration-300 hover:bg-silver hover:scale-110"
                   aria-label={label}
                   key={label}

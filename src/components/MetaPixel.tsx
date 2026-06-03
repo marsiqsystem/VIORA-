@@ -2,7 +2,7 @@
 
 import Script from "next/script";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useRef } from "react";
 
 declare global {
   interface Window {
@@ -14,8 +14,13 @@ declare global {
 const PageViewTracker = () => {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const hasTrackedInitialView = useRef(false);
 
   useEffect(() => {
+    if (!hasTrackedInitialView.current) {
+      hasTrackedInitialView.current = true;
+      return;
+    }
     if (typeof window !== "undefined" && window.fbq) {
       window.fbq("track", "PageView");
     }
@@ -44,6 +49,7 @@ const MetaPixel = () => {
             s.parentNode.insertBefore(t,s)}(window, document,'script',
             'https://connect.facebook.net/en_US/fbevents.js');
             fbq('init', '${pixelId}');
+            fbq('track', 'PageView');
           `,
         }}
       />

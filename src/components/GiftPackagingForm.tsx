@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { useWixClient } from "@/hooks/useWixClient";
 import { useCartStore } from "@/hooks/useCartStore";
 import { useRouter } from "next/navigation";
+import { trackMetaEvent } from "@/lib/metaEvents";
 
 export type GiftableProduct = {
   id: string;
@@ -118,6 +119,26 @@ const GiftPackagingForm = ({ products }: { products: GiftableProduct[] }) => {
       } as any);
 
       await getCart(wixClient);
+
+      const eventData = {
+        currency: "INR",
+        value: total,
+        content_ids: [selected.id],
+        content_name: `${selected.name} with gift packaging`,
+        content_type: "product",
+        contents: [
+          { id: selected.id, quantity: 1, item_price: productPrice },
+          { id: "premium-gift-packaging", quantity: 1, item_price: PACKAGING_FEE },
+        ],
+        num_items: 2,
+      };
+
+      trackMetaEvent("CustomizeProduct", {
+        ...eventData,
+        content_name: `Gift packaging: ${color}, ${ribbon}, ${recipient}`,
+      });
+      trackMetaEvent("AddToCart", eventData);
+      trackMetaEvent("InitiateCheckout", eventData);
 
       router.push("/checkout");
       return;
