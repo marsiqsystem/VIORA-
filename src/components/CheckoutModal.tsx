@@ -12,7 +12,7 @@ import {
   trackAddPaymentInfo,
   trackInitiateCheckout,
 } from "@/lib/metaPixel";
-import { trackMetaEvent } from "@/lib/metaEvents";
+import { trackMetaEvent, setMetaUserData } from "@/lib/metaEvents";
 
 type PaymentMethod = "PREPAID" | "COD";
 
@@ -150,6 +150,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
       return;
     }
     setError("");
+    setMetaUserData({ email: email.trim() });
     setStep(2);
   };
 
@@ -364,6 +365,21 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
 
     setError("");
     setProcessing(true);
+
+    const nameParts = fullName.trim().split(/\s+/).filter(Boolean);
+    const firstName = nameParts[0] || fullName.trim();
+    const lastName = nameParts.slice(1).join(" ") || undefined;
+
+    setMetaUserData({
+      email: email.trim(),
+      phone: mobile,
+      firstName,
+      lastName,
+      city: city.trim(),
+      state: state.trim(),
+      zip: pincode.trim(),
+      country: "IN",
+    });
 
     const contentIds = lineItems
       .map((item) => item.catalogReference?.catalogItemId)

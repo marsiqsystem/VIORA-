@@ -6,7 +6,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { currentCart } from "@wix/ecom";
 import { useCartStore } from "@/hooks/useCartStore";
 import { useWixClient } from "@/hooks/useWixClient";
-import { trackMetaEvent } from "@/lib/metaEvents";
+import { trackMetaEvent, setMetaUserData } from "@/lib/metaEvents";
 import { trackAddPaymentInfo } from "@/lib/metaPixel";
 import BackButton from "@/components/BackButton";
 
@@ -142,6 +142,15 @@ const CheckoutPage = () => {
           shippingAddress,
         })
       );
+
+      const nameParts = splitName(billing.fullName);
+      setMetaUserData({
+        email: billing.email.trim(),
+        phone: billing.phone,
+        firstName: nameParts.firstName,
+        lastName: nameParts.lastName,
+        country: "IN",
+      });
 
       trackMetaEvent("InitiateCheckout", {
         currency: "INR",

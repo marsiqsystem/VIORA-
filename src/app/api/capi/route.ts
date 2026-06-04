@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies, headers } from "next/headers";
+import crypto from "crypto";
 
 export const runtime = "nodejs";
 
@@ -8,7 +9,57 @@ type CapiRequestBody = {
   eventId: string;
   eventSourceUrl?: string;
   customData?: Record<string, unknown>;
+  userData?: {
+    email?: string;
+    phone?: string;
+    firstName?: string;
+    lastName?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
+    country?: string;
+  };
 };
+
+function sha256(value: string): string {
+  return crypto.createHash("sha256").update(value.trim().toLowerCase()).digest("hex");
+}
+
+function hashUserData(userData?: CapiRequestBody["userData"]) {
+  if (!userData) return {};
+  const hashed: Record<string, string> = {};
+
+  if (userData.email) {
+    hashed.em = sha256(userData.email);
+  }
+  if (userData.phone) {
+    let phoneDigits = userData.phone.replace(/[^0-9]/g, "");
+    if (phoneDigits.length === 10) {
+      phoneDigits = "91" + phoneDigits;
+    }
+    hashed.ph = sha256(phoneDigits);
+  }
+  if (userData.firstName) {
+    hashed.fn = sha256(userData.firstName);
+  }
+  if (userData.lastName) {
+    hashed.ln = sha256(userData.lastName);
+  }
+  if (userData.city) {
+    hashed.ct = sha256(userData.city);
+  }
+  if (userData.state) {
+    hashed.st = sha256(userData.state);
+  }
+  if (userData.zip) {
+    hashed.zp = sha256(userData.zip);
+  }
+  if (userData.country) {
+    hashed.country = sha256(userData.country);
+  }
+
+  return hashed;
+}
 
 export async function POST(req: NextRequest) {
   const pixelId = process.env.NEXT_PUBLIC_META_PIXEL_ID;
@@ -29,7 +80,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { eventName, eventId, eventSourceUrl, customData } = body;
+  const { eventName, eventId, eventSourceUrl, customData, userData } = body;
   if (!eventName || !eventId) {
     return NextResponse.json(
       { ok: false, error: "eventName and eventId are required" },
@@ -62,6 +113,7 @@ export async function POST(req: NextRequest) {
           ...(fbc && { fbc }),
           ...(clientIp && { client_ip_address: clientIp }),
           ...(userAgent && { client_user_agent: userAgent }),
+          ...hashUserData(userData),
         },
         custom_data: customData || {},
       },

@@ -27,6 +27,17 @@ export type MetaCustomData = {
   method?: string;
 };
 
+export type MetaUserData = {
+  email?: string;
+  phone?: string;
+  firstName?: string;
+  lastName?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  country?: string;
+};
+
 const generateEventId = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
@@ -76,6 +87,38 @@ const sendCapiEvent = (payload: Record<string, unknown>) => {
   });
 };
 
+let clientUserData: MetaUserData | null = null;
+
+export function setMetaUserData(userData: MetaUserData) {
+  clientUserData = userData;
+  if (typeof window !== "undefined") {
+    try {
+      window.sessionStorage.setItem("viora_meta_user_data", JSON.stringify(userData));
+    } catch (e) {}
+
+    const pixelId = process.env.NEXT_PUBLIC_META_PIXEL_ID;
+    if (pixelId && typeof window.fbq === "function") {
+      const metaData: Record<string, string> = {};
+      if (userData.email) metaData.em = userData.email.trim().toLowerCase();
+      if (userData.phone) {
+        let phoneDigits = userData.phone.replace(/[^0-9]/g, "");
+        if (phoneDigits.length === 10) {
+          phoneDigits = "91" + phoneDigits;
+        }
+        metaData.ph = phoneDigits;
+      }
+      if (userData.firstName) metaData.fn = userData.firstName.trim().toLowerCase();
+      if (userData.lastName) metaData.ln = userData.lastName.trim().toLowerCase();
+      if (userData.city) metaData.ct = userData.city.trim().toLowerCase();
+      if (userData.state) metaData.st = userData.state.trim().toLowerCase();
+      if (userData.zip) metaData.zp = userData.zip.trim().toLowerCase();
+      if (userData.country) metaData.country = userData.country.trim().toLowerCase();
+
+      window.fbq("init", pixelId, metaData);
+    }
+  }
+}
+
 /**
  * Fires a Meta event to BOTH the client-side Pixel (fbq) and the server-side
  * Conversions API (`/api/capi`) using a shared `eventID` so Meta can
@@ -93,11 +136,23 @@ export async function trackMetaEvent(
   // fbevents.js has finished replacing the bootstrap stub.
   trackBrowserPixel(eventName, customData, eventId);
 
+  // Retrieve saved user data from memory or sessionStorage
+  let userData = clientUserData;
+  if (!userData) {
+    try {
+      const stored = window.sessionStorage.getItem("viora_meta_user_data");
+      if (stored) {
+        userData = JSON.parse(stored);
+      }
+    } catch (e) {}
+  }
+
   // Server-side Conversions API
   await sendCapiEvent({
     eventName,
     eventId,
     eventSourceUrl: window.location.href,
     customData,
+    ...(userData && { userData }),
   });
 }
