@@ -9,6 +9,7 @@ type CapiRequestBody = {
   eventId: string;
   eventSourceUrl?: string;
   customData?: Record<string, unknown>;
+  externalId?: string;
   userData?: {
     email?: string;
     phone?: string;
@@ -80,7 +81,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { eventName, eventId, eventSourceUrl, customData, userData } = body;
+  const { eventName, eventId, eventSourceUrl, customData, userData, externalId } = body;
   if (!eventName || !eventId) {
     return NextResponse.json(
       { ok: false, error: "eventName and eventId are required" },
@@ -113,6 +114,10 @@ export async function POST(req: NextRequest) {
           ...(fbc && { fbc }),
           ...(clientIp && { client_ip_address: clientIp }),
           ...(userAgent && { client_user_agent: userAgent }),
+          // Anonymous-but-stable per-browser identifier so Meta can match
+          // signals from the same visitor even before they share email/phone.
+          // Hashed per Meta's requirements.
+          ...(externalId && { external_id: sha256(externalId) }),
           ...hashUserData(userData),
         },
         custom_data: customData || {},

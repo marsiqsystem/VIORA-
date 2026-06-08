@@ -45,6 +45,29 @@ const generateEventId = () => {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 };
 
+// Stable anonymous client identifier. Persisted in localStorage so the same
+// visitor — even when not logged in — produces the same external_id across
+// sessions. Sent on every CAPI event so Meta can match/dedupe without needing
+// email or phone for anonymous browsers.
+const EXTERNAL_ID_KEY = "viora_meta_external_id";
+
+const getOrCreateExternalId = (): string | undefined => {
+  if (typeof window === "undefined") return undefined;
+  try {
+    let id = window.localStorage.getItem(EXTERNAL_ID_KEY);
+    if (!id) {
+      id =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+      window.localStorage.setItem(EXTERNAL_ID_KEY, id);
+    }
+    return id;
+  } catch {
+    return undefined;
+  }
+};
+
 const trackBrowserPixel = (
   eventName: MetaEventName,
   customData: MetaCustomData,
@@ -147,6 +170,8 @@ export async function trackMetaEvent(
     } catch (e) {}
   }
 
+  const externalId = getOrCreateExternalId();
+
   // Server-side Conversions API
   await sendCapiEvent({
     eventName,
@@ -154,5 +179,6 @@ export async function trackMetaEvent(
     eventSourceUrl: window.location.href,
     customData,
     ...(userData && { userData }),
+    ...(externalId && { externalId }),
   });
 }

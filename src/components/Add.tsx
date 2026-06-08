@@ -8,10 +8,17 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import dynamic from "next/dynamic";
+import type { AbandonedCartItem } from "@/components/BuyNowConfirmModal";
+import { media as wixMedia } from "@wix/sdk";
 
 const CheckoutModal = dynamic(() => import("@/components/CheckoutModal"), {
   ssr: false,
 });
+
+const BuyNowConfirmModal = dynamic(
+  () => import("@/components/BuyNowConfirmModal"),
+  { ssr: false }
+);
 
 const Add = ({
   productId,
@@ -33,10 +40,12 @@ const Add = ({
   const [isAdding, setIsAdding] = useState(false);
   const [isBuyingNow, setIsBuyingNow] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [abandonedItems, setAbandonedItems] = useState<AbandonedCartItem[]>([]);
 
   const wixClient = useWixClient();
   const router = useRouter();
-  const { addItem, updateQuantity, cart, isLoading } = useCartStore();
+  const { addItem, updateQuantity, cart, isLoading, getCart } = useCartStore();
   const { showToast } = useToast();
 
   const hasRealVariant =
@@ -85,17 +94,22 @@ const Add = ({
 
   const handleAddToCart = async () => {
     setIsAdding(true);
+    // Fire the Meta AddToCart signal synchronously on click — BEFORE awaiting
+    // the Wix API. Waiting for the round-trip risks losing the event if the
+    // user navigates away or the request hangs (and ad-blocked browsers
+    // sometimes silently drop the second pixel call when it runs after a
+    // long await).
+    trackMetaEvent("AddToCart", {
+      currency: "INR",
+      value: productPrice * quantity,
+      content_ids: [productId],
+      content_name: productName,
+      content_type: "product",
+      contents: [{ id: productId, quantity, item_price: productPrice }],
+      num_items: quantity,
+    });
     try {
       await addItem(wixClient, productId, variantId, quantity, selectedOptions);
-      trackMetaEvent("AddToCart", {
-        currency: "INR",
-        value: productPrice * quantity,
-        content_ids: [productId],
-        content_name: productName,
-        content_type: "product",
-        contents: [{ id: productId, quantity, item_price: productPrice }],
-        num_items: quantity,
-      });
       setIsAdded(true);
       showToast(`${productName} added to cart!`, "success");
       setTimeout(() => setIsAdded(false), 2000);
@@ -107,46 +121,113 @@ const Add = ({
     }
   };
 
+  // Returns the cart line items that belong to a DIFFERENT product than the one
+  // the user is about to buy now. These are the "abandoned" items we should ask
+  // about before piling them into the same checkout.
+  const collectAbandonedItems = (): AbandonedCartItem[] => {
+    const lineItems = (cart as any)?.lineItems || [];
+    return lineItems
+      .filter(
+        (item: any) => item?.catalogReference?.catalogItemId !== productId
+      )
+      .map((item: any) => {
+        const rawImage = item.image as string | undefined;
+        let scaledImage: string | undefined;
+        if (rawImage) {
+          try {
+            scaledImage = wixMedia.getScaledToFillImageUrl(rawImage, 96, 96, {});
+          } catch {
+            scaledImage = rawImage;
+          }
+        }
+        return {
+          id: item._id,
+          name: item.productName?.original || "Item in cart",
+          price: Number(item.price?.amount) || 0,
+          quantity: item.quantity || 1,
+          image: scaledImage,
+        };
+      });
+  };
+
+  // The real Buy Now flow — runs after the user has either confirmed the
+  // abandoned items should stay, or after we've removed them.
+  const runBuyNow = async () => {
+    // Fire AddToCart synchronously BEFORE awaiting the Wix API so the Meta
+    // pixel signal goes out even if the Wix call is slow / the user navigates.
+    trackMetaEvent("AddToCart", {
+      currency: "INR",
+      value: productPrice * quantity,
+      content_ids: [productId],
+      content_name: productName,
+      content_type: "product",
+      contents: [{ id: productId, quantity, item_price: productPrice }],
+      num_items: quantity,
+    });
+
+    await addItem(wixClient, productId, variantId, quantity, selectedOptions);
+
+    const verifyCart = await wixClient.currentCart.getCurrentCart();
+    if (!verifyCart?.lineItems?.length) {
+      throw new Error("Cart is still empty after adding item");
+    }
+
+    trackMetaEvent("InitiateCheckout", {
+      currency: "INR",
+      value: productPrice * quantity,
+      content_ids: [productId],
+      content_name: productName,
+      content_type: "product",
+      contents: [{ id: productId, quantity, item_price: productPrice }],
+      num_items: quantity,
+    });
+
+    setCheckoutOpen(true);
+  };
+
   const handleBuyNow = async () => {
     if (isOutOfStock || isBuyingNow) return;
+
+    // If the cart already has products that aren't this one, stop and ask the
+    // customer whether to keep them. Avoids the surprise of paying for an
+    // older "abandoned" item on top of the one they wanted right now.
+    const other = collectAbandonedItems();
+    if (other.length > 0) {
+      setAbandonedItems(other);
+      setConfirmOpen(true);
+      return;
+    }
+
     setIsBuyingNow(true);
     try {
-      // Step 1: Add to cart and WAIT for the Wix API to confirm
-      await addItem(wixClient, productId, variantId, quantity, selectedOptions);
-
-      // Step 2: Verify the cart actually has items now
-      const verifyCart = await wixClient.currentCart.getCurrentCart();
-      if (!verifyCart?.lineItems?.length) {
-        throw new Error("Cart is still empty after adding item");
-      }
-
-      // Step 3: Track event
-      trackMetaEvent("AddToCart", {
-        currency: "INR",
-        value: productPrice * quantity,
-        content_ids: [productId],
-        content_name: productName,
-        content_type: "product",
-        contents: [{ id: productId, quantity, item_price: productPrice }],
-        num_items: quantity,
-      });
-      trackMetaEvent("InitiateCheckout", {
-        currency: "INR",
-        value: productPrice * quantity,
-        content_ids: [productId],
-        content_name: productName,
-        content_type: "product",
-        contents: [{ id: productId, quantity, item_price: productPrice }],
-        num_items: quantity,
-      });
-
-      // Step 4: Open the Checkout OTP Modal popup right on the product page
-      setCheckoutOpen(true);
+      await runBuyNow();
     } catch (err) {
       console.error("Detailed Wix Cart Error:", err);
       showToast("Buy Now failed. Please try again.", "error");
     }
     setIsBuyingNow(false);
+  };
+
+  const handleConfirmDecision = async (decision: "yes" | "no") => {
+    setIsBuyingNow(true);
+    try {
+      if (decision === "no") {
+        // Remove the abandoned items from the Wix cart so checkout charges
+        // only for the product the customer is buying right now.
+        const ids = abandonedItems.map((i) => i.id).filter(Boolean);
+        if (ids.length) {
+          await wixClient.currentCart.removeLineItemsFromCurrentCart(ids);
+          await getCart(wixClient);
+        }
+      }
+      await runBuyNow();
+      setConfirmOpen(false);
+    } catch (err) {
+      console.error("Buy Now confirmation failed:", err);
+      showToast("Buy Now failed. Please try again.", "error");
+    } finally {
+      setIsBuyingNow(false);
+    }
   };
 
   const isOutOfStock = stockNumber < 1;
@@ -324,6 +405,14 @@ const Add = ({
       </div>
 
       <CheckoutModal open={checkoutOpen} onClose={() => setCheckoutOpen(false)} />
+
+      <BuyNowConfirmModal
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        abandonedItems={abandonedItems}
+        currentProductPrice={productPrice * quantity}
+        onDecision={handleConfirmDecision}
+      />
     </div>
   );
 };

@@ -8,10 +8,17 @@ import { useToast } from "@/components/Toast";
 import { trackMetaEvent } from "@/lib/metaEvents";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
+import type { AbandonedCartItem } from "@/components/BuyNowConfirmModal";
+import { media as wixMedia } from "@wix/sdk";
 
 const CheckoutModal = dynamic(() => import("@/components/CheckoutModal"), {
   ssr: false,
 });
+
+const BuyNowConfirmModal = dynamic(
+  () => import("@/components/BuyNowConfirmModal"),
+  { ssr: false }
+);
 type Props = {
   productId: string;
   variantId: string;
@@ -37,11 +44,13 @@ const StickyAddToCart = ({
 }: Props) => {
   const wixClient = useWixClient();
   const router = useRouter();
-  const { addItem } = useCartStore();
+  const { addItem, cart, getCart } = useCartStore();
   const { showToast } = useToast();
   const [visible, setVisible] = useState(false);
   const [isBuyingNow, setIsBuyingNow] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [abandonedItems, setAbandonedItems] = useState<AbandonedCartItem[]>([]);
 
   useEffect(() => {
     const target = document.querySelector(triggerSelector);
@@ -55,6 +64,56 @@ const StickyAddToCart = ({
     return () => observer.disconnect();
   }, [triggerSelector]);
 
+  const baseEvent = {
+    currency: "INR",
+    value: productPrice,
+    content_ids: [productId],
+    content_name: productName,
+    content_type: "product",
+    contents: [{ id: productId, quantity: 1, item_price: productPrice }],
+    num_items: 1,
+  };
+
+  const collectAbandonedItems = (): AbandonedCartItem[] => {
+    const lineItems = (cart as any)?.lineItems || [];
+    return lineItems
+      .filter(
+        (item: any) => item?.catalogReference?.catalogItemId !== productId
+      )
+      .map((item: any) => {
+        const rawImage = item.image as string | undefined;
+        let scaledImage: string | undefined;
+        if (rawImage) {
+          try {
+            scaledImage = wixMedia.getScaledToFillImageUrl(rawImage, 96, 96, {});
+          } catch {
+            scaledImage = rawImage;
+          }
+        }
+        return {
+          id: item._id,
+          name: item.productName?.original || "Item in cart",
+          price: Number(item.price?.amount) || 0,
+          quantity: item.quantity || 1,
+          image: scaledImage,
+        };
+      });
+  };
+
+  const runBuyNow = async () => {
+    trackMetaEvent("AddToCart", baseEvent);
+
+    await addItem(wixClient, productId, variantId, 1, selectedOptions);
+
+    const verifyCart = await wixClient.currentCart.getCurrentCart();
+    if (!verifyCart?.lineItems?.length) {
+      throw new Error("Cart is still empty after adding item");
+    }
+
+    trackMetaEvent("InitiateCheckout", baseEvent);
+    setCheckoutOpen(true);
+  };
+
   const handleBuyNow = async () => {
     if (isOutOfStock || isBuyingNow) return;
 
@@ -65,35 +124,42 @@ const StickyAddToCart = ({
       return;
     }
 
+    const other = collectAbandonedItems();
+    if (other.length > 0) {
+      setAbandonedItems(other);
+      setConfirmOpen(true);
+      return;
+    }
+
     setIsBuyingNow(true);
     try {
-      // Add to cart and wait for Wix API to confirm. Pass selectedOptions so
-      // variant products (color/size) are added with the chosen options —
-      // otherwise Wix rejects the line item and Buy Now fails.
-      await addItem(wixClient, productId, variantId, 1, selectedOptions);
-
-      // Verify cart actually has items before navigating
-      const verifyCart = await wixClient.currentCart.getCurrentCart();
-      if (!verifyCart?.lineItems?.length) {
-        throw new Error("Cart is still empty after adding item");
-      }
-
-      const baseEvent = {
-        currency: "INR",
-        value: productPrice,
-        content_ids: [productId],
-        content_name: productName,
-        content_type: "product",
-        contents: [{ id: productId, quantity: 1, item_price: productPrice }],
-        num_items: 1,
-      };
-      trackMetaEvent("AddToCart", baseEvent);
-      trackMetaEvent("InitiateCheckout", baseEvent);
-
-      // Open the Checkout OTP Modal popup right on the product page
-      setCheckoutOpen(true);
+      await runBuyNow();
     } catch (err: any) {
       console.error("Sticky Buy Now failed:", err);
+      const cause =
+        err?.details?.applicationError?.description ||
+        err?.message ||
+        "Please try again.";
+      showToast(`Buy Now failed: ${cause}`, "error");
+    } finally {
+      setIsBuyingNow(false);
+    }
+  };
+
+  const handleConfirmDecision = async (decision: "yes" | "no") => {
+    setIsBuyingNow(true);
+    try {
+      if (decision === "no") {
+        const ids = abandonedItems.map((i) => i.id).filter(Boolean);
+        if (ids.length) {
+          await wixClient.currentCart.removeLineItemsFromCurrentCart(ids);
+          await getCart(wixClient);
+        }
+      }
+      await runBuyNow();
+      setConfirmOpen(false);
+    } catch (err: any) {
+      console.error("Sticky Buy Now confirmation failed:", err);
       const cause =
         err?.details?.applicationError?.description ||
         err?.message ||
@@ -169,6 +235,14 @@ const StickyAddToCart = ({
       </div>
 
       <CheckoutModal open={checkoutOpen} onClose={() => setCheckoutOpen(false)} />
+
+      <BuyNowConfirmModal
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        abandonedItems={abandonedItems}
+        currentProductPrice={productPrice}
+        onDecision={handleConfirmDecision}
+      />
     </div>
   );
 };
