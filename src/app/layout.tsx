@@ -1,17 +1,15 @@
 import type { Metadata } from "next";
 import { Montserrat, Cormorant_Garamond } from "next/font/google";
-import { GoogleAnalytics } from "@next/third-parties/google";
 import "lenis/dist/lenis.css";
 import "./globals.css";
 import dynamic from "next/dynamic";
 import Navbar from "@/components/Navbar";
-import MetaPixel from "@/components/MetaPixel";
 import SmoothScroll from "@/components/SmoothScroll";
 
 // Below-the-fold / non-critical → defer JS to shrink the initial bundle.
 const Footer = dynamic(() => import("@/components/Footer"));
 const MobileBottomNav = dynamic(() => import("@/components/MobileBottomNav"));
-const Clarity = dynamic(() => import("@/components/Clarity"));
+const ConsentManager = dynamic(() => import("@/components/ConsentManager"));
 import { WixClientContextProvider } from "@/context/wixContext";
 import { ToastProvider } from "@/components/Toast";
 import AnnouncementMarquee from "@/components/AnnouncementMarquee";
@@ -87,11 +85,7 @@ export default function RootLayout({
             <MobileBottomNav />
           </ToastProvider>
         </WixClientContextProvider>
-        <MetaPixel />
-        <Clarity />
-        {process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID && (
-          <GoogleAnalytics gaId={process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID} />
-        )}
+        <ConsentManager />
       </body>
     </html>
   );

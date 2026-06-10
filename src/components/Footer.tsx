@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { trackSubscribe, trackLead, trackContact } from "@/lib/metaPixel";
+import { reopenConsentBanner } from "@/components/ConsentManager";
 
 const Footer = () => {
   const [email, setEmail] = useState("");
@@ -167,6 +168,15 @@ const Footer = () => {
               <li><Link href="/contact" className="hover:text-white">Contact</Link></li>
               <li><Link href="/privacy-policy" className="hover:text-white">Privacy Policy</Link></li>
               <li><Link href="/terms-and-conditions" className="hover:text-white">Terms &amp; Conditions</Link></li>
+              <li>
+                <button
+                  type="button"
+                  onClick={reopenConsentBanner}
+                  className="text-left hover:text-white"
+                >
+                  Cookie Preferences
+                </button>
+              </li>
             </ul>
           </div>
 
