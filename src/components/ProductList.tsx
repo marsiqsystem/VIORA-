@@ -11,10 +11,12 @@ const ProductList = async ({
   categoryId,
   limit,
   searchParams,
+  featuredNames,
 }: {
   categoryId: string;
   limit?: number;
   searchParams?: any;
+  featuredNames?: readonly string[];
 }) => {
   const wixClient = await wixClientServer();
 
@@ -91,7 +93,24 @@ const ProductList = async ({
     }
   }
 
-  if (categoryId === WIX_COLLECTION_IDS.allProducts && !searchParams?.sort) {
+  if (featuredNames && featuredNames.length > 0) {
+    const lookup = new Map<string, number>(
+      featuredNames.map((name, index) => [name.trim().toLowerCase(), index])
+    );
+    const filtered = allDedupedItems.filter((p) => {
+      const baseName = (p.name || "").split(" - ")[0].trim().toLowerCase();
+      return lookup.has(baseName);
+    });
+    filtered.sort((a, b) => {
+      const aName = (a.name || "").split(" - ")[0].trim().toLowerCase();
+      const bName = (b.name || "").split(" - ")[0].trim().toLowerCase();
+      return (lookup.get(aName) ?? 0) - (lookup.get(bName) ?? 0);
+    });
+    allDedupedItems.length = 0;
+    allDedupedItems.push(...filtered);
+  }
+
+  if (categoryId === WIX_COLLECTION_IDS.allProducts && !searchParams?.sort && !featuredNames) {
     const priority = new Map<string, number>(
       ALL_PRODUCTS_FEATURED_ORDER.map((name, index) => [name, index])
     );

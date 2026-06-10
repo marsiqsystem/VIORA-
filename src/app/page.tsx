@@ -110,6 +110,13 @@ const HomePage = async () => {
             limit={4}
           />
         </Suspense>
+        <Suspense fallback={<Skeleton />}>
+          <ProductList
+            categoryId={WIX_COLLECTION_IDS.newArrivals}
+            limit={3}
+            featuredNames={["Zara Crystal Set", "Rosa Blush Set", "Garnet Royale Set"]}
+          />
+        </Suspense>
       </section>
 
       <section className="bg-platinum px-4 pb-10 pt-4 md:px-8 md:pt-5 lg:px-12 xl:px-16 2xl:px-24">
