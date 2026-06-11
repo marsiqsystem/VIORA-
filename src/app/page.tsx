@@ -113,8 +113,8 @@ const HomePage = async () => {
         <Suspense fallback={<Skeleton />}>
           <ProductList
             categoryId={WIX_COLLECTION_IDS.newArrivals}
-            limit={3}
-            featuredNames={["Zara Crystal Set", "Rosa Blush Set", "Garnet Royale Set"]}
+            limit={4}
+            featuredNames={["Zara Crystal Set", "Rosa Blush Set", "Garnet Royale Set", "Crystal Drop Set"]}
           />
         </Suspense>
       </section>
