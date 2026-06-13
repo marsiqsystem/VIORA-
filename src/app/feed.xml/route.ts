@@ -91,6 +91,28 @@ function escapeXml(s: string): string {
     .replace(/'/g, "&apos;");
 }
 
+/**
+ * Split a Wix product name like "Crystal Drop Set - Aqua Blue" into
+ * { base: "Crystal Drop Set", color: "Aqua Blue" } so we can emit a stable
+ * item_group_id + g:color pair and let Google group colour variants properly.
+ * Mirrors the splitter used by /[slug]/page.tsx for the sibling/colour lookup.
+ */
+function splitBaseAndColor(name: string): { base: string; color: string } {
+  const idx = name.indexOf(" - ");
+  if (idx === -1) return { base: name.trim(), color: "" };
+  return {
+    base: name.slice(0, idx).trim(),
+    color: name.slice(idx + 3).trim(),
+  };
+}
+
+function slugify(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
 function toPlainText(html: string): string {
   return html
     .replace(/<[^>]*>/g, " ")
@@ -118,6 +140,7 @@ export async function GET() {
       skippedHidden: 0,
       skippedNoSlug: 0,
       skippedNoId: 0,
+      groupedAsColorVariant: 0,
     };
 
     let query = await wixClient.products.queryProducts().limit(100).find();
@@ -136,7 +159,11 @@ export async function GET() {
           continue;
         }
 
-        const id = p.sku || p._id;
+        // g:id MUST be unique per item. Wix's _id is a UUID guaranteed unique
+        // per product (even across colour variants). The SKU is sometimes
+        // shared across variants of the same base set — using it as g:id
+        // caused Google to silently dedupe and drop variants from the feed.
+        const id = p._id;
         if (!id) {
           stats.skippedNoId += 1;
           continue;
@@ -144,6 +171,12 @@ export async function GET() {
 
         const name = (p.name || "").trim() || "Viora Jewel piece";
         const link = `${SITE_URL}/${p.slug}`;
+
+        // Detect "Base Name - Color" pattern so we can emit item_group_id +
+        // g:color for proper variant grouping in Google Shopping.
+        const { base, color } = splitBaseAndColor(name);
+        const itemGroupId = color ? `viora-${slugify(base)}` : "";
+        if (color) stats.groupedAsColorVariant += 1;
 
         // Robust multi-path image lookup; fall back to brand logo if Wix
         // returns no usable media at all (keeps the product in the feed
@@ -209,7 +242,13 @@ export async function GET() {
       <g:availability>${inStock ? "in_stock" : "out_of_stock"}</g:availability>
       <g:price>${basePrice} ${currency}</g:price>${salePriceNode}
       <g:brand>Viora Jewel</g:brand>
-      <g:mpn>${escapeXml(String(id))}</g:mpn>
+      <g:mpn>${escapeXml(String(p.sku || id))}</g:mpn>${
+        itemGroupId
+          ? `\n      <g:item_group_id>${escapeXml(itemGroupId)}</g:item_group_id>`
+          : ""
+      }${
+        color ? `\n      <g:color>${escapeXml(color)}</g:color>` : ""
+      }
       <g:google_product_category>Apparel &amp; Accessories &gt; Jewelry</g:google_product_category>
       <g:product_type>Fashion Jewellery</g:product_type>
       <g:age_group>adult</g:age_group>
