@@ -83,10 +83,12 @@ const organizationSchema = {
   "@context": "https://schema.org",
   "@type": "Organization",
   name: "Viora Jewel",
+  alternateName: "Viora Jewels",
   url: SITE_URL,
   logo: `${SITE_URL}/logo%20compressed.png`,
+  email: "viorajewels6@gmail.com",
   description:
-    "Viora Jewel is an Indian direct-to-consumer brand offering affordable everyday ethnic jewellery, earrings and gifting pieces mostly under ₹649, with free shipping across India and easy 48-hour exchange.",
+    "Viora Jewel is an Indian direct-to-consumer brand offering affordable everyday fashion jewellery, earrings and gifting pieces mostly under ₹649, with free shipping across India and an easy 48-hour exchange on damaged or incorrect items.",
   address: {
     "@type": "PostalAddress",
     addressCountry: "IN",
@@ -94,13 +96,28 @@ const organizationSchema = {
   contactPoint: {
     "@type": "ContactPoint",
     contactType: "customer support",
+    email: "viorajewels6@gmail.com",
     areaServed: "IN",
     availableLanguage: ["English", "Hindi"],
     url: `${SITE_URL}/contact`,
   },
+  openingHoursSpecification: [
+    {
+      "@type": "OpeningHoursSpecification",
+      dayOfWeek: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+      opens: "09:00",
+      closes: "18:00",
+    },
+    {
+      "@type": "OpeningHoursSpecification",
+      dayOfWeek: "Saturday",
+      opens: "10:00",
+      closes: "16:00",
+    },
+  ],
   sameAs: [
-    "https://www.instagram.com/viorajewel",
-    "https://www.facebook.com/viorajewel",
+    "https://www.instagram.com/_viorajewels_",
+    "https://www.facebook.com/profile.php?id=61589962820647",
   ],
 };
 
