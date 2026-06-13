@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { WIX_COLLECTION_IDS } from "@/lib/categories";
 import CategoryStrip from "@/components/CategoryStrip";
+import FaqSection from "@/components/FaqSection";
 import { wixClientServer } from "@/lib/wixClientServer";
 import { getCategoryImageMap } from "@/lib/getCategoryImageMap";
 // Below-the-fold product rails are already deferred via the existing Suspense
@@ -231,6 +232,8 @@ const HomePage = async () => {
           ))}
         </div>
       </section>
+
+      <FaqSection />
     </div>
   );
 };

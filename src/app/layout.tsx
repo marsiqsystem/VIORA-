@@ -14,6 +14,10 @@ import { WixClientContextProvider } from "@/context/wixContext";
 import { ToastProvider } from "@/components/Toast";
 import AnnouncementMarquee from "@/components/AnnouncementMarquee";
 
+const SITE_URL = (
+  process.env.NEXT_PUBLIC_SITE_URL || "https://www.viorajewel.in"
+).replace(/\/$/, "");
+
 const montserrat = Montserrat({
   subsets: ["latin"],
   weight: ["300", "400", "500", "600", "700"],
@@ -30,35 +34,93 @@ const cormorant = Cormorant_Garamond({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: {
-    default: "Viora Jewels - Everyday Jewellery & Gifts",
-    template: "%s | Viora Jewels",
+    default: "Viora Jewel — Everyday Jewellery & Gifts",
+    template: "%s | Viora Jewel",
   },
   description:
-    "Shop Viora Jewels for elegant jewellery, thoughtful gifts, and occasion-ready accessories with secure checkout and fast delivery.",
+    "Affordable Indian ethnic jewellery, earrings & gifts mostly under ₹649. Free shipping across India. Easy 48-hour exchange.",
+  applicationName: "Viora Jewel",
   keywords: [
-    "jewellery",
-    "jewels",
-    "gifting",
-    "accessories",
-    "online shopping",
-    "Viora Jewels",
-    "premium jewellery",
+    "Viora Jewel",
+    "Indian ethnic jewellery",
+    "affordable jewellery India",
+    "earrings online",
+    "jewellery gifting",
+    "gold plated jewellery",
   ],
-  authors: [{ name: "Viora Jewels" }],
+  authors: [{ name: "Viora Jewel" }],
+  alternates: { canonical: "/" },
   openGraph: {
-    title: "Viora Jewels - Everyday Jewellery & Gifts",
-    description:
-      "Discover elegant jewellery and thoughtful gifts at Viora Jewels with secure checkout and fast delivery.",
-    url: "https://viorajewel.in",
-    siteName: "Viora Jewels",
     type: "website",
-    locale: "en_US",
+    siteName: "Viora Jewel",
+    title: "Viora Jewel — Everyday Jewellery & Gifts",
+    description:
+      "Affordable Indian ethnic jewellery, earrings & gifts under ₹649. Free shipping across India. Easy 48-hour exchange.",
+    url: SITE_URL,
+    locale: "en_IN",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Viora Jewel — Everyday Jewellery & Gifts",
+    description:
+      "Affordable Indian ethnic jewellery, earrings & gifts under ₹649. Free shipping. Easy 48-hour exchange.",
   },
   robots: {
     index: true,
     follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
   },
+};
+
+const organizationSchema = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: "Viora Jewel",
+  url: SITE_URL,
+  logo: `${SITE_URL}/logo%20compressed.png`,
+  description:
+    "Viora Jewel is an Indian direct-to-consumer brand offering affordable everyday ethnic jewellery, earrings and gifting pieces mostly under ₹649, with free shipping across India and easy 48-hour exchange.",
+  address: {
+    "@type": "PostalAddress",
+    addressCountry: "IN",
+  },
+  contactPoint: {
+    "@type": "ContactPoint",
+    contactType: "customer support",
+    areaServed: "IN",
+    availableLanguage: ["English", "Hindi"],
+    url: `${SITE_URL}/contact`,
+  },
+  sameAs: [
+    "https://www.instagram.com/viorajewel",
+    "https://www.facebook.com/viorajewel",
+  ],
+};
+
+const websiteSchema = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: "Viora Jewel",
+  url: SITE_URL,
+  inLanguage: "en-IN",
+  publisher: { "@type": "Organization", name: "Viora Jewel" },
+  potentialAction: {
+    "@type": "SearchAction",
+    target: `${SITE_URL}/list?search={search_term_string}`,
+    "query-input": "required name=search_term_string",
+  },
+};
+
+const globalSchema = {
+  "@context": "https://schema.org",
+  "@graph": [organizationSchema, websiteSchema],
 };
 
 export default function RootLayout({
@@ -68,9 +130,15 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang="en-IN"
       className={`${montserrat.variable} ${cormorant.variable} w-full max-w-[100vw]`}
     >
+      <head>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(globalSchema) }}
+        />
+      </head>
       <body className={`${montserrat.className} w-full max-w-[100vw]`}>
         <SmoothScroll />
         <WixClientContextProvider>
