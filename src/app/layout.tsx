@@ -91,6 +91,10 @@ const organizationSchema = {
     "Viora Jewel is an Indian direct-to-consumer brand offering affordable everyday fashion jewellery, earrings and gifting pieces mostly under ₹649, with free shipping across India and an easy 48-hour exchange on damaged or incorrect items.",
   address: {
     "@type": "PostalAddress",
+    streetAddress: "38C B.T. Road (Kalpana Apartment), 1st Floor, Flat 1A",
+    addressLocality: "Kolkata",
+    addressRegion: "West Bengal",
+    postalCode: "700056",
     addressCountry: "IN",
   },
   contactPoint: {

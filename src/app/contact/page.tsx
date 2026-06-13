@@ -292,6 +292,20 @@ const ContactPage = () => {
               </a>
             </div>
 
+            {/* Registered Address */}
+            <div className="bg-silver-light rounded-lg p-6">
+              <h3 className="font-playfair font-bold text-primary mb-4">Registered Address</h3>
+              <address className="not-italic text-sm text-gray-700 leading-relaxed">
+                <strong className="text-primary">Viora Jewel</strong>
+                <br />
+                38C B.T. Road (Kalpana Apartment), 1st Floor, Flat 1A
+                <br />
+                Kolkata &ndash; 700056
+                <br />
+                West Bengal, India
+              </address>
+            </div>
+
             {/* Business Hours */}
             <div className="bg-silver-light rounded-lg p-6">
               <h3 className="font-playfair font-bold text-primary mb-4">Business Hours</h3>
