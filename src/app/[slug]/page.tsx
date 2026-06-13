@@ -11,8 +11,16 @@ import { Suspense } from "react";
 
 // Canonical site origin — kept in sync with sitemap.ts / robots.ts.
 const BASE_URL = (
-  process.env.NEXT_PUBLIC_SITE_URL || "https://viorajewel.in"
+  process.env.NEXT_PUBLIC_SITE_URL || "https://www.viorajewel.in"
 ).replace(/\/$/, "");
+
+// Year-ahead ISO date used for Offer.priceValidUntil so Google stops warning
+// about missing validity windows. Refreshed on each request (page is dynamic).
+function oneYearFromNow(): string {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() + 1);
+  return d.toISOString().slice(0, 10);
+}
 
 const splitBaseAndColor = (name: string): { base: string; color: string } => {
   const idx = name.indexOf(" - ");
@@ -149,7 +157,7 @@ const SinglePage = async ({ params }: { params: { slug: string } }) => {
 
   return (
     <div className="min-h-screen bg-white">
-      {/* SEO: Product structured data for Google Rich Results */}
+      {/* SEO: Product + BreadcrumbList structured data for Google + AI Rich Results */}
       <ProductJsonLd
         name={product.name || baseName}
         description={product.description || ""}
@@ -159,7 +167,16 @@ const SinglePage = async ({ params }: { params: { slug: string } }) => {
         availability={!isOutOfStock}
         url={`${BASE_URL}/${product.slug || params.slug}`}
         sku={product.sku || product._id || undefined}
+        priceValidUntil={oneYearFromNow()}
         aggregateRating={{ ratingValue, reviewCount }}
+        breadcrumbs={[
+          { name: "Home", url: `${BASE_URL}/` },
+          { name: "Shop", url: `${BASE_URL}/list` },
+          {
+            name: baseName || product.name || "Product",
+            url: `${BASE_URL}/${product.slug || params.slug}`,
+          },
+        ]}
       />
 
       {/* Breadcrumb with Back button */}

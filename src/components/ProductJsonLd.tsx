@@ -3,18 +3,22 @@ import React from "react";
 /**
  * Reusable Product structured-data (JSON-LD) component.
  *
- * Renders a schema.org/Product graph inside a <script type="application/ld+json">
- * tag so Google can surface Rich Results (price, availability, rating) for a
- * product page. Designed to be fed data straight from the Wix Headless API.
+ * Renders a schema.org/Product graph (plus an inline BreadcrumbList when
+ * breadcrumb data is supplied) inside <script type="application/ld+json">
+ * tags so Google and AI search engines (ChatGPT Search, Perplexity, Gemini)
+ * can surface and cite specific products with price, availability, shipping
+ * and return policy.
  *
- * Google Product snippet requirements covered here:
- *  - `name` (required)
- *  - `image` (recommended — array of absolute URLs)
- *  - `offers` with `price`, `priceCurrency`, `availability` and `url`
- *  - optional `aggregateRating` / `sku` / `brand` for richer results
+ * Brand-wide constants (shipping + return policy) are baked in because they
+ * apply identically to every product. Per-product variables stay as props.
  *
  * Reference: https://developers.google.com/search/docs/appearance/structured-data/product
  */
+
+export interface BreadcrumbItem {
+  name: string;
+  url: string;
+}
 
 export interface ProductJsonLdProps {
   /** Product display name. */
@@ -36,15 +40,19 @@ export interface ProductJsonLdProps {
   url: string;
   /** Optional SKU / stock keeping unit. */
   sku?: string;
-  /** Brand name. Defaults to "Viora Jewels". */
+  /** Brand name. Defaults to "Viora Jewel" (singular — matches Organization entity). */
   brand?: string;
-  /** ISO date (YYYY-MM-DD) until which the price is valid. Recommended by Google. */
+  /** ISO date (YYYY-MM-DD) until which the price is valid. */
   priceValidUntil?: string;
+  /** Optional product category, e.g. "Necklace Set". */
+  category?: string;
   /** Optional aggregate rating. Omitted entirely when there are no reviews. */
   aggregateRating?: {
     ratingValue: number;
     reviewCount: number;
   };
+  /** Optional breadcrumbs. When provided, emits a BreadcrumbList graph. */
+  breadcrumbs?: BreadcrumbItem[];
 }
 
 /** Strip HTML tags and collapse whitespace so descriptions are valid plain text. */
@@ -82,6 +90,50 @@ function safeJsonLd(data: unknown): string {
     .replace(/&/g, "\\u0026");
 }
 
+// Brand-wide shipping policy. Free, pan-India, 1–2 day processing + 5–7 day
+// transit (mirrors /shipping-policy). Applied to every product offer.
+const VIORA_SHIPPING_DETAILS = {
+  "@type": "OfferShippingDetails",
+  shippingRate: {
+    "@type": "MonetaryAmount",
+    value: "0",
+    currency: "INR",
+  },
+  shippingDestination: {
+    "@type": "DefinedRegion",
+    addressCountry: "IN",
+  },
+  deliveryTime: {
+    "@type": "ShippingDeliveryTime",
+    handlingTime: {
+      "@type": "QuantitativeValue",
+      minValue: 1,
+      maxValue: 2,
+      unitCode: "DAY",
+    },
+    transitTime: {
+      "@type": "QuantitativeValue",
+      minValue: 5,
+      maxValue: 7,
+      unitCode: "DAY",
+    },
+  },
+};
+
+// Brand-wide return policy. 48-hour exchange window for damaged/incorrect
+// items; we issue exchanges (or 12-month store credit), not refunds — modelled
+// as ExchangeRefund. Mirrors /exchange-policy.
+const VIORA_RETURN_POLICY = {
+  "@type": "MerchantReturnPolicy",
+  applicableCountry: "IN",
+  returnPolicyCountry: "IN",
+  returnPolicyCategory: "https://schema.org/MerchantReturnFiniteReturnWindow",
+  merchantReturnDays: 2,
+  returnMethod: "https://schema.org/ReturnByMail",
+  returnFees: "https://schema.org/FreeReturn",
+  refundType: "https://schema.org/ExchangeRefund",
+};
+
 export default function ProductJsonLd({
   name,
   description,
@@ -91,9 +143,11 @@ export default function ProductJsonLd({
   availability,
   url,
   sku,
-  brand = "Viora Jewels",
+  brand = "Viora Jewel",
   priceValidUntil,
+  category,
   aggregateRating,
+  breadcrumbs,
 }: ProductJsonLdProps) {
   // Normalise the price to a plain numeric string (schema.org expects no symbol).
   const priceString =
@@ -111,10 +165,12 @@ export default function ProductJsonLd({
     availability: toSchemaAvailability(availability),
     url,
     itemCondition: "https://schema.org/NewCondition",
+    shippingDetails: VIORA_SHIPPING_DETAILS,
+    hasMerchantReturnPolicy: VIORA_RETURN_POLICY,
   };
   if (priceValidUntil) offer.priceValidUntil = priceValidUntil;
 
-  const jsonLd: Record<string, unknown> = {
+  const productJsonLd: Record<string, unknown> = {
     "@context": "https://schema.org",
     "@type": "Product",
     name,
@@ -126,9 +182,13 @@ export default function ProductJsonLd({
     offers: offer,
   };
 
-  if (imageList.length > 0) jsonLd.image = imageList;
-  if (description) jsonLd.description = toPlainText(description);
-  if (sku) jsonLd.sku = sku;
+  if (imageList.length > 0) productJsonLd.image = imageList;
+  if (description) productJsonLd.description = toPlainText(description);
+  if (sku) {
+    productJsonLd.sku = sku;
+    productJsonLd.mpn = sku;
+  }
+  if (category) productJsonLd.category = category;
 
   // Only emit aggregateRating when there is at least one review with a valid
   // value — Google flags ratings of 0 or empty review counts as invalid.
@@ -137,7 +197,7 @@ export default function ProductJsonLd({
     aggregateRating.reviewCount > 0 &&
     aggregateRating.ratingValue > 0
   ) {
-    jsonLd.aggregateRating = {
+    productJsonLd.aggregateRating = {
       "@type": "AggregateRating",
       ratingValue: Number(aggregateRating.ratingValue.toFixed(1)),
       reviewCount: aggregateRating.reviewCount,
@@ -146,11 +206,34 @@ export default function ProductJsonLd({
     };
   }
 
+  const breadcrumbJsonLd =
+    breadcrumbs && breadcrumbs.length > 0
+      ? {
+          "@context": "https://schema.org",
+          "@type": "BreadcrumbList",
+          itemListElement: breadcrumbs.map((b, i) => ({
+            "@type": "ListItem",
+            position: i + 1,
+            name: b.name,
+            item: b.url,
+          })),
+        }
+      : null;
+
   return (
-    <script
-      type="application/ld+json"
-      // eslint-disable-next-line react/no-danger
-      dangerouslySetInnerHTML={{ __html: safeJsonLd(jsonLd) }}
-    />
+    <>
+      <script
+        type="application/ld+json"
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{ __html: safeJsonLd(productJsonLd) }}
+      />
+      {breadcrumbJsonLd && (
+        <script
+          type="application/ld+json"
+          // eslint-disable-next-line react/no-danger
+          dangerouslySetInnerHTML={{ __html: safeJsonLd(breadcrumbJsonLd) }}
+        />
+      )}
+    </>
   );
 }
