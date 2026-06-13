@@ -57,15 +57,24 @@ export const metadata: Metadata = {
     siteName: "Viora Jewel",
     title: "Viora Jewel — Everyday Jewellery & Gifts",
     description:
-      "Affordable Indian ethnic jewellery, earrings & gifts under ₹649. Free shipping across India. Easy 48-hour exchange.",
+      "Affordable Indian fashion jewellery, earrings & gifts under ₹649. Free shipping across India. Easy 48-hour exchange.",
     url: SITE_URL,
     locale: "en_IN",
+    images: [
+      {
+        url: "/banner-optimized.jpg",
+        width: 1200,
+        height: 630,
+        alt: "Viora Jewel — Indian fashion jewellery sets, earrings and gifts",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "Viora Jewel — Everyday Jewellery & Gifts",
     description:
-      "Affordable Indian ethnic jewellery, earrings & gifts under ₹649. Free shipping. Easy 48-hour exchange.",
+      "Affordable Indian fashion jewellery, earrings & gifts under ₹649. Free shipping. Easy 48-hour exchange.",
+    images: ["/banner-optimized.jpg"],
   },
   robots: {
     index: true,

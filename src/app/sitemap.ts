@@ -49,6 +49,16 @@ async function getProductEntries(): Promise<MetadataRoute.Sitemap> {
         // Only index active/visible products that have a usable slug.
         if (product.visible === false || !product.slug) continue;
 
+        // Collect product image URLs for the image sitemap extension. AI image
+        // search (Gemini Vision, ChatGPT Vision) prefers products whose images
+        // are explicitly enumerated alongside the page URL.
+        const productImages = (product.media?.items
+          ?.map((m) => m.image?.url)
+          .filter((u): u is string => Boolean(u)) ?? []);
+        if (productImages.length === 0 && product.media?.mainMedia?.image?.url) {
+          productImages.push(product.media.mainMedia.image.url);
+        }
+
         entries.push({
           url: `${BASE_URL}/${product.slug}`,
           lastModified: product.lastUpdated
@@ -56,6 +66,7 @@ async function getProductEntries(): Promise<MetadataRoute.Sitemap> {
             : new Date(),
           changeFrequency: "weekly",
           priority: 0.7,
+          ...(productImages.length > 0 ? { images: productImages } : {}),
         });
       }
 
