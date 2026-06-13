@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { getAllJournalPosts } from "@/lib/journal";
 
@@ -56,15 +57,25 @@ export default function JournalIndexPage() {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(collectionSchema) }}
       />
 
-      <section className="bg-primary text-white">
-        <div className="max-w-5xl mx-auto px-4 md:px-8 py-16 md:py-24 text-center">
-          <p className="text-xs uppercase tracking-[0.25em] text-white/60 mb-3">
+      <section className="relative overflow-hidden text-white">
+        <Image
+          src="/gsdjgds.png"
+          alt="Rose-gold pendant and earring set on blush satin"
+          fill
+          priority
+          sizes="100vw"
+          quality={75}
+          className="object-cover object-center"
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-primary/70 via-primary/50 to-primary/80" />
+        <div className="relative max-w-5xl mx-auto px-4 md:px-8 py-20 md:py-32 text-center">
+          <p className="text-xs uppercase tracking-[0.25em] text-white/80 mb-3">
             The Viora Journal
           </p>
-          <h1 className="font-playfair text-4xl md:text-6xl font-bold leading-tight">
+          <h1 className="font-playfair text-4xl md:text-6xl font-bold leading-tight drop-shadow-sm">
             Jewellery, demystified.
           </h1>
-          <p className="mt-5 max-w-2xl mx-auto text-white/75 text-base md:text-lg">
+          <p className="mt-5 max-w-2xl mx-auto text-white/90 text-base md:text-lg drop-shadow-sm">
             Honest guides on Indian fashion jewellery — care, styling, materials,
             and the small decisions that make a piece last longer.
           </p>
