@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import ProductView from "@/components/ProductView";
 import { wixClientServer } from "@/lib/wixClientServer";
 import { fetchProductReviews } from "@/lib/reviewsActions";
@@ -30,6 +31,93 @@ const splitBaseAndColor = (name: string): { base: string; color: string } => {
     color: name.slice(idx + 3).trim(),
   };
 };
+
+function descriptionToPlainText(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Per-product Open Graph + Twitter metadata so each product URL renders its
+ * own preview (product photo + product name + product description) when
+ * shared on Instagram, WhatsApp, Facebook, X, LinkedIn, etc. Without this,
+ * every product link inherits the global homepage banner — which the
+ * marketing team reported as broken-looking previews on Instagram.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: { slug: string };
+}): Promise<Metadata> {
+  try {
+    const wixClient = await wixClientServer();
+    const products = await wixClient.products
+      .queryProducts()
+      .eq("slug", params.slug)
+      .find();
+    const product = products.items[0];
+    if (!product) {
+      return { title: "Product not found" };
+    }
+
+    const name = (product.name || "Viora Jewel piece").trim();
+    const baseName = splitBaseAndColor(name).base || name;
+    const url = `${BASE_URL}/${product.slug || params.slug}`;
+
+    const rawDescription = product.description
+      ? descriptionToPlainText(product.description)
+      : "";
+    const description =
+      rawDescription.length > 30
+        ? rawDescription.slice(0, 160)
+        : `${baseName} from Viora Jewel — affordable Indian fashion jewellery with free shipping across India and an easy 48-hour exchange on damaged or incorrect items.`;
+
+    const ogImage =
+      product.media?.mainMedia?.image?.url ||
+      product.media?.items?.[0]?.image?.url;
+
+    return {
+      title: name,
+      description,
+      alternates: { canonical: `/${product.slug || params.slug}` },
+      openGraph: {
+        type: "website",
+        title: `${name} | Viora Jewel`,
+        description,
+        url,
+        siteName: "Viora Jewel",
+        locale: "en_IN",
+        ...(ogImage
+          ? {
+              images: [
+                {
+                  url: ogImage,
+                  alt: name,
+                },
+              ],
+            }
+          : {}),
+      },
+      twitter: {
+        card: "summary_large_image",
+        title: `${name} | Viora Jewel`,
+        description,
+        ...(ogImage ? { images: [ogImage] } : {}),
+      },
+    };
+  } catch (err) {
+    console.error("[product metadata] failed:", err);
+    return {};
+  }
+}
 
 const SinglePage = async ({ params }: { params: { slug: string } }) => {
   const wixClient = await wixClientServer();
