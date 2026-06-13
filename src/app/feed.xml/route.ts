@@ -25,6 +25,63 @@ const SITE_URL = (
   process.env.NEXT_PUBLIC_SITE_URL || "https://www.viorajewel.in"
 ).replace(/\/$/, "");
 
+// Ultimate fallback image for products with no usable media in Wix. Using the
+// brand logo keeps the item in the feed instead of dropping it — Google would
+// rather review a placeholder than miss the product entirely.
+const FALLBACK_IMAGE = `${SITE_URL}/logo%20compressed.png`;
+
+/**
+ * Wix Stores stores product media in several possible shapes depending on how
+ * the product was uploaded (single image, gallery, video-first, variant-only).
+ * Try every known path before giving up so we don't silently drop products
+ * that actually have images.
+ */
+function extractProductImages(product: any): {
+  main: string | undefined;
+  additional: string[];
+} {
+  const candidates: string[] = [];
+
+  // media.mainMedia — primary
+  const mm = product?.media?.mainMedia;
+  if (mm?.image?.url) candidates.push(mm.image.url);
+  if (mm?.thumbnail?.url) candidates.push(mm.thumbnail.url);
+  if (mm?.video?.posters?.[0]?.url) candidates.push(mm.video.posters[0].url);
+
+  // media.items[] — gallery
+  const items = product?.media?.items;
+  if (Array.isArray(items)) {
+    for (const it of items) {
+      if (it?.image?.url) candidates.push(it.image.url);
+      else if (it?.thumbnail?.url) candidates.push(it.thumbnail.url);
+      else if (it?.video?.posters?.[0]?.url)
+        candidates.push(it.video.posters[0].url);
+    }
+  }
+
+  // Variant images (some catalogs store images per variant only)
+  const variants = product?.variants;
+  if (Array.isArray(variants)) {
+    for (const v of variants) {
+      if (v?.media?.mainMedia?.image?.url)
+        candidates.push(v.media.mainMedia.image.url);
+    }
+  }
+
+  // Dedupe while preserving order.
+  const seen = new Set<string>();
+  const unique = candidates.filter((u) => {
+    if (!u || seen.has(u)) return false;
+    seen.add(u);
+    return true;
+  });
+
+  return {
+    main: unique[0],
+    additional: unique.slice(1, 11),
+  };
+}
+
 function escapeXml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -52,22 +109,54 @@ export async function GET() {
     const wixClient = await wixClientServer();
     const itemNodes: string[] = [];
 
+    // Diagnostic counters surface in Vercel logs so we know exactly why a
+    // product is being dropped from the feed.
+    const stats = {
+      totalSeen: 0,
+      keptWithImage: 0,
+      keptWithFallback: 0,
+      skippedHidden: 0,
+      skippedNoSlug: 0,
+      skippedNoId: 0,
+    };
+
     let query = await wixClient.products.queryProducts().limit(100).find();
 
     while (true) {
       for (const p of query.items) {
-        if (p.visible === false || !p.slug) continue;
+        stats.totalSeen += 1;
+
+        if (p.visible === false) {
+          stats.skippedHidden += 1;
+          continue;
+        }
+        if (!p.slug) {
+          stats.skippedNoSlug += 1;
+          console.warn(`[feed.xml] skipping product with no slug: ${p._id}`);
+          continue;
+        }
 
         const id = p.sku || p._id;
-        if (!id) continue;
+        if (!id) {
+          stats.skippedNoId += 1;
+          continue;
+        }
 
         const name = (p.name || "").trim() || "Viora Jewel piece";
         const link = `${SITE_URL}/${p.slug}`;
 
-        // Primary image — Google rejects items without a usable image.
-        const mainImage =
-          p.media?.mainMedia?.image?.url || p.media?.items?.[0]?.image?.url;
-        if (!mainImage) continue;
+        // Robust multi-path image lookup; fall back to brand logo if Wix
+        // returns no usable media at all (keeps the product in the feed
+        // rather than silently dropping it).
+        const { main, additional } = extractProductImages(p);
+        const mainImage = main ?? FALLBACK_IMAGE;
+        if (main) stats.keptWithImage += 1;
+        else {
+          stats.keptWithFallback += 1;
+          console.warn(
+            `[feed.xml] no media found for ${p.slug} (${p._id}) — using fallback`
+          );
+        }
 
         // Build description — strip HTML, fall back to a sane default.
         const rawDescription = p.description ? toPlainText(p.description) : "";
@@ -90,15 +179,7 @@ export async function GET() {
             (p.stock?.quantity ?? 1) < 1
           );
 
-        // Additional images (up to 10 per Google's spec).
-        const additionalImages = (p.media?.items || [])
-          .map((m) => m.image?.url)
-          .filter(
-            (u): u is string => Boolean(u) && u !== mainImage
-          )
-          .slice(0, 10);
-
-        const additionalImageNodes = additionalImages
+        const additionalImageNodes = additional
           .map(
             (u) =>
               `      <g:additional_image_link>${escapeXml(u)}</g:additional_image_link>`
@@ -149,6 +230,8 @@ export async function GET() {
       if (!query.hasNext()) break;
       query = await query.next();
     }
+
+    console.log("[feed.xml] generation stats:", stats, "items emitted:", itemNodes.length);
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss xmlns:g="http://base.google.com/ns/1.0" version="2.0">
