@@ -59,8 +59,8 @@ export default function JournalIndexPage() {
 
       <section className="relative overflow-hidden text-white">
         <Image
-          src="/gsdjgds.png"
-          alt="Rose-gold pendant and earring set on blush satin"
+          src="/journal-hero-rose-tone-set.png"
+          alt="Rose-tone fashion jewellery pendant and earring set styled on blush satin"
           fill
           priority
           sizes="100vw"
