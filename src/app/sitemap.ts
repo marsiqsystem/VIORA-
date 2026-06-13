@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { wixClientServer } from "@/lib/wixClientServer";
+import { getAllJournalPosts } from "@/lib/journal";
 
 // Regenerate the sitemap at most once per hour so newly published products
 // get picked up without rebuilding the whole site.
@@ -26,6 +27,7 @@ const STATIC_ROUTES: {
   { path: "/gift-packaging", changeFrequency: "weekly", priority: 0.6 },
   { path: "/about", changeFrequency: "monthly", priority: 0.5 },
   { path: "/contact", changeFrequency: "monthly", priority: 0.5 },
+  { path: "/journal", changeFrequency: "weekly", priority: 0.7 },
   { path: "/shipping-policy", changeFrequency: "yearly", priority: 0.3 },
   { path: "/exchange-policy", changeFrequency: "yearly", priority: 0.3 },
   { path: "/privacy-policy", changeFrequency: "yearly", priority: 0.3 },
@@ -82,5 +84,14 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   const productEntries = await getProductEntries();
 
-  return [...staticEntries, ...productEntries];
+  const journalEntries: MetadataRoute.Sitemap = getAllJournalPosts().map(
+    (post) => ({
+      url: `${BASE_URL}/journal/${post.slug}`,
+      lastModified: new Date(post.updatedAt || post.publishedAt),
+      changeFrequency: "monthly",
+      priority: 0.6,
+    })
+  );
+
+  return [...staticEntries, ...productEntries, ...journalEntries];
 }

@@ -165,6 +165,7 @@ const Footer = () => {
             <h4 className="mb-5 font-playfair text-lg font-semibold text-white">Company</h4>
             <ul className="space-y-3 text-sm text-white/65">
               <li><Link href="/about" className="hover:text-white">About Us</Link></li>
+              <li><Link href="/journal" className="hover:text-white">Journal</Link></li>
               <li><Link href="/contact" className="hover:text-white">Contact</Link></li>
               <li><Link href="/privacy-policy" className="hover:text-white">Privacy Policy</Link></li>
               <li><Link href="/terms-and-conditions" className="hover:text-white">Terms &amp; Conditions</Link></li>
