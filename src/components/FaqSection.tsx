@@ -8,7 +8,7 @@ const FAQS: Faq[] = [
   {
     question: "What is Viora Jewel?",
     answer:
-      "Viora Jewel is an Indian direct-to-consumer brand offering curated everyday fashion jewellery — sets, earrings, necklaces and rings designed for daily wear, gifting, weddings, receptions and office occasions, with most pieces priced under ₹649.",
+      "Viora Jewel is an Indian fashion jewellery brand offering premium-quality, affordable jewellery for women. Our collections include elegant necklace sets, earrings, rings, bracelets and accessories designed for everyday wear, weddings, parties, festive occasions, office wear and thoughtful gifting. We combine timeless designs, quality craftsmanship and accessible pricing to help every woman elevate her style without overspending.",
   },
   {
     question: "Is Viora Jewel jewellery real gold or gold-plated?",
