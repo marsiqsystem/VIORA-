@@ -3,8 +3,11 @@ import { Montserrat, Cormorant_Garamond } from "next/font/google";
 import "lenis/dist/lenis.css";
 import "./globals.css";
 import dynamic from "next/dynamic";
+import Script from "next/script";
 import Navbar from "@/components/Navbar";
 import SmoothScroll from "@/components/SmoothScroll";
+
+const GTAG_ID = "GT-T8ZJVVT9";
 
 // Below-the-fold / non-critical → defer JS to shrink the initial bundle.
 const Footer = dynamic(() => import("@/components/Footer"));
@@ -168,6 +171,18 @@ export default function RootLayout({
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(globalSchema) }}
         />
+        <Script
+          src={`https://www.googletagmanager.com/gtag/js?id=${GTAG_ID}`}
+          strategy="afterInteractive"
+        />
+        <Script id="gtag-init" strategy="afterInteractive">
+          {`
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+            gtag('config', '${GTAG_ID}');
+          `}
+        </Script>
       </head>
       <body className={`${montserrat.className} w-full max-w-[100vw]`}>
         <SmoothScroll />
