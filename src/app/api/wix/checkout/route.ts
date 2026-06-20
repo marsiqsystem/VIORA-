@@ -7,6 +7,7 @@ type CheckoutAddressPayload = {
   fullName: string;
   phone: string;
   addressLine1: string;
+  addressLine2?: string;
   city: string;
   state: string;
   postalCode: string;
@@ -120,6 +121,7 @@ export async function POST(req: Request) {
     const fullName = normalizeText(details?.fullName);
     const phone = normalizeText(details?.phone);
     const addressLine1 = normalizeText(details?.addressLine1);
+    const addressLine2 = normalizeText(details?.addressLine2);
     const city = normalizeText(details?.city);
     const state = normalizeText(details?.state);
     const postalCode = normalizeText(details?.postalCode);
@@ -139,6 +141,7 @@ export async function POST(req: Request) {
     const address = {
       country: "IN",
       addressLine1,
+      ...(addressLine2 ? { addressLine2 } : {}),
       city,
       subdivision: normalizeIndiaSubdivision(state),
       postalCode,

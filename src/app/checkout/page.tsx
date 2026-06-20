@@ -13,17 +13,64 @@ import BackButton from "@/components/BackButton";
 type AddressForm = {
   fullName: string;
   phone: string;
-  address: string;
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  subdivision: string;
+  postalCode: string;
 };
 
 type BillingForm = AddressForm & {
   email: string;
 };
 
+const INDIAN_SUBDIVISIONS: { code: string; name: string }[] = [
+  { code: "IN-AN", name: "Andaman and Nicobar Islands" },
+  { code: "IN-AP", name: "Andhra Pradesh" },
+  { code: "IN-AR", name: "Arunachal Pradesh" },
+  { code: "IN-AS", name: "Assam" },
+  { code: "IN-BR", name: "Bihar" },
+  { code: "IN-CH", name: "Chandigarh" },
+  { code: "IN-CT", name: "Chhattisgarh" },
+  { code: "IN-DH", name: "Dadra and Nagar Haveli and Daman and Diu" },
+  { code: "IN-DL", name: "Delhi" },
+  { code: "IN-GA", name: "Goa" },
+  { code: "IN-GJ", name: "Gujarat" },
+  { code: "IN-HR", name: "Haryana" },
+  { code: "IN-HP", name: "Himachal Pradesh" },
+  { code: "IN-JK", name: "Jammu and Kashmir" },
+  { code: "IN-JH", name: "Jharkhand" },
+  { code: "IN-KA", name: "Karnataka" },
+  { code: "IN-KL", name: "Kerala" },
+  { code: "IN-LA", name: "Ladakh" },
+  { code: "IN-LD", name: "Lakshadweep" },
+  { code: "IN-MP", name: "Madhya Pradesh" },
+  { code: "IN-MH", name: "Maharashtra" },
+  { code: "IN-MN", name: "Manipur" },
+  { code: "IN-ML", name: "Meghalaya" },
+  { code: "IN-MZ", name: "Mizoram" },
+  { code: "IN-NL", name: "Nagaland" },
+  { code: "IN-OR", name: "Odisha" },
+  { code: "IN-PY", name: "Puducherry" },
+  { code: "IN-PB", name: "Punjab" },
+  { code: "IN-RJ", name: "Rajasthan" },
+  { code: "IN-SK", name: "Sikkim" },
+  { code: "IN-TN", name: "Tamil Nadu" },
+  { code: "IN-TG", name: "Telangana" },
+  { code: "IN-TR", name: "Tripura" },
+  { code: "IN-UP", name: "Uttar Pradesh" },
+  { code: "IN-UT", name: "Uttarakhand" },
+  { code: "IN-WB", name: "West Bengal" },
+];
+
 const emptyAddress: AddressForm = {
   fullName: "",
   phone: "",
-  address: "",
+  addressLine1: "",
+  addressLine2: "",
+  city: "",
+  subdivision: "",
+  postalCode: "",
 };
 
 const emptyBilling: BillingForm = {
@@ -39,13 +86,19 @@ const splitName = (fullName: string) => {
   };
 };
 
+const normalizePhone = (raw: string) => raw.replace(/\D/g, "").slice(-10);
+
 const toWixAddressWithContact = (form: AddressForm) => {
   const name = splitName(form.fullName);
 
   return {
     address: {
       country: "IN",
-      addressLine1: form.address.trim(),
+      addressLine1: form.addressLine1.trim(),
+      addressLine2: form.addressLine2.trim() || undefined,
+      city: form.city.trim(),
+      subdivision: form.subdivision,
+      postalCode: form.postalCode.trim(),
     },
     contactDetails: {
       firstName: name.firstName,
@@ -113,6 +166,8 @@ const CheckoutPage = () => {
     setAlternateShipping((prev) => ({ ...prev, [field]: value }));
   };
 
+  const validatePhone = (raw: string) => normalizePhone(raw).length === 10;
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
@@ -127,6 +182,15 @@ const CheckoutPage = () => {
       : shipDifferent
         ? alternateShipping
         : billing;
+
+    if (!validatePhone(billing.phone)) {
+      setError("Please enter a valid 10-digit phone number for the buyer.");
+      return;
+    }
+    if ((isGiftOrder || shipDifferent) && !validatePhone(shippingForm.phone)) {
+      setError("Please enter a valid 10-digit recipient phone number.");
+      return;
+    }
 
     setSubmitting(true);
 
@@ -267,6 +331,88 @@ const CheckoutPage = () => {
     );
   }
 
+  const renderAddressFields = (
+    form: AddressForm,
+    update: (field: keyof AddressForm, value: string) => void,
+    opts: { variant?: "default" | "gift" } = {}
+  ) => {
+    const inputBg = opts.variant === "gift" ? "input bg-white" : "input";
+    return (
+      <>
+        <label className="block md:col-span-2">
+          <span className="mb-2 block text-sm font-medium text-gray-700">
+            Address Line 1
+          </span>
+          <input
+            required
+            maxLength={120}
+            value={form.addressLine1}
+            onChange={(e) => update("addressLine1", e.target.value)}
+            className={inputBg}
+            placeholder="House number, building, street"
+          />
+        </label>
+        <label className="block md:col-span-2">
+          <span className="mb-2 block text-sm font-medium text-gray-700">
+            Address Line 2 <span className="text-xs text-gray-400">(optional)</span>
+          </span>
+          <input
+            maxLength={120}
+            value={form.addressLine2}
+            onChange={(e) => update("addressLine2", e.target.value)}
+            className={inputBg}
+            placeholder="Landmark, area, locality"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-2 block text-sm font-medium text-gray-700">
+            City
+          </span>
+          <input
+            required
+            maxLength={50}
+            value={form.city}
+            onChange={(e) => update("city", e.target.value)}
+            className={inputBg}
+            placeholder="City"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-2 block text-sm font-medium text-gray-700">
+            State
+          </span>
+          <select
+            required
+            value={form.subdivision}
+            onChange={(e) => update("subdivision", e.target.value)}
+            className={inputBg}
+          >
+            <option value="">Select state</option>
+            {INDIAN_SUBDIVISIONS.map((s) => (
+              <option key={s.code} value={s.code}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-2 block text-sm font-medium text-gray-700">
+            PIN Code
+          </span>
+          <input
+            required
+            maxLength={10}
+            inputMode="numeric"
+            value={form.postalCode}
+            onChange={(e) => update("postalCode", e.target.value)}
+            className={inputBg}
+            placeholder="6-digit PIN"
+          />
+        </label>
+      </>
+    );
+  };
+
   return (
     <main className="min-h-[calc(100vh-180px)] bg-platinum px-4 py-10 md:px-8 lg:px-16 xl:px-32">
       <form
@@ -298,6 +444,7 @@ const CheckoutPage = () => {
                 </span>
                 <input
                   required
+                  maxLength={100}
                   value={billing.fullName}
                   onChange={(e) => updateBilling("fullName", e.target.value)}
                   className="input"
@@ -310,10 +457,17 @@ const CheckoutPage = () => {
                 </span>
                 <input
                   required
+                  type="tel"
+                  inputMode="numeric"
+                  pattern="[0-9]{10}"
+                  maxLength={10}
                   value={billing.phone}
-                  onChange={(e) => updateBilling("phone", e.target.value)}
+                  onChange={(e) =>
+                    updateBilling("phone", e.target.value.replace(/\D/g, ""))
+                  }
                   className="input"
-                  placeholder="+91 9876543210"
+                  placeholder="10-digit mobile number"
+                  title="Enter a 10-digit mobile number"
                 />
               </label>
               <label className="block md:col-span-2">
@@ -323,25 +477,16 @@ const CheckoutPage = () => {
                 <input
                   required
                   type="email"
+                  maxLength={120}
                   value={billing.email}
                   onChange={(e) => updateBilling("email", e.target.value)}
                   className="input"
                   placeholder="john@example.com"
                 />
               </label>
-              <label className="block md:col-span-2">
-                <span className="mb-2 block text-sm font-medium text-gray-700">
-                  Billing Address
-                </span>
-                <textarea
-                  required
-                  rows={3}
-                  value={billing.address}
-                  onChange={(e) => updateBilling("address", e.target.value)}
-                  className="input resize-none"
-                  placeholder="House number, street, city, state and PIN code"
-                />
-              </label>
+              {renderAddressFields(billing, (field, value) =>
+                updateBilling(field as keyof BillingForm, value)
+              )}
             </div>
           </section>
 
@@ -364,6 +509,7 @@ const CheckoutPage = () => {
                   </span>
                   <input
                     required
+                    maxLength={100}
                     value={giftShipping.fullName}
                     onChange={(e) =>
                       updateGiftShipping("fullName", e.target.value)
@@ -378,32 +524,25 @@ const CheckoutPage = () => {
                   </span>
                   <input
                     required
+                    type="tel"
+                    inputMode="numeric"
+                    pattern="[0-9]{10}"
+                    maxLength={10}
                     value={giftShipping.phone}
                     onChange={(e) =>
-                      updateGiftShipping("phone", e.target.value)
+                      updateGiftShipping("phone", e.target.value.replace(/\D/g, ""))
                     }
                     className="input bg-white"
-                    placeholder="+91 9876543210"
+                    placeholder="10-digit mobile number"
+                    title="Enter a 10-digit mobile number"
                   />
                   <span className="mt-1 block text-xs text-gray-500">
                     Crucial for delivery updates and courier coordination.
                   </span>
                 </label>
-                <label className="block md:col-span-2">
-                  <span className="mb-2 block text-sm font-medium text-gray-700">
-                    Full Shipping Address
-                  </span>
-                  <textarea
-                    required
-                    rows={4}
-                    value={giftShipping.address}
-                    onChange={(e) =>
-                      updateGiftShipping("address", e.target.value)
-                    }
-                    className="input resize-none bg-white"
-                    placeholder="Recipient house number, street, city, state and PIN code"
-                  />
-                </label>
+                {renderAddressFields(giftShipping, updateGiftShipping, {
+                  variant: "gift",
+                })}
               </div>
             </section>
           ) : (
@@ -439,6 +578,7 @@ const CheckoutPage = () => {
                     </span>
                     <input
                       required
+                      maxLength={100}
                       value={alternateShipping.fullName}
                       onChange={(e) =>
                         updateAlternateShipping("fullName", e.target.value)
@@ -453,29 +593,23 @@ const CheckoutPage = () => {
                     </span>
                     <input
                       required
+                      type="tel"
+                      inputMode="numeric"
+                      pattern="[0-9]{10}"
+                      maxLength={10}
                       value={alternateShipping.phone}
                       onChange={(e) =>
-                        updateAlternateShipping("phone", e.target.value)
+                        updateAlternateShipping(
+                          "phone",
+                          e.target.value.replace(/\D/g, "")
+                        )
                       }
                       className="input"
-                      placeholder="+91 9876543210"
+                      placeholder="10-digit mobile number"
+                      title="Enter a 10-digit mobile number"
                     />
                   </label>
-                  <label className="block md:col-span-2">
-                    <span className="mb-2 block text-sm font-medium text-gray-700">
-                      Shipping Address
-                    </span>
-                    <textarea
-                      required
-                      rows={4}
-                      value={alternateShipping.address}
-                      onChange={(e) =>
-                        updateAlternateShipping("address", e.target.value)
-                      }
-                      className="input resize-none"
-                      placeholder="House number, street, city, state and PIN code"
-                    />
-                  </label>
+                  {renderAddressFields(alternateShipping, updateAlternateShipping)}
                 </div>
               )}
             </section>

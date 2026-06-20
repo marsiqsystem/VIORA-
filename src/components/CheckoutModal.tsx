@@ -22,6 +22,50 @@ interface CheckoutModalProps {
 }
 
 const PREPAID_DISCOUNT = 50;
+const CLUB_VIORA_CODE = "CLUBVIORA";
+const CLUB_VIORA_MINIMUM = 999;
+const SHINE_50_CODE = "SHINE50";
+const SHINE_50_MINIMUM = 700;
+const SHINE_50_DISCOUNT = 50;
+
+const INDIAN_SUBDIVISIONS: { code: string; name: string }[] = [
+  { code: "IN-AN", name: "Andaman and Nicobar Islands" },
+  { code: "IN-AP", name: "Andhra Pradesh" },
+  { code: "IN-AR", name: "Arunachal Pradesh" },
+  { code: "IN-AS", name: "Assam" },
+  { code: "IN-BR", name: "Bihar" },
+  { code: "IN-CH", name: "Chandigarh" },
+  { code: "IN-CT", name: "Chhattisgarh" },
+  { code: "IN-DH", name: "Dadra and Nagar Haveli and Daman and Diu" },
+  { code: "IN-DL", name: "Delhi" },
+  { code: "IN-GA", name: "Goa" },
+  { code: "IN-GJ", name: "Gujarat" },
+  { code: "IN-HR", name: "Haryana" },
+  { code: "IN-HP", name: "Himachal Pradesh" },
+  { code: "IN-JK", name: "Jammu and Kashmir" },
+  { code: "IN-JH", name: "Jharkhand" },
+  { code: "IN-KA", name: "Karnataka" },
+  { code: "IN-KL", name: "Kerala" },
+  { code: "IN-LA", name: "Ladakh" },
+  { code: "IN-LD", name: "Lakshadweep" },
+  { code: "IN-MP", name: "Madhya Pradesh" },
+  { code: "IN-MH", name: "Maharashtra" },
+  { code: "IN-MN", name: "Manipur" },
+  { code: "IN-ML", name: "Meghalaya" },
+  { code: "IN-MZ", name: "Mizoram" },
+  { code: "IN-NL", name: "Nagaland" },
+  { code: "IN-OR", name: "Odisha" },
+  { code: "IN-PY", name: "Puducherry" },
+  { code: "IN-PB", name: "Punjab" },
+  { code: "IN-RJ", name: "Rajasthan" },
+  { code: "IN-SK", name: "Sikkim" },
+  { code: "IN-TN", name: "Tamil Nadu" },
+  { code: "IN-TG", name: "Telangana" },
+  { code: "IN-TR", name: "Tripura" },
+  { code: "IN-UP", name: "Uttar Pradesh" },
+  { code: "IN-UT", name: "Uttarakhand" },
+  { code: "IN-WB", name: "West Bengal" },
+];
 
 const loadRazorpayScript = (): Promise<boolean> =>
   new Promise((resolve) => {
@@ -38,7 +82,15 @@ const loadRazorpayScript = (): Promise<boolean> =>
 const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   const router = useRouter();
   const wixClient = useWixClient();
-  const { cart, getCart, clearCart } = useCartStore();
+  const {
+    cart,
+    getCart,
+    clearCart,
+    couponApplied,
+    couponError,
+    applyCoupon,
+    removeCoupon,
+  } = useCartStore();
   const { showToast } = useToast();
   const [mounted, setMounted] = useState(false);
   const [step, setStep] = useState<1 | 2>(1);
@@ -46,12 +98,17 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   const [mobile, setMobile] = useState("");
   const [fullName, setFullName] = useState("");
   const [address, setAddress] = useState("");
+  const [addressLine2, setAddressLine2] = useState("");
   const [pincode, setPincode] = useState("");
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("COD");
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
+  const [showCouponInput, setShowCouponInput] = useState(false);
+  const [couponCode, setCouponCode] = useState("");
+  const [applyingCoupon, setApplyingCoupon] = useState(false);
+  const [removingCoupon, setRemovingCoupon] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -137,6 +194,29 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   const prepaidDiscount = isPrepaid ? PREPAID_DISCOUNT : 0;
   const total = Math.max(0, subtotal - wixCouponDiscount - prepaidDiscount);
 
+  const appliedCouponCode = useMemo(() => {
+    const appliedDiscounts = (cart as any)?.appliedDiscounts || [];
+    return appliedDiscounts.find((d: any) => d.coupon)?.coupon?.code || "";
+  }, [cart]);
+  const amountToUnlockClub = Math.max(0, CLUB_VIORA_MINIMUM - subtotal);
+  const amountToUnlockShine = Math.max(0, SHINE_50_MINIMUM - subtotal);
+
+  const handleApplyCoupon = async () => {
+    const code = couponCode.trim().toUpperCase();
+    if (!code) return;
+    setApplyingCoupon(true);
+    await applyCoupon(wixClient, code);
+    setApplyingCoupon(false);
+    setCouponCode("");
+  };
+
+  const handleRemoveCoupon = async () => {
+    setRemovingCoupon(true);
+    await removeCoupon(wixClient);
+    setRemovingCoupon(false);
+    setShowCouponInput(false);
+  };
+
   // Display-only inflated subtotal. Frontend optics only. `total`/`subtotal`
   // (the real cart items total) is what's sent to /api/razorpay and used for
   // tracking / order amounts.
@@ -157,9 +237,9 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   const validateDelivery = () => {
     if (!fullName.trim()) return "Please enter your full name.";
     if (!address.trim()) return "Please enter your address.";
-    if (!/^\d{6}$/.test(pincode.trim())) return "Enter a valid 6-digit pincode.";
+    if (!pincode.trim()) return "Please enter your pincode.";
     if (!city.trim()) return "Please enter your city.";
-    if (!state.trim()) return "Please enter your state.";
+    if (!state.trim()) return "Please select your state.";
     const digitsOnly = mobile.replace(/\D/g, "");
     if (digitsOnly.length !== 10) {
       return "Phone number must be exactly 10 digits. Please remove any country code (like +91 or 0) and try again.";
@@ -191,6 +271,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
           fullName: fullName.trim(),
           phone: mobile.replace(/\D/g, ""),
           addressLine1: address.trim(),
+          addressLine2: addressLine2.trim(),
           city: city.trim(),
           state: state.trim(),
           postalCode: pincode.trim(),
@@ -519,14 +600,24 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                     placeholder="Full Name"
+                    maxLength={100}
                     className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
                   />
-                  <textarea
-                    rows={3}
+                  <input
+                    type="text"
                     value={address}
                     onChange={(e) => setAddress(e.target.value)}
-                    placeholder="Full Address (house, street)"
-                    className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20 resize-none"
+                    placeholder="Address Line 1 (house, street)"
+                    maxLength={120}
+                    className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
+                  />
+                  <input
+                    type="text"
+                    value={addressLine2}
+                    onChange={(e) => setAddressLine2(e.target.value)}
+                    placeholder="Address Line 2 (landmark, area) — optional"
+                    maxLength={120}
+                    className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
                   />
                   <div className="grid grid-cols-2 gap-3">
                     <input
@@ -534,32 +625,42 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                       value={city}
                       onChange={(e) => setCity(e.target.value)}
                       placeholder="City"
+                      maxLength={50}
                       className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
                     />
-                    <input
-                      type="text"
+                    <select
                       value={state}
                       onChange={(e) => setState(e.target.value)}
-                      placeholder="State"
-                      className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
-                    />
+                      className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20 bg-white"
+                    >
+                      <option value="">Select State</option>
+                      {INDIAN_SUBDIVISIONS.map((s) => (
+                        <option key={s.code} value={s.code}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <input
                       type="text"
                       value={pincode}
-                      onChange={(e) => setPincode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      onChange={(e) => setPincode(e.target.value.replace(/\D/g, "").slice(0, 10))}
                       placeholder="Pincode"
                       inputMode="numeric"
+                      maxLength={10}
                       className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
                     />
                     <input
                       type="tel"
                       value={mobile}
-                      onChange={(e) => setMobile(e.target.value)}
+                      onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
                       placeholder="Phone (10 digits)"
-                      inputMode="tel"
+                      inputMode="numeric"
                       autoComplete="tel"
+                      pattern="[0-9]{10}"
+                      maxLength={10}
+                      title="Enter a 10-digit mobile number"
                       className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
                     />
                   </div>
@@ -644,15 +745,102 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                   </p>
                 </div>
 
+                {/* Coupon code */}
+                <div className="pt-2">
+                  {couponApplied && appliedCouponCode ? (
+                    <div className="flex items-start justify-between gap-2 rounded-md border border-green-200 bg-green-50/60 px-3 py-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <svg className="w-4 h-4 text-green-700 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-green-800 truncate">
+                            {appliedCouponCode} applied
+                          </p>
+                          {wixCouponDiscount > 0 && (
+                            <p className="text-[11px] text-green-700/80">
+                              You save ₹{wixCouponDiscount.toFixed(0)}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRemoveCoupon}
+                        disabled={removingCoupon || processing}
+                        className="text-[11px] font-semibold uppercase tracking-wider text-red-600 hover:text-red-700 disabled:opacity-50"
+                      >
+                        {removingCoupon ? "..." : "Remove"}
+                      </button>
+                    </div>
+                  ) : !showCouponInput ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowCouponInput(true)}
+                      className="w-full flex items-center justify-between rounded-md border border-dashed border-gray-300 px-3 py-2 text-xs font-medium text-gray-600 hover:border-[#9B1B30] hover:text-[#9B1B30] transition-colors"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                        </svg>
+                        Have a coupon code?
+                      </span>
+                      <span aria-hidden>+</span>
+                    </button>
+                  ) : (
+                    <div>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={couponCode}
+                          onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              handleApplyCoupon();
+                            }
+                          }}
+                          placeholder="ENTER CODE"
+                          autoFocus
+                          className="flex-1 min-w-0 rounded-md border border-gray-300 bg-white px-3 py-2 text-xs tracking-wider uppercase outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleApplyCoupon}
+                          disabled={applyingCoupon || !couponCode.trim() || processing}
+                          className="rounded-md bg-[#9B1B30] px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-white hover:bg-[#7d1527] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {applyingCoupon ? "..." : "Apply"}
+                        </button>
+                      </div>
+                      {couponError ? (
+                        <p className="mt-1.5 text-[11px] text-red-600">{couponError}</p>
+                      ) : (
+                        <div className="mt-1.5 space-y-1">
+                          <p className={`text-[11px] ${amountToUnlockShine > 0 ? "text-gray-500" : "text-green-600 font-medium"}`}>
+                            {amountToUnlockShine > 0 ? (
+                              <>Add ₹{amountToUnlockShine.toFixed(0)} more to use <span className="font-semibold tracking-wider">{SHINE_50_CODE}</span> (₹{SHINE_50_DISCOUNT} off).</>
+                            ) : (
+                              <>✅ Eligible! Use <span className="font-semibold tracking-wider">{SHINE_50_CODE}</span> for ₹{SHINE_50_DISCOUNT} off.</>
+                            )}
+                          </p>
+                          <p className={`text-[11px] ${amountToUnlockClub > 0 ? "text-gray-500" : "text-green-600 font-medium"}`}>
+                            {amountToUnlockClub > 0 ? (
+                              <>Add ₹{amountToUnlockClub.toFixed(0)} more to use <span className="font-semibold tracking-wider">{CLUB_VIORA_CODE}</span> (10% off).</>
+                            ) : (
+                              <>✅ Eligible! Use <span className="font-semibold tracking-wider">{CLUB_VIORA_CODE}</span> for 10% off.</>
+                            )}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {wixCouponDiscount > 0 && (
-                  <div className="flex justify-between text-green-700 font-medium">
+                  <div className="flex justify-between text-green-700 font-medium pt-2">
                     <span>
-                      Coupon{" "}
-                      {(() => {
-                        const appliedDiscounts = (cart as any)?.appliedDiscounts || [];
-                        const code = appliedDiscounts.find((d: any) => d.coupon)?.coupon?.code;
-                        return code ? `(${code})` : "";
-                      })()}
+                      Coupon{appliedCouponCode ? ` (${appliedCouponCode})` : ""}
                     </span>
                     <span>- ₹{wixCouponDiscount.toFixed(2)}</span>
                   </div>
