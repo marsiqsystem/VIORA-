@@ -15,6 +15,8 @@ export type ColorSibling = {
 const COLOR_HEX: Record<string, string> = {
   red: "#9B1B30",
   maroon: "#5C0A18",
+  burgundy: "#6B1A2C",
+  wine: "#722F37",
   pink: "#E48BA8",
   rose: "#D5849A",
   peach: "#F4B393",
