@@ -9,7 +9,6 @@ import BackButton from "@/components/BackButton";
 import ProductJsonLd from "@/components/ProductJsonLd";
 import RelatedProducts from "@/components/RelatedProducts";
 import { Suspense } from "react";
-import { isProductOutOfStock } from "@/lib/productStock";
 
 // Stock and price changes in the Wix backend must reach customers immediately.
 // Without this, Next.js caches the rendered HTML and merchants flipping
@@ -225,7 +224,11 @@ const SinglePage = async ({ params }: { params: { slug: string } }) => {
     productImages.push(product.media.mainMedia.image.url);
   }
 
-  const isOutOfStock = isProductOutOfStock(product);
+  // Mirror ProductView's sold-out logic: only out of stock when Wix says so.
+  const isOutOfStock =
+    product.stock?.inStock === false ||
+    (product.stock?.trackInventory === true &&
+      (product.stock?.quantity ?? 0) < 1);
 
   // Aggregate rating from the reviews already fetched above.
   const reviewCount = initialReviews.length;

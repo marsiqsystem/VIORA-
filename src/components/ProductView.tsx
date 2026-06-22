@@ -9,7 +9,6 @@ import CustomizeProducts from "./CustomizeProducts";
 import Add from "./Add";
 import ColorVariantSwatches, { ColorSibling } from "./ColorVariantSwatches";
 import type { PublicReview } from "@/lib/reviewsTypes";
-import { isProductOutOfStock } from "@/lib/productStock";
 
 // Below-the-fold / non-critical: defer JS so initial product page is faster.
 const TrustBadges = dynamic(() => import("./TrustBadges"), { ssr: true });
@@ -260,11 +259,11 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                             productId={product._id!}
                             variantId="00000000-0000-0000-0000-000000000000"
                             stockNumber={
-                                // Any of Wix's sold-out signals (inventoryStatus,
-                                // inStock, tracked quantity) forces stock=0 so Add
-                                // disables the buttons. Otherwise: tracked qty or
-                                // effectively unlimited when not tracked.
-                                isProductOutOfStock(product)
+                                // Respect Wix's manual "In stock" toggle even when inventory
+                                // isn't tracked — merchant flips inStock=false in the backend
+                                // and the PDP must reflect it. Otherwise: tracked quantity,
+                                // or essentially unlimited when untracked & in stock.
+                                product.stock?.inStock === false
                                     ? 0
                                     : product.stock?.trackInventory === true
                                         ? product.stock?.quantity || 0
@@ -457,7 +456,16 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                     product.price?.discountedPrice || product.price?.price || 0
                 }
                 productImage={product.media?.mainMedia?.image?.url}
-                isOutOfStock={isProductOutOfStock(product)}
+                isOutOfStock={
+                    // Only flag as sold out when Wix explicitly says inStock: false
+                    // OR when inventory IS tracked and quantity has reached 0.
+                    // Products that don't track inventory have undefined quantity —
+                    // the old `(quantity || 0) < 1` was wrongly marking those as
+                    // sold out, which is why every product showed "SOLD OUT".
+                    product.stock?.inStock === false ||
+                    (product.stock?.trackInventory === true &&
+                        (product.stock?.quantity ?? 0) < 1)
+                }
                 hasUnselectedVariants={
                     !!(product.variants && product.productOptions) &&
                     Object.keys(selectedOptions).length <

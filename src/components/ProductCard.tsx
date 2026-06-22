@@ -8,7 +8,6 @@ import nextDynamic from "next/dynamic";
 import { trackAddToWishlist } from "@/lib/metaPixel";
 import { useWixClient } from "@/hooks/useWixClient";
 import { useWishlistStore } from "@/hooks/useWishlistStore";
-import { isProductOutOfStock } from "@/lib/productStock";
 
 // Modal JS is only needed when a logged-out user taps the heart — defer it.
 const LoginModal = nextDynamic(() => import("./LoginModal"), { ssr: false });
@@ -61,7 +60,10 @@ const ProductCard = ({
   const hasDiscount = discountedPrice && discountedPrice < actualPrice;
   const currentSellingPrice = hasDiscount ? discountedPrice : actualPrice;
 
-  const isOutOfStock = isProductOutOfStock(product);
+  const isOutOfStock =
+    product.stock?.inStock === false ||
+    (product.stock?.trackInventory === true &&
+      (product.stock?.quantity ?? 0) < 1);
   const isLowStock =
     !isOutOfStock && product.stock?.quantity && product.stock.quantity < 5;
   const href = "/" + product.slug;
