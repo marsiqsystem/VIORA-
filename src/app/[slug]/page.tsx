@@ -10,11 +10,6 @@ import ProductJsonLd from "@/components/ProductJsonLd";
 import RelatedProducts from "@/components/RelatedProducts";
 import { Suspense } from "react";
 
-// Stock and price changes in the Wix backend must reach customers immediately.
-// Without this, Next.js caches the rendered HTML and merchants flipping
-// "In Stock" off see no effect on the live PDP until a redeploy.
-export const dynamic = "force-dynamic";
-
 // Canonical site origin — kept in sync with sitemap.ts / robots.ts.
 const BASE_URL = (
   process.env.NEXT_PUBLIC_SITE_URL || "https://www.viorajewel.in"

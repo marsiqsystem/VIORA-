@@ -10,9 +10,6 @@ import BackButton from "@/components/BackButton";
 import CategoryStrip from "@/components/CategoryStrip";
 import { getCategoryImageMap } from "@/lib/getCategoryImageMap";
 
-// Stock/price freshness — see [slug]/page.tsx note.
-export const dynamic = "force-dynamic";
-
 const ListPage = async ({ searchParams }: { searchParams: any }) => {
   const wixClient = await wixClientServer();
   const categorySlug = searchParams.cat || "all-products";
