@@ -2,6 +2,9 @@
 import { wixClientServer } from "@/lib/wixClientServer";
 import ProductList from "@/components/ProductList";
 
+// Stock/price freshness — see [slug]/page.tsx note.
+export const dynamic = "force-dynamic";
+
 const ProductsPage = async ({ searchParams }: { searchParams: any }) => {
   const wixClient = await wixClientServer();
 
