@@ -259,11 +259,15 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                             productId={product._id!}
                             variantId="00000000-0000-0000-0000-000000000000"
                             stockNumber={
-                                // When inventory isn't tracked, treat stock as essentially unlimited
-                                // so the quantity selector works. Cap at tracked quantity otherwise.
-                                product.stock?.trackInventory === true
-                                    ? product.stock?.quantity || 0
-                                    : 99
+                                // Respect Wix's manual "In stock" toggle even when inventory
+                                // isn't tracked — merchant flips inStock=false in the backend
+                                // and the PDP must reflect it. Otherwise: tracked quantity,
+                                // or essentially unlimited when untracked & in stock.
+                                product.stock?.inStock === false
+                                    ? 0
+                                    : product.stock?.trackInventory === true
+                                        ? product.stock?.quantity || 0
+                                        : 99
                             }
                             productName={product.name || "Unnamed Product"}
                             productPrice={

@@ -60,7 +60,12 @@ const ProductCard = ({
   const hasDiscount = discountedPrice && discountedPrice < actualPrice;
   const currentSellingPrice = hasDiscount ? discountedPrice : actualPrice;
 
-  const isLowStock = product.stock?.quantity && product.stock.quantity < 5;
+  const isOutOfStock =
+    product.stock?.inStock === false ||
+    (product.stock?.trackInventory === true &&
+      (product.stock?.quantity ?? 0) < 1);
+  const isLowStock =
+    !isOutOfStock && product.stock?.quantity && product.stock.quantity < 5;
   const href = "/" + product.slug;
 
   // Strip color suffix: "Base Name - Color" → "Base Name"
@@ -90,8 +95,17 @@ const ProductCard = ({
             quality={70}
             priority={index < 4}
             loading={index < 4 ? undefined : "lazy"}
-            className="object-cover transition-transform duration-300 md:group-hover:scale-[1.02]"
+            className={`object-cover transition-transform duration-300 md:group-hover:scale-[1.02] ${
+              isOutOfStock ? "opacity-60 grayscale" : ""
+            }`}
           />
+          {isOutOfStock && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+              <span className="bg-black/75 text-white text-xs md:text-sm font-semibold uppercase tracking-wider px-3 py-1.5 rounded-full">
+                Sold Out
+              </span>
+            </div>
+          )}
         </div>
       </Link>
 
