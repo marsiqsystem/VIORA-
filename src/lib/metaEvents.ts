@@ -146,14 +146,19 @@ export function setMetaUserData(userData: MetaUserData) {
  * Fires a Meta event to BOTH the client-side Pixel (fbq) and the server-side
  * Conversions API (`/api/capi`) using a shared `eventID` so Meta can
  * deduplicate the two signals.
+ *
+ * `explicitEventId` — optional, deterministic id (e.g. `purchase_<orderId>`).
+ * Use this when the SAME event is also fired from a different surface (e.g.
+ * server-side after order finalize) so Meta can dedupe them properly.
  */
 export async function trackMetaEvent(
   eventName: MetaEventName,
-  customData: MetaCustomData = {}
+  customData: MetaCustomData = {},
+  explicitEventId?: string
 ) {
   if (typeof window === "undefined") return;
 
-  const eventId = generateEventId();
+  const eventId = explicitEventId || generateEventId();
 
   // Client-side Pixel. Retry briefly because user clicks can happen before
   // fbevents.js has finished replacing the bootstrap stub.

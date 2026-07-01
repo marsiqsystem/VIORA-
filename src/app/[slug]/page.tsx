@@ -267,8 +267,11 @@ const SinglePage = async ({ params }: { params: { slug: string } }) => {
         ]}
       />
 
-      {/* Breadcrumb with Back button */}
-      <div className="container-responsive py-4 border-b border-gray-100">
+      {/* Breadcrumb with Back button — tight top/bottom padding so the product
+          image sits high on the page. This matters for ads: platforms crop
+          product-page screenshots from the top, and any extra top whitespace
+          used to push the price below the fold in the ad preview. */}
+      <div className="container-responsive py-1 border-b border-gray-100">
         <nav className="flex items-center gap-2 text-sm text-gray-500">
           <BackButton className="-ml-2" />
           <Link href="/" className="hover:text-primary transition-colors">
@@ -285,8 +288,8 @@ const SinglePage = async ({ params }: { params: { slug: string } }) => {
         </nav>
       </div>
 
-      {/* Product Section */}
-      <div className="container-responsive py-8 lg:py-12">
+      {/* Product Section — no top padding for the same "keep the price above the fold in ads" reason */}
+      <div className="container-responsive pb-8 lg:pb-12">
         <ProductView
           product={product}
           colorSiblings={siblings}

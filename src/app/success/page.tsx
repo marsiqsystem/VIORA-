@@ -40,13 +40,17 @@ const SuccessContent = () => {
             ? parsed.content_ids
             : undefined;
         }
-        void trackMetaEvent("Purchase", {
-          value,
-          currency,
-          content_ids,
-          content_type: "product",
-          transaction_id: orderId,
-        });
+        void trackMetaEvent(
+          "Purchase",
+          {
+            value,
+            currency,
+            content_ids,
+            content_type: "product",
+            transaction_id: orderId,
+          },
+          `purchase_${orderId}`
+        );
         window.sessionStorage.setItem(firedKey, "1");
         window.sessionStorage.removeItem("vioraPendingPurchase");
       }

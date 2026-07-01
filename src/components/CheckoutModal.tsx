@@ -313,13 +313,20 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
         JSON.stringify({ value: total, currency: "INR", content_ids: contentIds })
       );
     } catch {}
-    await trackMetaEvent("Purchase", {
-      value: total,
-      currency: "INR",
-      content_ids: contentIds,
-      content_type: "product",
-      transaction_id: wixOrderId,
-    });
+    // Deterministic event id — the checkout API also fires this same Purchase
+    // event via CAPI using the identical id, so Meta dedupes the two signals
+    // instead of counting the same order twice.
+    await trackMetaEvent(
+      "Purchase",
+      {
+        value: total,
+        currency: "INR",
+        content_ids: contentIds,
+        content_type: "product",
+        transaction_id: wixOrderId,
+      },
+      `purchase_${wixOrderId}`
+    );
     try {
       window.sessionStorage.setItem(`viora_purchase_fired_${wixOrderId}`, "1");
       window.sessionStorage.removeItem("vioraPendingPurchase");

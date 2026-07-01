@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { wixAdminClientServer } from "@/lib/wixAdminClientServer";
 import { sendOrderConfirmationEmail } from "@/lib/orderEmail";
+import { sendServerCapi } from "@/lib/metaCapiServer";
 
 type CheckoutAddressPayload = {
   email: string;
@@ -365,8 +366,13 @@ export async function POST(req: Request) {
           undefined,
         image: li?.image || undefined,
       }));
-      const orderNumber = finalOrder?.number
-        ? `#${finalOrder.number}`
+      const rawOrderNumber = finalOrder?.number;
+      const hasValidOrderNumber =
+        rawOrderNumber != null &&
+        String(rawOrderNumber).trim() !== "" &&
+        String(rawOrderNumber).trim() !== "0";
+      const orderNumber = hasValidOrderNumber
+        ? `#${rawOrderNumber}`
         : `#${String(orderId).slice(-8)}`;
 
       const ps = (finalOrder?.priceSummary as any) || {};
@@ -408,6 +414,74 @@ export async function POST(req: Request) {
       });
     } catch (emailErr) {
       console.error("Order confirmation email step failed:", emailErr);
+    }
+
+    // Meta Purchase — server-side CAPI fire, using the same deterministic
+    // event_id the browser used (`purchase_<orderId>`) so Meta dedupes the two
+    // signals. Fire-and-forget: it must never block or fail the order response.
+    try {
+      const finalOrder =
+        committedOrder ||
+        (approvedOrderResult as any)?.order ||
+        (orderResult as any)?.order;
+      const purchaseValue = Number.isFinite(finalTotal)
+        ? finalTotal
+        : Number.isFinite(wixOrderTotal)
+        ? wixOrderTotal
+        : undefined;
+      const capiContentIds = (((finalOrder?.lineItems as any[]) || [])
+        .map(
+          (li) =>
+            li?.catalogReference?.catalogItemId ||
+            li?.productId ||
+            li?.catalogReference?.appId
+        )
+        .filter(Boolean) as string[]);
+
+      const cookieHeader = req.headers.get("cookie") || "";
+      const readCookie = (name: string) => {
+        const m = new RegExp(`(?:^|; )${name}=([^;]+)`).exec(cookieHeader);
+        return m ? decodeURIComponent(m[1]) : undefined;
+      };
+      const fbp = readCookie("_fbp");
+      const fbc = readCookie("_fbc");
+      const userAgent = req.headers.get("user-agent") || undefined;
+      const forwardedFor = req.headers.get("x-forwarded-for") || "";
+      const clientIp =
+        forwardedFor.split(",")[0].trim() ||
+        req.headers.get("x-real-ip") ||
+        undefined;
+
+      void sendServerCapi({
+        eventName: "Purchase",
+        eventId: `purchase_${orderId}`,
+        eventSourceUrl: req.headers.get("referer") || undefined,
+        fbp,
+        fbc,
+        clientIp,
+        userAgent,
+        userData: {
+          email,
+          phone,
+          firstName: contactDetails.firstName,
+          lastName: contactDetails.lastName,
+          city,
+          state,
+          zip: postalCode,
+          country: "IN",
+        },
+        customData: {
+          value: purchaseValue,
+          currency: "INR",
+          content_ids: capiContentIds,
+          content_type: "product",
+          transaction_id: orderId,
+        },
+      }).catch((err) => {
+        console.error("Server-side Purchase CAPI failed:", err);
+      });
+    } catch (capiErr) {
+      console.error("Server-side Purchase CAPI prep failed:", capiErr);
     }
 
     return NextResponse.json({
