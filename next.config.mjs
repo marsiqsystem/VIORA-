@@ -5,6 +5,20 @@ const nextConfig = {
   poweredByHeader: false,
   productionBrowserSourceMaps: false,
 
+  // Journal MDX lives in /content/journal at repo root. Vercel serverless
+  // functions (sitemap ISR, and any runtime route that reads posts) don't
+  // trace this folder automatically because the path is computed via
+  // process.cwd(). Force-include it so getAllJournalPosts() sees the files
+  // at runtime — otherwise sitemap.xml comes out with 0 journal URLs and
+  // Bing/Google never discover new articles.
+  experimental: {
+    outputFileTracingIncludes: {
+      "/sitemap.xml": ["./content/journal/**/*"],
+      "/journal": ["./content/journal/**/*"],
+      "/journal/[slug]": ["./content/journal/**/*"],
+    },
+  },
+
   images: {
     // Serve modern, smaller formats automatically. Next will pick AVIF first,
     // then WebP, then fall back to the original. AVIF cuts payload ~50% vs JPEG.
