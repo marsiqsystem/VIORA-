@@ -115,7 +115,7 @@ const HomePage = async () => {
           <ProductList
             categoryId={WIX_COLLECTION_IDS.newArrivals}
             limit={4}
-            featuredNames={["Zara Crystal Set", "Rosa Blush Set", "Garnet Royale Set", "Crystal Drop Set"]}
+            featuredNames={["Zara Crystal Set", "Rosa Blush Set", "Scarlet Bloom Set", "Crystal Wings Set"]}
           />
         </Suspense>
       </section>

@@ -47,6 +47,9 @@ const COLOR_HEX: Record<string, string> = {
   brown: "#5C3A22",
   beige: "#D9C5A4",
   champagne: "#E7D4A8",
+  "crystal clear": "#EAF3F7",
+  crystal: "#EAF3F7",
+  clear: "#EAF3F7",
 };
 
 const resolveColor = (label: string): string => {
