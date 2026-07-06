@@ -1,5 +1,6 @@
 import { ApiKeyStrategy, createClient } from "@wix/sdk";
 import { checkout, orders, orderTransactions, draftOrders } from "@wix/ecom";
+import { contacts, labels } from "@wix/crm";
 
 export const wixAdminClientServer = () => {
   const apiKey = process.env.WIX_API_KEY;
@@ -13,7 +14,7 @@ export const wixAdminClientServer = () => {
   }
 
   return createClient({
-    modules: { checkout, orders, orderTransactions, draftOrders },
+    modules: { checkout, orders, orderTransactions, draftOrders, contacts, labels },
     auth: ApiKeyStrategy({
       apiKey,
       ...(siteId ? { siteId } : { accountId: accountId! }),
