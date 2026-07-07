@@ -1,11 +1,35 @@
 import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
+import { isValidEmail } from "@/lib/validateEmail";
+import {
+  clientIp,
+  isHoneypotFilled,
+  isRateLimited,
+  isSameOrigin,
+} from "@/lib/apiGuard";
 
 const CONTACT_RECIPIENT = "viorajewels6@gmail.com";
 
 export async function POST(req: Request) {
   try {
-    const { title, firstName, lastName, email, query } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const { title, firstName, lastName, email, query } = body;
+
+    // Bot filled the hidden honeypot field: pretend success, send nothing.
+    if (isHoneypotFilled(body)) {
+      return NextResponse.json({ ok: true });
+    }
+    // Not submitted from our own site's form → almost certainly a bot/script.
+    if (!isSameOrigin(req)) {
+      return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+    }
+    // Throttle bursts so a bot can't drain the daily Gmail quota.
+    if (isRateLimited(`contact:${clientIp(req)}`)) {
+      return NextResponse.json(
+        { error: "Too many requests. Please try again later." },
+        { status: 429 }
+      );
+    }
 
     if (!firstName?.trim() || !lastName?.trim() || !email?.trim() || !query?.trim()) {
       return NextResponse.json(
@@ -13,7 +37,7 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    if (!/^\S+@\S+\.\S+$/.test(email.trim())) {
+    if (!isValidEmail(email)) {
       return NextResponse.json(
         { error: "Please enter a valid email address." },
         { status: 400 }

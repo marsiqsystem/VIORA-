@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { isValidEmail } from "./validateEmail";
 
 // Branded, invoice-style order-confirmation email sent from our own Gmail, so
 // the customer sees the correct amount and payment status — unlike Wix's
@@ -354,6 +355,13 @@ export const sendOrderConfirmationEmail = async (
 
   if (!gmailUser || !gmailAppPassword) {
     console.error("Order email skipped: GMAIL_USER / GMAIL_APP_PASSWORD missing.");
+    return false;
+  }
+
+  // Don't send to a malformed address — it's a guaranteed bounce, and every
+  // bounce still burns Gmail's daily sending quota.
+  if (!isValidEmail(params.to)) {
+    console.error(`Order email skipped: invalid recipient "${params.to}".`);
     return false;
   }
 

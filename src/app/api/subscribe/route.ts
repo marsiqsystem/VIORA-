@@ -2,15 +2,42 @@ import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 import { sendNewsletterEmail } from "@/lib/newsletterEmail";
 import { upsertNewsletterSubscriber } from "@/lib/newsletterContacts";
+import { isValidEmail, normalizeEmail } from "@/lib/validateEmail";
+import {
+  clientIp,
+  isHoneypotFilled,
+  isRateLimited,
+  isSameOrigin,
+} from "@/lib/apiGuard";
 
 const NOTIFY_RECIPIENT = "viorajewels6@gmail.com";
 
 export async function POST(req: Request) {
   try {
-    const { email } = await req.json();
-    const clean = typeof email === "string" ? email.trim() : "";
+    const body = await req.json().catch(() => ({}));
+    const { email } = body;
 
-    if (!/^\S+@\S+\.\S+$/.test(clean)) {
+    // Bot filled the hidden honeypot field: pretend success, send nothing.
+    if (isHoneypotFilled(body)) {
+      return NextResponse.json({ ok: true });
+    }
+    // Not submitted from our own site's form → almost certainly a bot/script.
+    if (!isSameOrigin(req)) {
+      return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+    }
+    // Throttle bursts so a bot can't drain the daily Gmail quota.
+    if (isRateLimited(`subscribe:${clientIp(req)}`)) {
+      return NextResponse.json(
+        { error: "Too many requests. Please try again later." },
+        { status: 429 }
+      );
+    }
+
+    // Normalise (trim + lowercase) so we store and send one canonical form and
+    // don't add the same address twice under different casing.
+    const clean = normalizeEmail(email);
+
+    if (!isValidEmail(clean)) {
       return NextResponse.json(
         { error: "Please enter a valid email address." },
         { status: 400 }

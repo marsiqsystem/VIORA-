@@ -32,13 +32,20 @@ const Footer = () => {
   const handleSubscribe = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || subscribing) return;
+    // Honeypot: real users never see or fill this; bots that fill the form do.
+    const honeypot =
+      (
+        (e.currentTarget as HTMLFormElement).elements.namedItem(
+          "company"
+        ) as HTMLInputElement | null
+      )?.value || "";
     setSubscribeError("");
     setSubscribing(true);
     try {
       const res = await fetch("/api/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, company: honeypot }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -75,6 +82,15 @@ const Footer = () => {
             </div>
             <div className="w-full min-w-0 max-w-md md:w-auto">
               <form onSubmit={handleSubscribe} className="flex w-full">
+                {/* Honeypot — hidden from users, catches form-filling bots. */}
+                <input
+                  type="text"
+                  name="company"
+                  tabIndex={-1}
+                  autoComplete="off"
+                  aria-hidden="true"
+                  className="absolute -left-[9999px] h-0 w-0 opacity-0"
+                />
                 <input
                   type="email"
                   placeholder="Enter your email"

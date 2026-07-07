@@ -45,6 +45,24 @@ const LIMIT = (() => {
   return raw ? Math.max(0, parseInt(raw.split("=")[1], 10) || 0) : Infinity;
 })();
 
+// Same pragmatic validation as src/lib/validateEmail.ts (kept inline because
+// this is a standalone .mjs script). Rejects obviously-broken addresses BEFORE
+// sending, so we don't burn Gmail's daily quota on guaranteed bounces.
+const isValidEmail = (raw) => {
+  const email = (typeof raw === "string" ? raw : "").trim().toLowerCase();
+  if (!email || email.length > 254 || /\s/.test(email)) return false;
+  const at = email.indexOf("@");
+  if (at <= 0 || at !== email.lastIndexOf("@") || at === email.length - 1) return false;
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  if (local.startsWith(".") || local.endsWith(".") || local.includes("..")) return false;
+  if (
+    domain.startsWith(".") || domain.endsWith(".") || domain.startsWith("-") ||
+    domain.includes("..") || !/^[a-z0-9.-]+$/.test(domain) || !/\.[a-z]{2,}$/.test(domain)
+  ) return false;
+  return true;
+};
+
 const NEWSLETTER_LABEL_KEY = "custom.newsletter-subscriber";
 const NEWSLETTER_LABEL_NAME = "Newsletter Subscriber";
 const BRAND = "#9B1B30";
@@ -157,10 +175,15 @@ while (true) {
 }
 
 // Dedupe (case-insensitive)
-const uniq = Array.from(new Set(emails.map((e) => e.toLowerCase())));
+const deduped = Array.from(new Set(emails.map((e) => e.toLowerCase())));
+
+// Drop malformed addresses so we never send (and bounce) on them.
+const uniq = deduped.filter(isValidEmail);
+const skipped = deduped.filter((e) => !isValidEmail(e));
 const target = uniq.slice(0, LIMIT);
 
-console.log(`Found ${uniq.length} unique newsletter subscribers.`);
+console.log(`Found ${deduped.length} unique subscribers; ${uniq.length} valid, ${skipped.length} skipped as invalid.`);
+if (skipped.length) console.log(`Skipped (invalid): ${skipped.join(", ")}`);
 if (LIMIT !== Infinity) console.log(`Limiting to first ${LIMIT}.`);
 if (DRY_RUN) {
   console.log(target.join("\n"));
