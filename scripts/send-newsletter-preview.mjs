@@ -6,10 +6,11 @@
 
 import nodemailer from "nodemailer";
 
-const { GMAIL_USER, GMAIL_APP_PASSWORD } = process.env;
+const { RESEND_API_KEY } = process.env;
+const MAIL_FROM = process.env.MAIL_FROM_MARKETING || `"Viora Jewels" <news@viorajewel.in>`;
 
-if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
-  console.error("Missing GMAIL_USER / GMAIL_APP_PASSWORD (use --env-file=.env.local).");
+if (!RESEND_API_KEY) {
+  console.error("Missing RESEND_API_KEY (use --env-file=.env.local).");
   process.exit(1);
 }
 
@@ -91,12 +92,14 @@ const html = `
 </div>`;
 
 const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
+  host: "smtp.resend.com",
+  port: 465,
+  secure: true,
+  auth: { user: "resend", pass: RESEND_API_KEY },
 });
 
 await transporter.sendMail({
-  from: `"Viora Jewels" <${GMAIL_USER}>`,
+  from: MAIL_FROM,
   to,
   subject: "Welcome to Viora 💜",
   html,

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import nodemailer from "nodemailer";
+import { getMailer, MAIL_FROM_TRANSACTIONAL } from "@/lib/mailer";
 import { sendNewsletterEmail } from "@/lib/newsletterEmail";
-import { upsertNewsletterSubscriber } from "@/lib/newsletterContacts";
+import { markWelcomeSent, upsertNewsletterSubscriber } from "@/lib/newsletterContacts";
 import { isValidEmail, normalizeEmail } from "@/lib/validateEmail";
 import {
   clientIp,
@@ -44,44 +44,50 @@ export async function POST(req: Request) {
       );
     }
 
-    const gmailUser = process.env.GMAIL_USER;
-    const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
-
-    if (!gmailUser || !gmailAppPassword) {
-      console.error("GMAIL_USER or GMAIL_APP_PASSWORD missing from env.");
+    const transporter = getMailer();
+    if (!transporter) {
+      console.error("RESEND_API_KEY missing from env.");
       return NextResponse.json(
         { error: "Subscription service is not configured. Please try again later." },
         { status: 500 }
       );
     }
 
-    // Store in Wix Contacts (labelled "Newsletter Subscriber") + send the
-    // Viora-branded welcome. Both are best-effort — they must not block or
-    // fail the request from the user's point of view, and admin still gets
-    // notified regardless.
-    const [contactRes, welcomeSent] = await Promise.all([
-      upsertNewsletterSubscriber(clean),
-      sendNewsletterEmail(clean),
-    ]);
+    // Store in Wix Contacts (labelled "Newsletter Subscriber"), THEN send the
+    // Viora-branded welcome — in that order, because the contact record tells
+    // us whether this address was already welcomed. Re-subscribing must never
+    // produce a second copy of the same email. Both steps are best-effort:
+    // they must not block or fail the request from the user's point of view,
+    // and admin still gets notified regardless.
+    const contactRes = await upsertNewsletterSubscriber(clean);
 
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: { user: gmailUser, pass: gmailAppPassword },
-    });
+    let welcomeSent = false;
+    let welcomeStatus: string;
+
+    if (contactRes.alreadyWelcomed) {
+      welcomeStatus = "skipped (already welcomed)";
+    } else {
+      welcomeSent = await sendNewsletterEmail(clean);
+      welcomeStatus = welcomeSent ? "sent" : "FAILED";
+      // Record it so no later subscribe or blast run sends a second copy.
+      if (welcomeSent && contactRes.contactId) {
+        await markWelcomeSent(contactRes.contactId);
+      }
+    }
 
     await transporter.sendMail({
-      from: `"Viora Jewels Website" <${gmailUser}>`,
+      from: MAIL_FROM_TRANSACTIONAL,
       to: NOTIFY_RECIPIENT,
       replyTo: clean,
       subject: "New newsletter subscriber",
       text: `New subscriber to the Viora List: ${clean}\n\nWix contact: ${
         contactRes.ok ? contactRes.contactId : `FAILED (${contactRes.reason})`
-      }\nWelcome email: ${welcomeSent ? "sent" : "FAILED"}`,
+      }\nWelcome email: ${welcomeStatus}`,
       html: `<p style="font-family:Arial,sans-serif;">New subscriber to the <strong>Viora List</strong>:</p>
         <p style="font-family:Arial,sans-serif;font-size:16px;color:#9B1B30;">${clean}</p>
         <p style="font-family:Arial,sans-serif;font-size:12px;color:#555;">
           Wix contact: ${contactRes.ok ? contactRes.contactId : `FAILED (${contactRes.reason})`}<br/>
-          Welcome email: ${welcomeSent ? "sent" : "FAILED"}
+          Welcome email: ${welcomeStatus}
         </p>`,
     });
 

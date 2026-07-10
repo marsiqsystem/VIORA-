@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import nodemailer from "nodemailer";
+import { getMailer, MAIL_FROM_TRANSACTIONAL } from "@/lib/mailer";
 import { isValidEmail } from "@/lib/validateEmail";
 import {
   clientIp,
@@ -44,21 +44,14 @@ export async function POST(req: Request) {
       );
     }
 
-    const gmailUser = process.env.GMAIL_USER;
-    const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
-
-    if (!gmailUser || !gmailAppPassword) {
-      console.error("GMAIL_USER or GMAIL_APP_PASSWORD missing from env.");
+    const transporter = getMailer();
+    if (!transporter) {
+      console.error("RESEND_API_KEY missing from env.");
       return NextResponse.json(
         { error: "Email service is not configured. Please try again later." },
         { status: 500 }
       );
     }
-
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: { user: gmailUser, pass: gmailAppPassword },
-    });
 
     const fullName = [title, firstName, lastName].filter(Boolean).join(" ").trim();
     const safeText = (s: string) => String(s).replace(/[\r\n]+/g, " ").trim();
@@ -71,7 +64,7 @@ export async function POST(req: Request) {
         .replace(/'/g, "&#39;");
 
     await transporter.sendMail({
-      from: `"Viora Jewels Website" <${gmailUser}>`,
+      from: MAIL_FROM_TRANSACTIONAL,
       to: CONTACT_RECIPIENT,
       replyTo: `"${safeText(fullName)}" <${safeText(email)}>`,
       subject: `Website enquiry from ${safeText(fullName)}`,

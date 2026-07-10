@@ -1,7 +1,7 @@
-import nodemailer from "nodemailer";
+import { getMailer, MAIL_FROM_TRANSACTIONAL } from "./mailer";
 import { isValidEmail } from "./validateEmail";
 
-// Branded, invoice-style order-confirmation email sent from our own Gmail, so
+// Branded, invoice-style order-confirmation email sent from our own domain, so
 // the customer sees the correct amount and payment status — unlike Wix's
 // automatic email, which always shows the "pay cash to courier" text and
 // (before the draft-order discount) the pre-discount total.
@@ -350,30 +350,24 @@ export const renderOrderEmail = (
 export const sendOrderConfirmationEmail = async (
   params: OrderEmailParams
 ): Promise<boolean> => {
-  const gmailUser = process.env.GMAIL_USER;
-  const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
-
-  if (!gmailUser || !gmailAppPassword) {
-    console.error("Order email skipped: GMAIL_USER / GMAIL_APP_PASSWORD missing.");
+  const transporter = getMailer();
+  if (!transporter) {
+    console.error("Order email skipped: RESEND_API_KEY missing.");
     return false;
   }
 
-  // Don't send to a malformed address — it's a guaranteed bounce, and every
-  // bounce still burns Gmail's daily sending quota.
+  // Don't send to a malformed address — it's a guaranteed bounce, and bounces
+  // still hurt sender reputation.
   if (!isValidEmail(params.to)) {
     console.error(`Order email skipped: invalid recipient "${params.to}".`);
     return false;
   }
 
   const { subject, html, text } = renderOrderEmail(params);
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: { user: gmailUser, pass: gmailAppPassword },
-  });
 
   try {
     await transporter.sendMail({
-      from: `"Viora Jewels" <${gmailUser}>`,
+      from: MAIL_FROM_TRANSACTIONAL,
       to: params.to,
       subject,
       text,

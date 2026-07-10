@@ -20,17 +20,18 @@ const {
   WIX_API_KEY,
   WIX_SITE_ID,
   WIX_ACCOUNT_ID,
-  GMAIL_USER,
-  GMAIL_APP_PASSWORD,
+  RESEND_API_KEY,
   NEXT_PUBLIC_SITE_URL,
 } = process.env;
+
+const MAIL_FROM = process.env.MAIL_FROM_TRANSACTIONAL || `"Viora Jewels" <orders@viorajewel.in>`;
 
 if (!WIX_API_KEY || (!WIX_SITE_ID && !WIX_ACCOUNT_ID)) {
   console.error("Missing WIX_API_KEY / WIX_SITE_ID (or WIX_ACCOUNT_ID). Did you forget --env-file=.env.local?");
   process.exit(1);
 }
-if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
-  console.error("Missing GMAIL_USER / GMAIL_APP_PASSWORD.");
+if (!RESEND_API_KEY) {
+  console.error("Missing RESEND_API_KEY.");
   process.exit(1);
 }
 
@@ -306,8 +307,10 @@ const wixOrderToEmailParams = (order) => {
 // Send
 // --------------------------------------------------------------------------
 const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
+  host: "smtp.resend.com",
+  port: 465,
+  secure: true,
+  auth: { user: "resend", pass: RESEND_API_KEY },
 });
 
 const DRY_RUN = process.env.DRY_RUN === "1";
@@ -336,7 +339,7 @@ for (const num of orderNumbers) {
     }
 
     await transporter.sendMail({
-      from: `"Viora Jewels" <${GMAIL_USER}>`,
+      from: MAIL_FROM,
       to: params.to,
       subject,
       text,
