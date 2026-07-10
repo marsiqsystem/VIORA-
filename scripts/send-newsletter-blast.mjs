@@ -65,6 +65,14 @@ const isValidEmail = (raw) => {
 
 const NEWSLETTER_LABEL_KEY = "custom.newsletter-subscriber";
 const NEWSLETTER_LABEL_NAME = "Newsletter Subscriber";
+
+// Shared with src/lib/newsletterContacts.ts. A contact carrying this label has
+// already received this welcome email — from an earlier blast run or from the
+// automatic welcome at signup — and must be skipped. Re-running this script is
+// therefore safe: it only ever mails people who have never been mailed.
+const WELCOME_SENT_LABEL_KEY = "custom.welcome-email-sent";
+const WELCOME_SENT_LABEL_NAME = "Welcome Email Sent";
+
 const BRAND = "#9B1B30";
 const SITE_URL = (NEXT_PUBLIC_SITE_URL || "https://viorajewel.in").replace(/\/$/, "");
 const FB_URL = "https://www.facebook.com/people/Viora-Jewels/61589962820647/";
@@ -148,13 +156,19 @@ const client = createClient({
   }),
 });
 
-// Make sure the label exists (idempotent) so its key is stable.
+// Make sure the labels exist (idempotent) so their keys are stable.
 const labelRes = await client.labels.findOrCreateLabel(NEWSLETTER_LABEL_NAME);
 const labelKey = labelRes.label?.key || NEWSLETTER_LABEL_KEY;
+const welcomeRes = await client.labels.findOrCreateLabel(WELCOME_SENT_LABEL_NAME);
+const welcomeKey = welcomeRes.label?.key || WELCOME_SENT_LABEL_KEY;
 
 // Wix queryContacts doesn't allow filtering by labelKeys — page through
 // listContacts and filter in JS.
-const emails = [];
+//
+// Keyed by lowercased email so one address maps to exactly one send, even if
+// it appears on several contacts or in several casings.
+const byEmail = new Map();
+let alreadyWelcomed = 0;
 const PAGE_SIZE = 1000;
 let offset = 0;
 while (true) {
@@ -165,24 +179,29 @@ while (true) {
   for (const c of rows) {
     const labels = c.info?.labelKeys?.items || [];
     if (!labels.includes(labelKey)) continue;
+    // Already got this exact email — never send it a second time.
+    if (labels.includes(welcomeKey)) {
+      alreadyWelcomed++;
+      continue;
+    }
     const list = c.info?.emails?.items || [];
     for (const e of list) {
-      if (e?.email) emails.push(e.email);
+      const email = e?.email?.trim().toLowerCase();
+      if (email && !byEmail.has(email)) byEmail.set(email, c._id);
     }
   }
   if (rows.length < PAGE_SIZE) break;
   offset += PAGE_SIZE;
 }
 
-// Dedupe (case-insensitive)
-const deduped = Array.from(new Set(emails.map((e) => e.toLowerCase())));
-
 // Drop malformed addresses so we never send (and bounce) on them.
+const deduped = Array.from(byEmail.keys());
 const uniq = deduped.filter(isValidEmail);
 const skipped = deduped.filter((e) => !isValidEmail(e));
 const target = uniq.slice(0, LIMIT);
 
-console.log(`Found ${deduped.length} unique subscribers; ${uniq.length} valid, ${skipped.length} skipped as invalid.`);
+console.log(`Found ${deduped.length} un-welcomed subscribers; ${uniq.length} valid, ${skipped.length} skipped as invalid.`);
+console.log(`Skipped ${alreadyWelcomed} contact(s) already marked "${WELCOME_SENT_LABEL_NAME}".`);
 if (skipped.length) console.log(`Skipped (invalid): ${skipped.join(", ")}`);
 if (LIMIT !== Infinity) console.log(`Limiting to first ${LIMIT}.`);
 if (DRY_RUN) {
@@ -220,6 +239,19 @@ for (const to of target) {
     });
     sent++;
     console.log(`[${sent}/${target.length}] sent -> ${to}`);
+
+    // Mark immediately, one address at a time. If the script dies midway, or
+    // is simply run again, everyone already mailed is skipped. A failure to
+    // label is loud, because it is the only way a duplicate can still happen.
+    try {
+      await client.contacts.labelContact(byEmail.get(to), [welcomeKey]);
+    } catch (labelErr) {
+      console.error(
+        `WARNING -> ${to} was mailed but could NOT be labelled "${WELCOME_SENT_LABEL_NAME}" ` +
+          `(${labelErr?.message || labelErr}). Label it by hand in Wix Contacts, ` +
+          `otherwise the next run will email them a second time.`
+      );
+    }
   } catch (err) {
     failed++;
     failures.push({ to, err: err?.message || String(err) });

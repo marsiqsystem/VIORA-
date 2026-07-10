@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 import { sendNewsletterEmail } from "@/lib/newsletterEmail";
-import { upsertNewsletterSubscriber } from "@/lib/newsletterContacts";
+import { markWelcomeSent, upsertNewsletterSubscriber } from "@/lib/newsletterContacts";
 import { isValidEmail, normalizeEmail } from "@/lib/validateEmail";
 import {
   clientIp,
@@ -55,14 +55,27 @@ export async function POST(req: Request) {
       );
     }
 
-    // Store in Wix Contacts (labelled "Newsletter Subscriber") + send the
-    // Viora-branded welcome. Both are best-effort — they must not block or
-    // fail the request from the user's point of view, and admin still gets
-    // notified regardless.
-    const [contactRes, welcomeSent] = await Promise.all([
-      upsertNewsletterSubscriber(clean),
-      sendNewsletterEmail(clean),
-    ]);
+    // Store in Wix Contacts (labelled "Newsletter Subscriber"), THEN send the
+    // Viora-branded welcome — in that order, because the contact record tells
+    // us whether this address was already welcomed. Re-subscribing must never
+    // produce a second copy of the same email. Both steps are best-effort:
+    // they must not block or fail the request from the user's point of view,
+    // and admin still gets notified regardless.
+    const contactRes = await upsertNewsletterSubscriber(clean);
+
+    let welcomeSent = false;
+    let welcomeStatus: string;
+
+    if (contactRes.alreadyWelcomed) {
+      welcomeStatus = "skipped (already welcomed)";
+    } else {
+      welcomeSent = await sendNewsletterEmail(clean);
+      welcomeStatus = welcomeSent ? "sent" : "FAILED";
+      // Record it so no later subscribe or blast run sends a second copy.
+      if (welcomeSent && contactRes.contactId) {
+        await markWelcomeSent(contactRes.contactId);
+      }
+    }
 
     const transporter = nodemailer.createTransport({
       service: "gmail",
@@ -76,12 +89,12 @@ export async function POST(req: Request) {
       subject: "New newsletter subscriber",
       text: `New subscriber to the Viora List: ${clean}\n\nWix contact: ${
         contactRes.ok ? contactRes.contactId : `FAILED (${contactRes.reason})`
-      }\nWelcome email: ${welcomeSent ? "sent" : "FAILED"}`,
+      }\nWelcome email: ${welcomeStatus}`,
       html: `<p style="font-family:Arial,sans-serif;">New subscriber to the <strong>Viora List</strong>:</p>
         <p style="font-family:Arial,sans-serif;font-size:16px;color:#9B1B30;">${clean}</p>
         <p style="font-family:Arial,sans-serif;font-size:12px;color:#555;">
           Wix contact: ${contactRes.ok ? contactRes.contactId : `FAILED (${contactRes.reason})`}<br/>
-          Welcome email: ${welcomeSent ? "sent" : "FAILED"}
+          Welcome email: ${welcomeStatus}
         </p>`,
     });
 
