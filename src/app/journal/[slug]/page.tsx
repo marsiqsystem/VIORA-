@@ -3,6 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MDXRemote } from "next-mdx-remote/rsc";
 import BackButton from "@/components/BackButton";
+import ShopPicks from "@/components/journal/ShopPicks";
+import { getJournalCatalog } from "@/lib/journalCatalog";
 import {
   getAllJournalSlugs,
   getJournalPost,
@@ -12,6 +14,11 @@ import {
 const SITE_URL = (
   process.env.NEXT_PUBLIC_SITE_URL || "https://www.viorajewel.in"
 ).replace(/\/$/, "");
+
+// Articles embed live product cards (<ShopPicks>). Re-render hourly so prices
+// and sold-out state don't freeze at build time — roughly half the catalog is
+// out of stock at any moment, and the picks are filtered on stock.
+export const revalidate = 3600;
 
 export function generateStaticParams() {
   return getAllJournalSlugs().map((slug) => ({ slug }));
@@ -111,13 +118,25 @@ const mdxComponents = {
   ),
 };
 
-export default function JournalArticlePage({
+export default async function JournalArticlePage({
   params,
 }: {
   params: { slug: string };
 }) {
   const post = getJournalPost(params.slug);
   if (!post) notFound();
+
+  // Fetched once here and handed to every <ShopPicks> in the article, so the
+  // MDX components stay synchronous — next-mdx-remote renders them inline and
+  // an async component in the map is the one thing that would break it.
+  const catalog = await getJournalCatalog();
+
+  const components = {
+    ...mdxComponents,
+    ShopPicks: (props: Record<string, unknown>) => (
+      <ShopPicks {...(props as any)} catalog={catalog} />
+    ),
+  };
 
   const url = `${SITE_URL}/journal/${post.slug}`;
 
@@ -226,7 +245,7 @@ export default function JournalArticlePage({
         </header>
 
         <div className="prose-viora">
-          <MDXRemote source={post.content} components={mdxComponents as any} />
+          <MDXRemote source={post.content} components={components as any} />
         </div>
       </article>
 

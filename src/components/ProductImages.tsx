@@ -8,10 +8,13 @@ const ProductImages = ({
   items,
   rating,
   isBestSeller = false,
+  productName,
 }: {
   items: any;
   rating?: number;
   isBestSeller?: boolean;
+  /** Used for image alt text. Falls back to a generic label when absent. */
+  productName?: string;
 }) => {
   const [index, setIndex] = useState(0);
   const [isZoomed, setIsZoomed] = useState(false);
@@ -141,7 +144,11 @@ const ProductImages = ({
 
         <Image
           src={items[index].image?.url || "/product.png"}
-          alt="product"
+          alt={
+            productName
+              ? `${productName} — Viora Jewel${index > 0 ? `, view ${index + 1}` : ""}`
+              : "Viora Jewel product"
+          }
           fill
           priority={index === 0}
           draggable={false}
@@ -246,7 +253,11 @@ const ProductImages = ({
               )}
               <Image
                 src={item.image?.url || "/product.png"}
-                alt={`Product thumbnail ${i + 1}`}
+                alt={
+                  productName
+                    ? `${productName} — thumbnail ${i + 1}`
+                    : `Product thumbnail ${i + 1}`
+                }
                 fill
                 className={`object-cover transition-opacity duration-200 ${imagesLoaded[`thumb-${i}`] ? "opacity-100" : "opacity-0"
                   }`}

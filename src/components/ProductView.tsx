@@ -38,6 +38,13 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
         [key: string]: string;
     }>({});
 
+    // Descriptive image alt text. Product photos previously all carried alt="product",
+    // which tells Google Images nothing and fails screen readers.
+    const baseName = displayName || (product.name || "").split(" - ")[0].trim();
+    const altName = [baseName, currentColor && `in ${currentColor}`]
+        .filter(Boolean)
+        .join(" ");
+
     // Fire ViewContent (Pixel + CAPI) once per product load
     useEffect(() => {
         if (!product?._id) return;
@@ -133,7 +140,7 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
               Desktop (md+) restores normal in-flow column behavior.
             */}
             <div className="relative left-1/2 -translate-x-1/2 w-screen max-w-[100vw] overflow-hidden md:left-auto md:translate-x-0 md:w-full md:max-w-none md:overflow-visible lg:w-1/2 lg:sticky lg:top-32 lg:self-start lg:h-fit">
-                <ProductImages items={filteredMediaItems} isBestSeller={isBestSeller} rating={hasRealReviews ? realAvgRating : undefined} />
+                <ProductImages items={filteredMediaItems} isBestSeller={isBestSeller} rating={hasRealReviews ? realAvgRating : undefined} productName={altName} />
             </div>
 
             {/* Details */}
