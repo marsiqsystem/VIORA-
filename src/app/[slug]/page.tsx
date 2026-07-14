@@ -8,6 +8,7 @@ import type { ColorSibling } from "@/components/ColorVariantSwatches";
 import BackButton from "@/components/BackButton";
 import ProductJsonLd from "@/components/ProductJsonLd";
 import RelatedProducts from "@/components/RelatedProducts";
+import { isDuplicateSlug } from "@/lib/duplicateProducts";
 import { Suspense } from "react";
 
 // Canonical site origin — kept in sync with sitemap.ts / robots.ts.
@@ -84,10 +85,20 @@ export async function generateMetadata({
       product.media?.mainMedia?.image?.url ||
       product.media?.items?.[0]?.image?.url;
 
+    const slug = product.slug || params.slug;
+
     return {
       title: name,
       description,
-      alternates: { canonical: `/${product.slug || params.slug}` },
+      alternates: { canonical: `/${slug}` },
+      // A Wix duplicate clone is the same item as the original, so let crawlers
+      // read it and follow its links but keep it out of the index — otherwise
+      // two identical URLs compete and Google picks the winner for us. Dropping
+      // it from the sitemap is not enough on its own: Google already knows these
+      // URLs, and only a noindex on the page itself will remove them.
+      ...(isDuplicateSlug(slug)
+        ? { robots: { index: false, follow: true } }
+        : {}),
       openGraph: {
         type: "website",
         title: `${name} | Viora Jewel`,

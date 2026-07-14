@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { wixClientServer } from "@/lib/wixClientServer";
+import { isDuplicateSlug } from "@/lib/duplicateProducts";
 
 /**
  * Google Shopping product feed for Viora Jewel.
@@ -140,6 +141,7 @@ export async function GET() {
       skippedHidden: 0,
       skippedNoSlug: 0,
       skippedNoId: 0,
+      skippedDuplicate: 0,
       groupedAsColorVariant: 0,
     };
 
@@ -156,6 +158,16 @@ export async function GET() {
         if (!p.slug) {
           stats.skippedNoSlug += 1;
           console.warn(`[feed.xml] skipping product with no slug: ${p._id}`);
+          continue;
+        }
+
+        // Wix duplicate-product clones are the same item as the original. Feeding
+        // both to Merchant Center imports one product twice.
+        if (isDuplicateSlug(p.slug)) {
+          stats.skippedDuplicate += 1;
+          console.warn(
+            `[feed.xml] skipping Wix duplicate clone: ${p.slug} — delete or rename it in the Wix admin`
+          );
           continue;
         }
 
