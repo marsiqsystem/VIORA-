@@ -9,6 +9,7 @@ import SmoothScroll from "@/components/SmoothScroll";
 
 const GTAG_ID = "GT-T8ZJVVT9";
 const GOOGLE_ADS_ID = "AW-18325090177";
+const GA4_ID = "G-2PY7N0E5WE";
 
 // Below-the-fold / non-critical → defer JS to shrink the initial bundle.
 const Footer = dynamic(() => import("@/components/Footer"));
@@ -183,6 +184,7 @@ export default function RootLayout({
             gtag('js', new Date());
             gtag('config', '${GTAG_ID}');
             gtag('config', '${GOOGLE_ADS_ID}');
+            gtag('config', '${GA4_ID}');
           `}
         </Script>
       </head>
