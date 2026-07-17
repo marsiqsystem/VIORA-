@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import ProductList from "@/components/ProductList";
 import Skeleton from "@/components/Skeleton";
 import Link from "next/link";
@@ -5,6 +6,19 @@ import Image from "next/image";
 import { Suspense } from "react";
 import { WIX_COLLECTION_IDS } from "@/lib/categories";
 import BackButton from "@/components/BackButton";
+
+export const metadata: Metadata = {
+  title: "New Arrivals — Latest Jewellery & Gifts",
+  description:
+    "Discover the newest Viora Jewel arrivals — freshly added ethnic jewellery, earrings and gifts. Free shipping across India and easy 48-hour exchange.",
+  alternates: { canonical: "/new-arrivals" },
+  openGraph: {
+    title: "New Arrivals | Viora Jewel",
+    description:
+      "The latest additions to the Viora Jewel collection — new jewellery, earrings and gifts.",
+    url: "/new-arrivals",
+  },
+};
 
 const NewArrivalsPage = ({ searchParams }: { searchParams: any }) => {
   return (

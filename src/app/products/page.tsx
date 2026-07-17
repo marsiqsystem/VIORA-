@@ -1,6 +1,20 @@
 // pages/all-products.tsx
+import type { Metadata } from "next";
 import { wixClientServer } from "@/lib/wixClientServer";
 import ProductList from "@/components/ProductList";
+
+export const metadata: Metadata = {
+  title: "All Products — Jewellery, Earrings & Gifts",
+  description:
+    "Shop the full Viora Jewel collection — ethnic jewellery sets, earrings, and gifts, mostly under ₹649. Free shipping across India and easy 48-hour exchange.",
+  alternates: { canonical: "/products" },
+  openGraph: {
+    title: "All Products | Viora Jewel",
+    description:
+      "Browse every Viora Jewel piece — jewellery sets, earrings and gifts with free shipping across India.",
+    url: "/products",
+  },
+};
 
 const ProductsPage = async ({ searchParams }: { searchParams: any }) => {
   const wixClient = await wixClientServer();

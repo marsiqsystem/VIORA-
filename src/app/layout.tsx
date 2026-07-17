@@ -56,7 +56,6 @@ export const metadata: Metadata = {
     "gold plated jewellery",
   ],
   authors: [{ name: "Viora Jewel" }],
-  alternates: { canonical: "/" },
   openGraph: {
     type: "website",
     siteName: "Viora Jewel",

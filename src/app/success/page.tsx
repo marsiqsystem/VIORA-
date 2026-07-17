@@ -83,6 +83,9 @@ const SuccessContent = () => {
       <h2 className="relative z-10 text-base md:text-xl font-medium">
         We&apos;ve sent the invoice to your email.
       </h2>
+      <p className="relative z-10 text-xs md:text-sm text-gray-500">
+        Can&apos;t find it? Please check your spam or promotions folder.
+      </p>
       <h3 className="relative z-10 text-sm md:text-base">
         Redirecting you to your order page...
       </h3>

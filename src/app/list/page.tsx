@@ -1,4 +1,5 @@
 
+import type { Metadata } from "next";
 import ProductList from "@/components/ProductList";
 import Skeleton from "@/components/Skeleton";
 import { wixClientServer } from "@/lib/wixClientServer";
@@ -9,6 +10,27 @@ import { CATEGORY_IDS, CATEGORY_LABELS } from "@/lib/categories";
 import BackButton from "@/components/BackButton";
 import CategoryStrip from "@/components/CategoryStrip";
 import { getCategoryImageMap } from "@/lib/getCategoryImageMap";
+
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: any;
+}): Promise<Metadata> {
+  const categorySlug = searchParams.cat || "all-products";
+  const categoryName =
+    CATEGORY_LABELS[categorySlug] ||
+    categorySlug
+      .replace(/-/g, " ")
+      .replace(/\b\w/g, (l: string) => l.toUpperCase());
+  const isDefault = categorySlug === "all-products";
+  return {
+    title: isDefault ? "Shop Jewellery, Earrings & Gifts" : `${categoryName}`,
+    description: `Shop ${categoryName.toLowerCase()} from Viora Jewel — affordable everyday jewellery and gifts with free shipping across India and easy 48-hour exchange.`,
+    alternates: {
+      canonical: isDefault ? "/list" : `/list?cat=${categorySlug}`,
+    },
+  };
+}
 
 const ListPage = async ({ searchParams }: { searchParams: any }) => {
   const wixClient = await wixClientServer();

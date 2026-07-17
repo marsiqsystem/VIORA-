@@ -1,7 +1,21 @@
+import type { Metadata } from "next";
 import React from "react";
 import Image from "next/image";
 import Link from "next/link";
 import BackButton from "@/components/BackButton";
+
+export const metadata: Metadata = {
+  title: "About Us",
+  description:
+    "Viora Jewel is an India-based brand crafting affordable everyday ethnic jewellery, earrings and gifts. Learn our story, values and promise.",
+  alternates: { canonical: "/about" },
+  openGraph: {
+    title: "About Viora Jewel",
+    description:
+      "The story behind Viora Jewel — affordable everyday Indian jewellery, earrings and gifts.",
+    url: "/about",
+  },
+};
 
 const AboutPage = () => {
   return (

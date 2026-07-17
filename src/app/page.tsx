@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Image from "next/image";
 import ProductList from "@/components/ProductList";
 import Skeleton from "@/components/Skeleton";
@@ -12,6 +13,10 @@ import { getCategoryImageMap } from "@/lib/getCategoryImageMap";
 // Below-the-fold product rails are already deferred via the existing Suspense
 // boundaries around ProductList (server-streamed), so no extra dynamic import
 // is needed on this route.
+
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+};
 
 const trustItems = [
   {
