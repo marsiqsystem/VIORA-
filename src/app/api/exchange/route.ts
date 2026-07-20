@@ -180,7 +180,17 @@ export async function POST(req: Request) {
   } catch (err: any) {
     console.error("Exchange request send failed:", err);
     return NextResponse.json(
-      { error: "Failed to submit your request. Please try again later." },
+      {
+        error: "Failed to submit your request. Please try again later.",
+        // TEMP DEBUG — remove after diagnosing Titan SMTP. Surfaces the SMTP
+        // failure reason (no secrets) so we can see why sending fails in prod.
+        debug: {
+          code: err?.code,
+          command: err?.command,
+          responseCode: err?.responseCode,
+          message: String(err?.message || err),
+        },
+      },
       { status: 500 }
     );
   }
