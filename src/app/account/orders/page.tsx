@@ -44,6 +44,9 @@ type ExchangeTarget = {
   id: string;
   number?: string | number;
   productName?: string;
+  customerName?: string;
+  customerEmail?: string;
+  customerPhone?: string;
 };
 
 const MyOrdersPage = () => {
@@ -273,15 +276,23 @@ const MyOrdersPage = () => {
                         </Link>
                         <button
                           type="button"
-                          onClick={() =>
+                          onClick={() => {
+                            const c = order.billingInfo?.contactDetails;
+                            const name = [c?.firstName, c?.lastName]
+                              .filter(Boolean)
+                              .join(" ")
+                              .trim();
                             setExchangeTarget({
                               id: order._id || "",
                               number: order.number,
                               productName:
                                 order.lineItems?.[0]?.productName?.original ||
                                 undefined,
-                            })
-                          }
+                              customerName: name || undefined,
+                              customerEmail: order.buyerInfo?.email || undefined,
+                              customerPhone: c?.phone || undefined,
+                            });
+                          }}
                           className="inline-flex items-center gap-2 rounded-full bg-[#9B1B30] px-4 py-2 text-xs font-semibold uppercase tracking-wider text-white transition-colors hover:bg-[#7d1626]"
                         >
                           <svg
@@ -328,6 +339,9 @@ const MyOrdersPage = () => {
         orderId={exchangeTarget?.id ?? ""}
         orderNumber={exchangeTarget?.number}
         productName={exchangeTarget?.productName}
+        customerName={exchangeTarget?.customerName}
+        customerEmail={exchangeTarget?.customerEmail}
+        customerPhone={exchangeTarget?.customerPhone}
       />
     </div>
   );

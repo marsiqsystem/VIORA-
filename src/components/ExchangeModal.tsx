@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import { uploadToWixMedia } from "@/lib/wixMediaUpload";
 
 type Props = {
   open: boolean;
@@ -12,9 +11,27 @@ type Props = {
   orderNumber?: string | number;
   /** Product name for context in the request email. */
   productName?: string;
-  /** Customer email so the team can reply directly. */
+  /** Customer identity so the team knows who requested — shown in the email. */
+  customerName?: string;
   customerEmail?: string;
+  customerPhone?: string;
 };
+
+// ~6MB original ≈ ~8MB base64 — matches the server-side cap.
+const MAX_FILE_BYTES = 6 * 1024 * 1024;
+
+/** Reads a File into a bare base64 string (no data: prefix). */
+const fileToBase64 = (f: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(new Error("Could not read the photo."));
+    reader.readAsDataURL(f);
+  });
 
 const REASONS = [
   "Product damaged",
@@ -30,7 +47,9 @@ const ExchangeModal = ({
   orderId,
   orderNumber,
   productName,
+  customerName,
   customerEmail,
+  customerPhone,
 }: Props) => {
   const [reason, setReason] = useState("");
   const [description, setDescription] = useState("");
@@ -46,6 +65,12 @@ const ExchangeModal = ({
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0] || null;
+    if (f && f.size > MAX_FILE_BYTES) {
+      setError("That photo is too large. Please pick one under 6 MB.");
+      e.target.value = "";
+      return;
+    }
+    setError(null);
     setFile(f);
     setPreviewUrl(f ? URL.createObjectURL(f) : null);
   };
@@ -67,15 +92,21 @@ const ExchangeModal = ({
     setIsSubmitting(true);
     setError(null);
     try {
-      // 1) Upload evidence image to Wix Media Manager (if provided).
-      let mediaUrl: string | undefined;
+      // Attach the evidence photo as base64 so the team gets the actual image
+      // in the email (no external hosting needed).
+      let image:
+        | { base64: string; mimeType: string; fileName: string }
+        | undefined;
       if (file) {
-        const uploaded = await uploadToWixMedia(file);
-        mediaUrl = uploaded.url;
+        image = {
+          base64: await fileToBase64(file),
+          mimeType: file.type || "image/jpeg",
+          fileName: file.name || "exchange-photo.jpg",
+        };
       }
 
-      // 2) Email the request to the team (via /api/exchange). Only mark the
-      //    request as submitted when the server actually accepts it.
+      // Email the request to the team (via /api/exchange). Only mark the
+      // request as submitted when the server actually accepts it.
       const res = await fetch("/api/exchange", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -85,8 +116,10 @@ const ExchangeModal = ({
           productName,
           reason,
           description,
-          mediaUrl,
+          customerName,
           customerEmail,
+          customerPhone,
+          image,
         }),
       });
 
