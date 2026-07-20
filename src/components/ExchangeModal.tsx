@@ -8,6 +8,12 @@ type Props = {
   open: boolean;
   onClose: () => void;
   orderId?: string;
+  /** Human-friendly order number (e.g. "10008"), shown to the team in the email. */
+  orderNumber?: string | number;
+  /** Product name for context in the request email. */
+  productName?: string;
+  /** Customer email so the team can reply directly. */
+  customerEmail?: string;
 };
 
 const REASONS = [
@@ -18,13 +24,21 @@ const REASONS = [
   "Other",
 ];
 
-const ExchangeModal = ({ open, onClose, orderId }: Props) => {
+const ExchangeModal = ({
+  open,
+  onClose,
+  orderId,
+  orderNumber,
+  productName,
+  customerEmail,
+}: Props) => {
   const [reason, setReason] = useState("");
   const [description, setDescription] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!open) return null;
 
@@ -42,6 +56,7 @@ const ExchangeModal = ({ open, onClose, orderId }: Props) => {
     setFile(null);
     setPreviewUrl(null);
     setSubmitted(false);
+    setError(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -50,6 +65,7 @@ const ExchangeModal = ({ open, onClose, orderId }: Props) => {
     if (isOther && !description.trim()) return;
 
     setIsSubmitting(true);
+    setError(null);
     try {
       // 1) Upload evidence image to Wix Media Manager (if provided).
       let mediaUrl: string | undefined;
@@ -58,17 +74,37 @@ const ExchangeModal = ({ open, onClose, orderId }: Props) => {
         mediaUrl = uploaded.url;
       }
 
-      // 2) TODO: persist the exchange request via your backend / Wix data collection.
-      //    e.g. wixClient.items.insert("ExchangeRequests", { orderId, reason, description, mediaUrl, status: "PENDING" })
-      console.log("Exchange submitted:", { orderId, reason, description, mediaUrl });
+      // 2) Email the request to the team (via /api/exchange). Only mark the
+      //    request as submitted when the server actually accepts it.
+      const res = await fetch("/api/exchange", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId,
+          orderNumber,
+          productName,
+          reason,
+          description,
+          mediaUrl,
+          customerEmail,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || "Failed to submit your request.");
+      }
 
       setSubmitted(true);
       setTimeout(() => {
         reset();
         onClose();
-      }, 1600);
-    } catch (err) {
+      }, 1800);
+    } catch (err: any) {
       console.error("Exchange submit failed:", err);
+      setError(
+        err?.message || "Something went wrong. Please try again in a moment."
+      );
     }
     setIsSubmitting(false);
   };
@@ -174,6 +210,12 @@ const ExchangeModal = ({ open, onClose, orderId }: Props) => {
                 Clear photos help our team approve your request faster.
               </p>
             </div>
+
+            {error && (
+              <p className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+                {error}
+              </p>
+            )}
 
             <button
               type="submit"

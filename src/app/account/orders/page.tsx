@@ -40,8 +40,16 @@ const SIDEBAR = [
   },
 ];
 
+type ExchangeTarget = {
+  id: string;
+  number?: string | number;
+  productName?: string;
+};
+
 const MyOrdersPage = () => {
-  const [exchangeOrderId, setExchangeOrderId] = useState<string | null>(null);
+  const [exchangeTarget, setExchangeTarget] = useState<ExchangeTarget | null>(
+    null
+  );
   const wixClient = useWixClient();
   const router = useRouter();
   const [realOrders, setRealOrders] = useState<orders.Order[]>([]);
@@ -265,7 +273,15 @@ const MyOrdersPage = () => {
                         </Link>
                         <button
                           type="button"
-                          onClick={() => setExchangeOrderId(order._id || "")}
+                          onClick={() =>
+                            setExchangeTarget({
+                              id: order._id || "",
+                              number: order.number,
+                              productName:
+                                order.lineItems?.[0]?.productName?.original ||
+                                undefined,
+                            })
+                          }
                           className="inline-flex items-center gap-2 rounded-full bg-[#9B1B30] px-4 py-2 text-xs font-semibold uppercase tracking-wider text-white transition-colors hover:bg-[#7d1626]"
                         >
                           <svg
@@ -307,9 +323,11 @@ const MyOrdersPage = () => {
       </section>
 
       <ExchangeModal
-        open={Boolean(exchangeOrderId)}
-        onClose={() => setExchangeOrderId(null)}
-        orderId={exchangeOrderId ?? ""}
+        open={Boolean(exchangeTarget)}
+        onClose={() => setExchangeTarget(null)}
+        orderId={exchangeTarget?.id ?? ""}
+        orderNumber={exchangeTarget?.number}
+        productName={exchangeTarget?.productName}
       />
     </div>
   );
