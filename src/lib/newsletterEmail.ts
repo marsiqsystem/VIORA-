@@ -1,5 +1,5 @@
-import nodemailer from "nodemailer";
 import path from "node:path";
+import { getTransporter, mailFrom } from "@/lib/mailer";
 
 // Branded welcome/newsletter email — sent from our own Gmail, in Viora's
 // format (not a Wix/Mailchimp default). Design was approved 2026-07-06.
@@ -117,23 +117,19 @@ export const renderNewsletterEmail = (): {
  * can log.
  */
 export const sendNewsletterEmail = async (to: string): Promise<boolean> => {
-  const gmailUser = process.env.GMAIL_USER;
-  const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
+  const transporter = getTransporter();
+  const from = mailFrom();
 
-  if (!gmailUser || !gmailAppPassword) {
-    console.error("Newsletter email skipped: GMAIL_USER / GMAIL_APP_PASSWORD missing.");
+  if (!transporter || !from) {
+    console.error("Newsletter email skipped: mail not configured (MAIL_* / GMAIL_*).");
     return false;
   }
 
   const { subject, html, text } = renderNewsletterEmail();
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: { user: gmailUser, pass: gmailAppPassword },
-  });
 
   try {
     await transporter.sendMail({
-      from: `"Viora Jewels" <${gmailUser}>`,
+      from,
       to,
       subject,
       text,

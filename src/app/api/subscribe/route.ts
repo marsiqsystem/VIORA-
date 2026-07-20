@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import nodemailer from "nodemailer";
+import { getTransporter, mailFrom } from "@/lib/mailer";
 import { sendNewsletterEmail } from "@/lib/newsletterEmail";
 import { markWelcomeSent, upsertNewsletterSubscriber } from "@/lib/newsletterContacts";
 import { isValidEmail, normalizeEmail } from "@/lib/validateEmail";
@@ -44,11 +44,11 @@ export async function POST(req: Request) {
       );
     }
 
-    const gmailUser = process.env.GMAIL_USER;
-    const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
+    const transporter = getTransporter();
+    const from = mailFrom("Viora Jewels Website");
 
-    if (!gmailUser || !gmailAppPassword) {
-      console.error("GMAIL_USER or GMAIL_APP_PASSWORD missing from env.");
+    if (!transporter || !from) {
+      console.error("Mail not configured (MAIL_* / GMAIL_* missing).");
       return NextResponse.json(
         { error: "Subscription service is not configured. Please try again later." },
         { status: 500 }
@@ -77,13 +77,8 @@ export async function POST(req: Request) {
       }
     }
 
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: { user: gmailUser, pass: gmailAppPassword },
-    });
-
     await transporter.sendMail({
-      from: `"Viora Jewels Website" <${gmailUser}>`,
+      from,
       to: NOTIFY_RECIPIENT,
       replyTo: clean,
       subject: "New newsletter subscriber",

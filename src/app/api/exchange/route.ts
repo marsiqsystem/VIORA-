@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import nodemailer from "nodemailer";
+import { getTransporter, mailFrom } from "@/lib/mailer";
 import {
   clientIp,
   isHoneypotFilled,
@@ -54,10 +54,10 @@ export async function POST(req: Request) {
       );
     }
 
-    const gmailUser = process.env.GMAIL_USER;
-    const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
-    if (!gmailUser || !gmailAppPassword) {
-      console.error("GMAIL_USER or GMAIL_APP_PASSWORD missing from env.");
+    const transporter = getTransporter();
+    const from = mailFrom("Viora Jewels Website");
+    if (!transporter || !from) {
+      console.error("Mail not configured (MAIL_* / GMAIL_* missing).");
       return NextResponse.json(
         { error: "Email service is not configured. Please try again later." },
         { status: 500 }
@@ -103,11 +103,6 @@ export async function POST(req: Request) {
     }
     const hasPhoto = attachments.length > 0;
 
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: { user: gmailUser, pass: gmailAppPassword },
-    });
-
     const row = (label: string, value: string) =>
       `<tr><td style="padding:6px 8px;font-weight:bold;width:120px;vertical-align:top;">${label}</td><td style="padding:6px 8px;">${value}</td></tr>`;
 
@@ -117,7 +112,7 @@ export async function POST(req: Request) {
       .map((v) => escapeHtml(v));
 
     await transporter.sendMail({
-      from: `"Viora Jewels Website" <${gmailUser}>`,
+      from,
       to: EXCHANGE_RECIPIENT,
       replyTo: customerEmail ? String(customerEmail) : undefined,
       subject: `Exchange request — Order ${orderLabel}${

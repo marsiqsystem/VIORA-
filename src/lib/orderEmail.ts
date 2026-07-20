@@ -1,4 +1,4 @@
-import nodemailer from "nodemailer";
+import { getTransporter, mailFrom } from "./mailer";
 import { isValidEmail } from "./validateEmail";
 
 // Branded, invoice-style order-confirmation email sent from our own Gmail, so
@@ -350,30 +350,26 @@ export const renderOrderEmail = (
 export const sendOrderConfirmationEmail = async (
   params: OrderEmailParams
 ): Promise<boolean> => {
-  const gmailUser = process.env.GMAIL_USER;
-  const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
+  const transporter = getTransporter();
+  const from = mailFrom();
 
-  if (!gmailUser || !gmailAppPassword) {
-    console.error("Order email skipped: GMAIL_USER / GMAIL_APP_PASSWORD missing.");
+  if (!transporter || !from) {
+    console.error("Order email skipped: mail not configured (MAIL_* / GMAIL_*).");
     return false;
   }
 
   // Don't send to a malformed address — it's a guaranteed bounce, and every
-  // bounce still burns Gmail's daily sending quota.
+  // bounce still burns the daily sending quota.
   if (!isValidEmail(params.to)) {
     console.error(`Order email skipped: invalid recipient "${params.to}".`);
     return false;
   }
 
   const { subject, html, text } = renderOrderEmail(params);
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: { user: gmailUser, pass: gmailAppPassword },
-  });
 
   try {
     await transporter.sendMail({
-      from: `"Viora Jewels" <${gmailUser}>`,
+      from,
       to: params.to,
       subject,
       text,
