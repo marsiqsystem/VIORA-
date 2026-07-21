@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getTransporter, mailFrom } from "@/lib/mailer";
+import { isMailConfigured, sendMail } from "@/lib/mailer";
 import { isValidEmail } from "@/lib/validateEmail";
 import {
   clientIp,
@@ -44,9 +44,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const transporter = getTransporter();
-    const from = mailFrom("Viora Jewels Website");
-    if (!transporter || !from) {
+    if (!isMailConfigured()) {
       console.error("Mail not configured (MAIL_* / GMAIL_* missing).");
       return NextResponse.json(
         { error: "Email service is not configured. Please try again later." },
@@ -64,8 +62,8 @@ export async function POST(req: Request) {
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
 
-    await transporter.sendMail({
-      from,
+    await sendMail({
+      fromName: "Viora Jewels Website",
       to: CONTACT_RECIPIENT,
       replyTo: `"${safeText(fullName)}" <${safeText(email)}>`,
       subject: `Website enquiry from ${safeText(fullName)}`,

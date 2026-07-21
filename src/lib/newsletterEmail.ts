@@ -1,5 +1,5 @@
 import path from "node:path";
-import { getTransporter, mailFrom } from "@/lib/mailer";
+import { isMailConfigured, sendMail } from "@/lib/mailer";
 
 // Branded welcome/newsletter email — sent from our own Gmail, in Viora's
 // format (not a Wix/Mailchimp default). Design was approved 2026-07-06.
@@ -117,10 +117,7 @@ export const renderNewsletterEmail = (): {
  * can log.
  */
 export const sendNewsletterEmail = async (to: string): Promise<boolean> => {
-  const transporter = getTransporter();
-  const from = mailFrom();
-
-  if (!transporter || !from) {
+  if (!isMailConfigured()) {
     console.error("Newsletter email skipped: mail not configured (MAIL_* / GMAIL_*).");
     return false;
   }
@@ -128,8 +125,7 @@ export const sendNewsletterEmail = async (to: string): Promise<boolean> => {
   const { subject, html, text } = renderNewsletterEmail();
 
   try {
-    await transporter.sendMail({
-      from,
+    await sendMail({
       to,
       subject,
       text,
