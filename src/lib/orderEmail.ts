@@ -1,4 +1,4 @@
-import { getTransporter, mailFrom } from "./mailer";
+import { isMailConfigured, sendMail } from "./mailer";
 import { isValidEmail } from "./validateEmail";
 
 // Branded, invoice-style order-confirmation email sent from our own Gmail, so
@@ -350,10 +350,7 @@ export const renderOrderEmail = (
 export const sendOrderConfirmationEmail = async (
   params: OrderEmailParams
 ): Promise<boolean> => {
-  const transporter = getTransporter();
-  const from = mailFrom();
-
-  if (!transporter || !from) {
+  if (!isMailConfigured()) {
     console.error("Order email skipped: mail not configured (MAIL_* / GMAIL_*).");
     return false;
   }
@@ -368,8 +365,7 @@ export const sendOrderConfirmationEmail = async (
   const { subject, html, text } = renderOrderEmail(params);
 
   try {
-    await transporter.sendMail({
-      from,
+    await sendMail({
       to: params.to,
       subject,
       text,

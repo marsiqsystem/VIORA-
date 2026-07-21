@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getTransporter, mailFrom } from "@/lib/mailer";
+import { isMailConfigured, sendMail } from "@/lib/mailer";
 import { sendNewsletterEmail } from "@/lib/newsletterEmail";
 import { markWelcomeSent, upsertNewsletterSubscriber } from "@/lib/newsletterContacts";
 import { isValidEmail, normalizeEmail } from "@/lib/validateEmail";
@@ -44,10 +44,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const transporter = getTransporter();
-    const from = mailFrom("Viora Jewels Website");
-
-    if (!transporter || !from) {
+    if (!isMailConfigured()) {
       console.error("Mail not configured (MAIL_* / GMAIL_* missing).");
       return NextResponse.json(
         { error: "Subscription service is not configured. Please try again later." },
@@ -77,8 +74,8 @@ export async function POST(req: Request) {
       }
     }
 
-    await transporter.sendMail({
-      from,
+    await sendMail({
+      fromName: "Viora Jewels Website",
       to: NOTIFY_RECIPIENT,
       replyTo: clean,
       subject: "New newsletter subscriber",
