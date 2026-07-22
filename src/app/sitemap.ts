@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { wixClientServer } from "@/lib/wixClientServer";
 import { getAllJournalPosts } from "@/lib/journal";
+import { isDuplicateSlug } from "@/lib/duplicateProducts";
 
 // Regenerate the sitemap at most once per hour so newly published products
 // get picked up without rebuilding the whole site.
@@ -48,6 +49,10 @@ async function getProductEntries(): Promise<MetadataRoute.Sitemap> {
       for (const product of query.items) {
         // Only index active/visible products that have a usable slug.
         if (product.visible === false || !product.slug) continue;
+
+        // Wix duplicate-product clones sell the same item as the original, so
+        // listing them here asks Google to choose between two identical URLs.
+        if (isDuplicateSlug(product.slug)) continue;
 
         // Collect product image URLs for the image sitemap extension. AI image
         // search (Gemini Vision, ChatGPT Vision) prefers products whose images

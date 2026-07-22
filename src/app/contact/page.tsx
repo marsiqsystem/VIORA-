@@ -3,17 +3,23 @@ import React, { useState } from "react";
 import Image from "next/image";
 import { trackContact, trackLead } from "@/lib/metaPixel";
 import BackButton from "@/components/BackButton";
+import { HONEYPOT_FIELD } from "@/lib/apiGuard";
 
 const CONTACT_EMAIL = "viorajewels6@gmail.com";
 
+const EMPTY_FORM = {
+  title: "",
+  firstName: "",
+  lastName: "",
+  email: "",
+  query: "",
+  // Honeypot: /api/contact rejects any submission where this is non-empty.
+  // Humans never see it; bots that fill every field do.
+  [HONEYPOT_FIELD]: "",
+};
+
 const ContactPage = () => {
-  const [formData, setFormData] = useState({
-    title: "",
-    firstName: "",
-    lastName: "",
-    email: "",
-    query: "",
-  });
+  const [formData, setFormData] = useState(EMPTY_FORM);
   const [showPopup, setShowPopup] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -48,13 +54,7 @@ const ContactPage = () => {
 
       trackLead();
       setShowPopup(true);
-      setFormData({
-        title: "",
-        firstName: "",
-        lastName: "",
-        email: "",
-        query: "",
-      });
+      setFormData(EMPTY_FORM);
     } catch (err: any) {
       setSubmitError(err?.message || "Failed to send. Please try again.");
     } finally {
@@ -115,6 +115,26 @@ const ContactPage = () => {
             </p>
 
             <form onSubmit={handleSubmit} className="space-y-5">
+              {/* Honeypot. Off-screen rather than display:none — some bots skip
+                  hidden fields but still fill positioned ones. Never focusable,
+                  never announced to screen readers. */}
+              <input
+                type="text"
+                name={HONEYPOT_FIELD}
+                value={formData[HONEYPOT_FIELD]}
+                onChange={handleChange}
+                tabIndex={-1}
+                autoComplete="off"
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  left: "-9999px",
+                  width: "1px",
+                  height: "1px",
+                  opacity: 0,
+                }}
+              />
+
               {/* Title */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
