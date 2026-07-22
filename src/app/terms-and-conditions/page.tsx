@@ -148,9 +148,9 @@ const TermsAndConditionsPage = () => {
               Questions? Write to us at{" "}
               <a
                 className="text-accent underline"
-                href="mailto:viorajewels6@gmail.com"
+                href="mailto:mail@viorajewel.in"
               >
-                viorajewels6@gmail.com
+                mail@viorajewel.in
               </a>
               .
             </p>

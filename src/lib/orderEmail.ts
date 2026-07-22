@@ -13,7 +13,7 @@ import { isValidEmail } from "./validateEmail";
 const BRAND = "#9B1B30";
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || "https://viorajewel.in").replace(/\/$/, "");
 const LOGO_URL = `${SITE_URL}/email-logo.png`;
-const SUPPORT_EMAIL = "viorajewels6@gmail.com";
+const SUPPORT_EMAIL = "mail@viorajewel.in";
 
 type OrderEmailItem = {
   name: string;

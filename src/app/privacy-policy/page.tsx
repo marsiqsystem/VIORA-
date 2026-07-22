@@ -181,9 +181,9 @@ const PrivacyPolicyPage = () => {
               settings, or (c) emailing{" "}
               <a
                 className="text-accent underline"
-                href="mailto:viorajewels6@gmail.com"
+                href="mailto:mail@viorajewel.in"
               >
-                viorajewels6@gmail.com
+                mail@viorajewel.in
               </a>
               . Withdrawing consent does not affect processing already carried
               out before withdrawal.
@@ -240,9 +240,9 @@ const PrivacyPolicyPage = () => {
               To exercise any of these rights, email{" "}
               <a
                 className="text-accent underline"
-                href="mailto:viorajewels6@gmail.com"
+                href="mailto:mail@viorajewel.in"
               >
-                viorajewels6@gmail.com
+                mail@viorajewel.in
               </a>
               . We will respond within 30 days.
             </p>
@@ -260,9 +260,9 @@ const PrivacyPolicyPage = () => {
               please write to{" "}
               <a
                 className="text-accent underline"
-                href="mailto:viorajewels6@gmail.com"
+                href="mailto:mail@viorajewel.in"
               >
-                viorajewels6@gmail.com
+                mail@viorajewel.in
               </a>
               .
             </p>
@@ -312,9 +312,9 @@ const PrivacyPolicyPage = () => {
               to{" "}
               <a
                 className="text-accent underline"
-                href="mailto:viorajewels6@gmail.com"
+                href="mailto:mail@viorajewel.in"
               >
-                viorajewels6@gmail.com
+                mail@viorajewel.in
               </a>
               .
             </p>

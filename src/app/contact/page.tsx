@@ -5,7 +5,7 @@ import { trackContact, trackLead } from "@/lib/metaPixel";
 import BackButton from "@/components/BackButton";
 import { HONEYPOT_FIELD } from "@/lib/apiGuard";
 
-const CONTACT_EMAIL = "viorajewels6@gmail.com";
+const CONTACT_EMAIL = "mail@viorajewel.in";
 
 const EMPTY_FORM = {
   title: "",

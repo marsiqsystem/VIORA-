@@ -97,9 +97,9 @@ const ShippingPolicyPage = () => {
               email{" "}
               <a
                 className="text-accent underline"
-                href="mailto:viorajewels6@gmail.com"
+                href="mailto:mail@viorajewel.in"
               >
-                viorajewels6@gmail.com
+                mail@viorajewel.in
               </a>{" "}
               with your order ID and we&apos;ll investigate within 24 hours.
             </p>

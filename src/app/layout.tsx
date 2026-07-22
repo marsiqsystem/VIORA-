@@ -4,12 +4,14 @@ import "lenis/dist/lenis.css";
 import "./globals.css";
 import dynamic from "next/dynamic";
 import Script from "next/script";
+import { GoogleTagManager } from "@next/third-parties/google";
 import Navbar from "@/components/Navbar";
 import SmoothScroll from "@/components/SmoothScroll";
 
 const GTAG_ID = "GT-T8ZJVVT9";
 const GOOGLE_ADS_ID = "AW-18325090177";
 const GA4_ID = "G-2PY7N0E5WE";
+const GTM_ID = process.env.NEXT_PUBLIC_GTM_ID;
 
 // Below-the-fold / non-critical → defer JS to shrink the initial bundle.
 const Footer = dynamic(() => import("@/components/Footer"));
@@ -99,7 +101,7 @@ const organizationSchema = {
   alternateName: "Viora Jewels",
   url: SITE_URL,
   logo: `${SITE_URL}/logo%20compressed.png`,
-  email: "viorajewels6@gmail.com",
+  email: "mail@viorajewel.in",
   description:
     "Viora Jewel is an Indian direct-to-consumer brand offering affordable everyday fashion jewellery, earrings and gifting pieces mostly under ₹649, with free shipping across India and an easy 48-hour exchange on damaged or incorrect items.",
   address: {
@@ -113,7 +115,7 @@ const organizationSchema = {
   contactPoint: {
     "@type": "ContactPoint",
     contactType: "customer support",
-    email: "viorajewels6@gmail.com",
+    email: "mail@viorajewel.in",
     areaServed: "IN",
     availableLanguage: ["English", "Hindi"],
     url: `${SITE_URL}/contact`,
@@ -167,6 +169,7 @@ export default function RootLayout({
       lang="en-IN"
       className={`${montserrat.variable} ${cormorant.variable} w-full max-w-[100vw]`}
     >
+      {GTM_ID && <GoogleTagManager gtmId={GTM_ID} />}
       <head>
         <script
           type="application/ld+json"
