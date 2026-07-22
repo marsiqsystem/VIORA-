@@ -18,44 +18,55 @@ const ProductList = async ({
   searchParams?: any;
   featuredNames?: readonly string[];
 }) => {
-  const wixClient = await wixClientServer();
-
-  // Note: name search is applied in-memory (case-insensitive substring) below,
-  // NOT via .startsWith here. Wix's startsWith is case-sensitive and prefix-only,
-  // so searching "blue" would never match "Eternal Shine ... - Blue".
-  let productQuery = wixClient.products
-    .queryProducts()
-    .hasSome(
-      "productType",
-      searchParams?.type ? [searchParams.type] : ["physical", "digital"]
-    )
-    .gt("priceData.price", searchParams?.min || 0)
-    .lt("priceData.price", searchParams?.max || 999999);
-
-  if (categoryId) {
-    productQuery = productQuery.hasSome("collectionIds", [categoryId]);
-  }
-
-  if (searchParams?.sort) {
-    const [sortType, sortBy] = searchParams.sort.split(" ");
-    if (sortType === "asc") productQuery = productQuery.ascending(sortBy);
-    if (sortType === "desc") productQuery = productQuery.descending(sortBy);
-  }
-
   const pageSize = limit || PRODUCT_PER_PAGE;
   const requestedPage = searchParams?.page ? parseInt(searchParams.page) : 0;
   const currentPage = Number.isFinite(requestedPage) ? Math.max(requestedPage, 0) : 0;
 
-  const res = await productQuery.limit(PRODUCT_FETCH_LIMIT).find();
+  // A flaky Wix response must not fail the build. This renders on statically
+  // prerendered pages (/, /products), and the surrounding Suspense boundary
+  // does NOT catch a throw during export — one 502 takes the whole deploy down,
+  // the way it did on /gift-packaging. Degrade to the empty state instead.
+  let fetchedItems: products.Product[] = [];
+
+  try {
+    const wixClient = await wixClientServer();
+
+    // Note: name search is applied in-memory (case-insensitive substring) below,
+    // NOT via .startsWith here. Wix's startsWith is case-sensitive and prefix-only,
+    // so searching "blue" would never match "Eternal Shine ... - Blue".
+    let productQuery = wixClient.products
+      .queryProducts()
+      .hasSome(
+        "productType",
+        searchParams?.type ? [searchParams.type] : ["physical", "digital"]
+      )
+      .gt("priceData.price", searchParams?.min || 0)
+      .lt("priceData.price", searchParams?.max || 999999);
+
+    if (categoryId) {
+      productQuery = productQuery.hasSome("collectionIds", [categoryId]);
+    }
+
+    if (searchParams?.sort) {
+      const [sortType, sortBy] = searchParams.sort.split(" ");
+      if (sortType === "asc") productQuery = productQuery.ascending(sortBy);
+      if (sortType === "desc") productQuery = productQuery.descending(sortBy);
+    }
+
+    const res = await productQuery.limit(PRODUCT_FETCH_LIMIT).find();
+    fetchedItems = res.items;
+  } catch (err) {
+    console.error("[ProductList] product fetch failed, rendering empty state:", err);
+  }
 
   // Case-insensitive substring search across the product name. Matches any
   // word (e.g. "blue" hits "Eternal Shine Jewelry Set - Blue").
   const searchTerm = (searchParams?.q || "").trim().toLowerCase();
   const searchedItems = searchTerm
-    ? res.items.filter((item) =>
+    ? fetchedItems.filter((item) =>
         (item.name || "").toLowerCase().includes(searchTerm)
       )
-    : res.items;
+    : fetchedItems;
 
   // Override which color variant is shown on the listing page for specific
   // products. Key = lowercase base name, value = lowercase color suffix.
