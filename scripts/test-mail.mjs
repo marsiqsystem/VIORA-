@@ -82,18 +82,33 @@ console.log(`  GMAIL_APP_PASSWORD: ${describeSecret(GMAIL_APP_PASSWORD)}`);
 if (MAIL_HOST && MAIL_USER && MAIL_PASS) {
   // Try both ports: 465 is implicit TLS, 587 is STARTTLS. Some hosts allow only
   // one of them, and that shows up as an auth-ish failure on the wrong port.
-  const ports = MAIL_PORT ? [Number(MAIL_PORT)] : [465, 587];
-  for (const port of ports) {
-    await tryTransport(
-      `Titan ${MAIL_HOST}:${port}`,
-      {
-        host: MAIL_HOST,
-        port,
-        secure: port === 465,
-        auth: { user: MAIL_USER, pass: MAIL_PASS },
-      },
-      MAIL_USER
-    );
+  const ports = MAIL_PORT ? [Number(MAIL_PORT), 587] : [465, 587];
+
+  // Try both SMTP endpoints. The mailbox was bought through GoDaddy, whose
+  // "Professional Email" IS Titan white-labelled — and those mailboxes live on
+  // GoDaddy's own relay, not on titan.email's direct one. Same credentials,
+  // different server: the wrong one answers the handshake and THEN rejects
+  // AUTH with 535, which is exactly the symptom we have. Test both, once.
+  const hosts = Array.from(
+    new Set([MAIL_HOST, "smtp.titan.email", "smtpout.secureserver.net"])
+  );
+
+  for (const host of hosts) {
+    for (const port of Array.from(new Set(ports))) {
+      const ok = await tryTransport(
+        `${host}:${port}`,
+        {
+          host,
+          port,
+          secure: port === 465,
+          auth: { user: MAIL_USER, pass: MAIL_PASS },
+        },
+        MAIL_USER
+      );
+      if (ok) {
+        console.log(`\n   ⇧ USE THIS: MAIL_HOST=${host}  MAIL_PORT=${port}`);
+      }
+    }
   }
 } else {
   console.log("\n── Titan ── skipped: MAIL_HOST / MAIL_USER / MAIL_PASS not all set.");
