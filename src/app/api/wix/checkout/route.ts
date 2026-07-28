@@ -493,7 +493,24 @@ export async function POST(req: Request) {
       order: committedOrder || approvedOrderResult?.order || (orderResult as any)?.order,
     });
   } catch (err: any) {
+    // Log the FULL Wix error so the exact rule/code is visible in Vercel logs.
     console.error("Wix checkout finalization failed:", err);
-    return NextResponse.json({ error: getWixErrorMessage(err) }, { status: 500 });
+    try {
+      console.error(
+        "Wix error details:",
+        JSON.stringify(err?.details ?? err, null, 2)
+      );
+    } catch {}
+
+    // Surface the Wix applicationError CODE alongside its description so a failed
+    // checkout tells us which rule fired (e.g. a minimum-order rule) instead of
+    // just an opaque amount.
+    const code = err?.details?.applicationError?.code;
+    const description = getWixErrorMessage(err);
+    const message = code ? `${code}: ${description}` : description;
+    return NextResponse.json(
+      { error: message, code: code ?? null, details: err?.details ?? null },
+      { status: 500 }
+    );
   }
 }
