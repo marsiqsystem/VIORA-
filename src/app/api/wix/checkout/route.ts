@@ -108,6 +108,28 @@ const flattenCalculationErrors = (value: unknown): string[] => {
   ];
 };
 
+// Create the order, but survive a coupon that no longer meets its minimum.
+// A shopper can apply CLUBVIORA (min ₹999), then remove an item so the subtotal
+// drops below ₹999 — the coupon stays attached to the Wix cart and createOrder
+// then fails with ERROR_INVALID_SUBTOTAL. Rather than losing the order, strip
+// the coupon and place it at the normal price.
+const createOrderWithCouponFallback = async (wixClient: any, checkoutId: string) => {
+  try {
+    return await wixClient.checkout.createOrder(checkoutId);
+  } catch (err: any) {
+    if (err?.details?.applicationError?.code !== "ERROR_INVALID_SUBTOTAL") throw err;
+    console.warn(
+      "createOrder hit ERROR_INVALID_SUBTOTAL — removing the invalid coupon and retrying."
+    );
+    try {
+      await wixClient.checkout.removeCoupon(checkoutId);
+    } catch (rmErr) {
+      console.error("Failed to remove coupon from checkout:", rmErr);
+    }
+    return await wixClient.checkout.createOrder(checkoutId);
+  }
+};
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -206,7 +228,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const orderResult = await wixClient.checkout.createOrder(checkoutId);
+    const orderResult = await createOrderWithCouponFallback(wixClient, checkoutId);
     const orderId =
       (orderResult as any)?.orderId ||
       (orderResult as any)?.order?._id ||
