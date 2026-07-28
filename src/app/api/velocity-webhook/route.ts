@@ -9,9 +9,10 @@
 // The customer (name/phone/product) is NOT in the webhook — we recover it from
 // Wix by the order reference Velocity echoes back, or by AWB as a fallback.
 //
-// NOTE: velocity.parseStatusWebhook / normalizeStatus are still SCAFFOLD until
-// Velocity provides their real status-webhook spec (payload shape + exact status
-// strings + signature). Everything else here is ready.
+// NOTE: velocity.parseStatusWebhook / normalizeStatus are wired to Velocity's
+// tracking payload shape (order_external_id / tracking_number / shipment_status).
+// The one open item is verifyWebhook — the shared-secret/HMAC check stays a
+// scaffold until Velocity confirms the header they sign requests with.
 
 import { NextRequest, NextResponse } from "next/server";
 import * as velocity from "@/lib/crm/velocity";
@@ -31,7 +32,7 @@ async function dispatchOnce(order: any, flagKey: string, sendFn: (o: any) => Pro
   }
   const result = await sendFn(order);
   if (result.ok && !result.dryRun) {
-    await wix.setFlag(order.orderId, flagKey);
+    await wix.setFlag(order.orderGuid || order.orderId, flagKey);
     console.log(`[velocity-webhook] ${flagKey} sent for ${order.orderId}.`);
   } else if (!result.ok) {
     console.error(`[velocity-webhook] ${flagKey} FAILED:`, result.error);
@@ -75,7 +76,7 @@ export async function POST(req: NextRequest) {
       await dispatchOnce(order, "wa_wf2_sent", notify.sendOutForDelivery);
     } else if (status === "DELIVERED") {
       // Stamp delivery in Wix so the review queue (WF4) can find it in 3 days.
-      await wix.markDelivered(order.orderId, Date.now());
+      await wix.markDelivered(order.orderGuid || order.orderId, Date.now());
       await dispatchOnce(order, "wa_wf3_sent", notify.sendDelivered);
     }
   } catch (err) {

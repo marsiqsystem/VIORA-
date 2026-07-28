@@ -80,11 +80,15 @@ async function processOrder(body: any) {
 
   wix.ensureMockOrder(order);
 
+  // The GUID is what every Wix API call keys on (fulfillment write, order fetch,
+  // flag write); the human number is only for display. Fall back to the number.
+  const wixKey = info.orderGuid || info.orderId;
+
   // 3) Velocity shipment.
   const ship: any = await velocity.createShipment(order);
   if (ship.ok && ship.awb) {
     // 4) Write tracking back into Wix — the storefront reads it from there.
-    await wix.pushTracking(info.orderId, { awb: ship.awb, trackingUrl: ship.trackingUrl });
+    await wix.pushTracking(wixKey, { awb: ship.awb, trackingUrl: ship.trackingUrl });
     order.awb = ship.awb;
     order.trackingUrl = ship.trackingUrl;
     console.log(`[wix-webhook] tracking pushed to Wix: awb=${ship.awb}`);
@@ -98,7 +102,7 @@ async function processOrder(body: any) {
   }
 
   // 5) WF1 with Wix-flag idempotency.
-  const current = (await wix.getOrder(info.orderId)) || order;
+  const current = (await wix.getOrder(wixKey)) || order;
   if (wix.getFlag(current, WF1_FLAG)) {
     console.log(`[wix-webhook] ${WF1_FLAG} already set for ${info.orderId} — skip WF1.`);
     return;
@@ -106,7 +110,7 @@ async function processOrder(body: any) {
 
   const result: any = await notify.sendOrderConfirmation(order);
   if (result.ok && !result.dryRun) {
-    await wix.setFlag(info.orderId, WF1_FLAG);
+    await wix.setFlag(wixKey, WF1_FLAG);
     console.log(`[wix-webhook] WF1 ${T.orderConfirmation.name} sent.`);
   } else if (result.dryRun) {
     console.log("[wix-webhook] WF1 DRY RUN (flag not set).");

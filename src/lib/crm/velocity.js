@@ -32,6 +32,7 @@ function cfg() {
     username: process.env.VELOCITY_USERNAME, // registered mobile number
     password: process.env.VELOCITY_PASSWORD,
     warehouseId: process.env.VELOCITY_WAREHOUSE_ID, // pre-registered pickup warehouse
+    pickupLocation: process.env.VELOCITY_PICKUP_LOCATION, // warehouse display name (API requires it)
     trackBase: (process.env.VELOCITY_TRACK_URL_BASE || "https://shipfastt.in/track").replace(
       /\/$/,
       ""
@@ -133,11 +134,15 @@ function buildShipmentPayload(o) {
           name: it.name || o.product || "Jewellery",
           sku: it.sku || `SKU-${i + 1}`,
           units: Number(it.quantity) || 1,
+          selling_price: Number(it.price) || Number(o.amount) || 0,
         }))
-      : [{ name: o.product || "Jewellery", sku: "SKU-1", units: 1 }];
+      : [{ name: o.product || "Jewellery", sku: "SKU-1", units: 1, selling_price: amount }];
 
   return {
-    order_id: o.orderId,
+    // Send the Wix order GUID as Velocity's order_id so the status webhook's
+    // order_external_id maps straight back to the Wix order (falls back to the
+    // human order number if the GUID isn't available).
+    order_id: o.orderGuid || o.orderId,
     order_date: formatOrderDate(new Date()),
     billing_customer_name: o.name || "Customer",
     billing_address: address.line1 || "",
@@ -147,6 +152,8 @@ function buildShipmentPayload(o) {
     billing_country: address.country || "India",
     billing_phone: o.phone || "",
     payment_method: isCOD ? "COD" : "PREPAID",
+    print_label: true, // REQUIRED by Velocity: auto-generate the shipping label
+    pickup_location: c.pickupLocation || "", // REQUIRED: the warehouse's display name
     sub_total: amount,
     cod_collectible: isCOD ? amount : 0,
     length: c.dims.length,
@@ -251,12 +258,16 @@ async function createShipment(o) {
 }
 
 // ===========================================================================
-// STATUS WEBHOOK (WF2/WF3) — STILL SCAFFOLD until Velocity sends the spec
+// STATUS WEBHOOK (WF2/WF3) — written against Velocity's tracking payload shape
+// (Shiprocket-style: shipment_status / tracking_number / order_external_id).
+// Signature verification (verifyWebhook) is the only remaining scaffold — it
+// stays open until Velocity confirms their secret/HMAC header.
 // ===========================================================================
 
 /**
- * Map a raw Velocity status webhook to our internal status enum.
- * TODO(velocity): replace the right-hand strings with Velocity's actual values.
+ * Map a raw Velocity status webhook to our internal status enum. We only act on
+ * the two states that trigger a customer message (WF2/WF3); everything else is
+ * OTHER and acknowledged with a 200.
  * @returns {"OUT_FOR_DELIVERY"|"DELIVERED"|"OTHER"}
  */
 function normalizeStatus(raw) {
@@ -268,17 +279,75 @@ function normalizeStatus(raw) {
 
 /**
  * Pull { reference, awb, status } out of a Velocity status webhook body.
- * TODO(velocity): correct these paths to the real payload shape.
+ * reference = the order_id we sent at creation (the Wix GUID), echoed back as
+ * order_external_id; awb = tracking_number. Falls back through legacy field names.
  */
 function parseStatusWebhook(body) {
   const b = body || {};
   const data = b.data || b;
   return {
-    reference: data.reference || data.order_id || data.client_order_id || null,
-    awb: data.awb || data.waybill || data.awb_code || data.tracking_number || null,
-    rawStatus: data.status || data.current_status || data.event || null,
-    status: normalizeStatus(data.status || data.current_status || data.event),
+    // order_external_id is the order_id WE sent to Velocity at creation (the Wix
+    // order GUID) — the reliable key back to the Wix order. tracking_number = AWB.
+    reference: data.order_external_id || data.order_id || data.reference || null,
+    awb: data.tracking_number || data.awb || data.awb_code || null,
+    trackingUrl: data.tracking_url || null,
+    rawStatus: data.status || data.current_status || null,
+    status: normalizeStatus(data.status || data.current_status),
   };
+}
+
+/**
+ * Live tracking for the storefront timeline. POST /custom/api/v1/order-tracking
+ * with the AWB -> current shipment_status + activity list. Never throws.
+ * @returns {Promise<{ok:boolean, status?:string, activities?:any[], trackUrl?:string, error?:any}>}
+ */
+async function trackShipment(awb) {
+  const c = cfg();
+  if (c.mock || !c.enabled) {
+    return { ok: true, dryRun: true, status: "in_transit", activities: [], trackUrl: `${c.trackBase}/${awb}` };
+  }
+  if (!awb) return { ok: false, error: "no awb" };
+  try {
+    return await withRetry(
+      async () => {
+        const post = (token) =>
+          fetch(`${c.baseUrl}/custom/api/v1/order-tracking`, {
+            method: "POST",
+            headers: { Authorization: token, "Content-Type": "application/json" },
+            body: JSON.stringify({ awbs: [awb] }),
+          });
+        let token = await getToken();
+        let res = await post(token);
+        if (res.status === 401) {
+          tokenCache = null;
+          token = await getToken(true);
+          res = await post(token);
+        }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const e = new Error(`velocity track failed HTTP ${res.status}`);
+          e.status = res.status;
+          throw e;
+        }
+        const rec = data?.result?.[awb]?.tracking_data || {};
+        return {
+          ok: true,
+          dryRun: false,
+          status:
+            rec.shipment_status ||
+            rec.shipment_track?.[0]?.current_status ||
+            null,
+          activities: rec.shipment_track_activities || [],
+          trackUrl: rec.track_url || `${c.trackBase}/${awb}`,
+          raw: data,
+        };
+      },
+      { label: "velocity.trackShipment", retries: 2 }
+    );
+  } catch (err) {
+    console.error("[velocity] trackShipment failed:", err?.message || err);
+    return { ok: false, error: err?.message || String(err) };
+  }
 }
 
 /**
@@ -297,6 +366,7 @@ export {
   createShipment,
   buildShipmentPayload,
   getToken,
+  trackShipment,
   normalizeStatus,
   parseStatusWebhook,
   verifyWebhook,

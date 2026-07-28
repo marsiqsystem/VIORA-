@@ -60,6 +60,9 @@ function normalize(wixOrder) {
     {};
   return {
     orderId: info.orderId,
+    // The Wix GUID — every Wix write (fulfillment, extendedFields flag, delivered
+    // stamp) keys on this, not the human order number.
+    orderGuid: info.orderGuid || wixOrder._id || wixOrder.id || null,
     phone: info.phone,
     name: info.customerName,
     product: info.product,

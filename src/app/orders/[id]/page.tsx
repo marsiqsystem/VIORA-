@@ -7,6 +7,7 @@ import OrderTimeline, {
   ORDER_STAGES,
   OrderStageKey,
 } from "@/components/OrderTimeline";
+import * as velocity from "@/lib/crm/velocity";
 
 export const dynamic = "force-dynamic";
 
@@ -46,31 +47,24 @@ async function getTracking(
   return null;
 }
 
-// --- Which timeline step has the order reached? Derived purely from Wix state:
-//   DELIVERED  when fulfillmentStatus === FULFILLED (backend markDelivered)
-//   OUT_FOR_DELIVERY  when the backend stamps it (extendedFields flag; lights up
-//                     once Velocity's status webhook is wired — see note below)
-//   SHIPPED    when a carrier tracking record exists on the order
-//   CONFIRMED  otherwise (order placed)
-function computeStageIndex(
-  order: any,
+// --- Map a LIVE Velocity shipment status to our 4-step timeline stage. The
+// storefront asks Velocity's order-tracking API for the AWB's real status, so the
+// timeline reflects the courier truth (not the Wix fulfillment flag, which flips
+// to FULFILLED the moment we attach an AWB and would falsely read as delivered).
+function stageFromVelocity(
+  status: string | null | undefined,
   hasTracking: boolean
 ): { index: number; canceled: boolean } {
-  const status = String(order?.status || "").toUpperCase();
-  if (status === "CANCELED" || status === "CANCELLED") {
-    return { index: 0, canceled: true };
-  }
-
-  const fulfillment = String(order?.fulfillmentStatus || "").toUpperCase();
-  const ofdFlag =
-    order?.extendedFields?.namespaces?.["@viora/whatsapp"]?.wa_wf2_sent === true ||
-    order?.extendedFields?.namespaces?.["@viora/whatsapp"]?.out_for_delivery === true;
-
-  if (fulfillment === "FULFILLED") return { index: 3, canceled: false }; // Delivered
-  if (ofdFlag) return { index: 2, canceled: false }; // Out for Delivery
-  if (hasTracking || fulfillment === "PARTIALLY_FULFILLED")
-    return { index: 1, canceled: false }; // Shipped
-  return { index: 0, canceled: false }; // Confirmed
+  const s = String(status || "").toLowerCase();
+  if (["cancelled", "canceled", "rejected", "lost", "return_cancelled", "return_rejected"].includes(s))
+    return { index: 1, canceled: true };
+  if (["delivered", "rto_delivered", "return_delivered"].includes(s))
+    return { index: 3, canceled: false }; // Delivered
+  if (s === "out_for_delivery") return { index: 2, canceled: false }; // Out for Delivery
+  // Any other live status (in_transit, pickup_scheduled, ndr_raised, …) with an
+  // AWB present = at least Shipped.
+  if (hasTracking) return { index: 1, canceled: false };
+  return { index: 0, canceled: false }; // Confirmed — no shipment yet
 }
 
 const OrderPage = async ({ params }: { params: { id: string } }) => {
@@ -108,7 +102,31 @@ const OrderPage = async ({ params }: { params: { id: string } }) => {
   }
 
   const tracking = await getTracking(wixClient, id);
-  const { index: stageIndex, canceled } = computeStageIndex(order, Boolean(tracking));
+
+  // Ask Velocity for the AWB's live status so the timeline shows the courier's
+  // real progress (Shipped -> Out for Delivery -> Delivered).
+  let liveStatus: string | null = null;
+  let liveTrackUrl: string | undefined = tracking?.trackingLink;
+  let liveActivities: { date?: string; activity?: string; location?: string }[] = [];
+  if (tracking?.trackingNumber) {
+    try {
+      const t: any = await velocity.trackShipment(tracking.trackingNumber);
+      if (t?.ok) {
+        liveStatus = t.status || null;
+        if (t.trackUrl) liveTrackUrl = t.trackUrl;
+        liveActivities = Array.isArray(t.activities) ? t.activities : [];
+      }
+    } catch {
+      /* tracking is best-effort — fall back to "Shipped" if AWB exists */
+    }
+  }
+
+  const wixCanceled = ["CANCELED", "CANCELLED"].includes(
+    String(order?.status || "").toUpperCase()
+  );
+  const stage = stageFromVelocity(liveStatus, Boolean(tracking));
+  const stageIndex = stage.index;
+  const canceled = wixCanceled || stage.canceled;
 
   const receiverName =
     [
@@ -188,10 +206,24 @@ const OrderPage = async ({ params }: { params: { id: string } }) => {
               <OrderTimeline currentIndex={stageIndex} timestamps={timestamps} canceled={canceled} />
             </div>
 
+            {/* Latest courier update (from Velocity's live tracking) */}
+            {liveActivities.length > 0 && (
+              <div className="mt-4 rounded-xl bg-platinum/60 px-4 py-3 text-xs text-gray-600">
+                <span className="font-semibold text-[#1A1410]">Latest update: </span>
+                {[
+                  liveActivities[0].activity,
+                  liveActivities[0].location,
+                  liveActivities[0].date,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </div>
+            )}
+
             {/* Live tracking button */}
-            {tracking?.trackingLink ? (
+            {liveTrackUrl ? (
               <a
-                href={tracking.trackingLink}
+                href={liveTrackUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#1A1410] px-6 py-3.5 text-sm font-semibold text-white transition-colors hover:bg-[#9B1B30] sm:w-auto"
@@ -201,7 +233,7 @@ const OrderPage = async ({ params }: { params: { id: string } }) => {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
                 </svg>
                 Live Track on Courier
-                {tracking.trackingNumber && (
+                {tracking?.trackingNumber && (
                   <span className="ml-1 rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-medium">
                     AWB {tracking.trackingNumber}
                   </span>
