@@ -23,6 +23,18 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+// Health check — opening the URL in a browser is a GET, and the webhook only
+// handles POST (that's the 405 you'd otherwise see). This just confirms the
+// endpoint is deployed and alive; Velocity still POSTs the real status updates.
+export async function GET() {
+  return NextResponse.json({
+    ok: true,
+    endpoint: "velocity-webhook",
+    method: "POST",
+    message: "Velocity status webhook is live. Send status updates via POST.",
+  });
+}
+
 // Send a template once per (order, flag), marking the Wix flag only on a REAL
 // send (dry-run leaves it unset so the pipeline can be re-run before go-live).
 async function dispatchOnce(order: any, flagKey: string, sendFn: (o: any) => Promise<any>) {
