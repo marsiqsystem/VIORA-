@@ -84,16 +84,29 @@ async function processOrder(body: any) {
   // flag write); the human number is only for display. Fall back to the number.
   const wixKey = info.orderGuid || info.orderId;
 
-  // 3) Velocity shipment.
-  const ship: any = await velocity.createShipment(order);
-  if (ship.ok && ship.awb) {
-    // 4) Write tracking back into Wix — the storefront reads it from there.
-    await wix.pushTracking(wixKey, { awb: ship.awb, trackingUrl: ship.trackingUrl });
-    order.awb = ship.awb;
-    order.trackingUrl = ship.trackingUrl;
-    console.log(`[wix-webhook] tracking pushed to Wix: awb=${ship.awb}`);
-  } else if (!ship.ok) {
-    console.error("[wix-webhook] Velocity shipment failed:", ship.error);
+  // 3) Velocity — CREATE-ONLY by default (no auto-ship).
+  // Velocity's own Wix connector auto-imports the order into its "new orders"
+  // list (its own IQ- number sequence). The user assigns the courier + ships
+  // MANUALLY there. We deliberately do NOT call the create+ship orchestration
+  // endpoint from here: it generated an AWB and deducted the wallet (shipping +
+  // COD charges) on every order, which the user does not want. Our webhook's
+  // only job is the WhatsApp confirmation below.
+  // Set VELOCITY_SHIP_ON_ORDER=true to restore automatic shipment creation.
+  if (String(process.env.VELOCITY_SHIP_ON_ORDER).toLowerCase() === "true") {
+    const ship: any = await velocity.createShipment(order);
+    if (ship.ok && ship.awb) {
+      // 4) Write tracking back into Wix — the storefront reads it from there.
+      await wix.pushTracking(wixKey, { awb: ship.awb, trackingUrl: ship.trackingUrl });
+      order.awb = ship.awb;
+      order.trackingUrl = ship.trackingUrl;
+      console.log(`[wix-webhook] tracking pushed to Wix: awb=${ship.awb}`);
+    } else if (!ship.ok) {
+      console.error("[wix-webhook] Velocity shipment failed:", ship.error);
+    }
+  } else {
+    console.log(
+      "[wix-webhook] Velocity auto-ship disabled (create-only) — Velocity's Wix connector handles order creation; user ships manually."
+    );
   }
 
   if (!info.phone) {
