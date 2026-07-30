@@ -107,29 +107,44 @@ async function processOrder(body: any, trace: any = { steps: [] }) {
   // flag write); the human number is only for display. Fall back to the number.
   const wixKey = info.orderGuid || info.orderId;
 
-  // 3) Velocity — CREATE-ONLY by default (no auto-ship).
-  // Velocity's own Wix connector auto-imports the order into its "new orders"
-  // list (its own IQ- number sequence). The user assigns the courier + ships
-  // MANUALLY there. We deliberately do NOT call the create+ship orchestration
-  // endpoint from here: it generated an AWB and deducted the wallet (shipping +
-  // COD charges) on every order, which the user does not want. Our webhook's
-  // only job is the WhatsApp confirmation below.
-  // Set VELOCITY_SHIP_ON_ORDER=true to restore automatic shipment creation.
-  if (String(process.env.VELOCITY_SHIP_ON_ORDER).toLowerCase() === "true") {
+  // 3) Velocity.
+  // DEFAULT = CREATE-ONLY: call Velocity's /forward-order endpoint so the order
+  // lands in Velocity's "New Orders" list with NO courier, NO AWB, and NO wallet
+  // deduction. The user then picks a courier + ships it MANUALLY in Velocity.
+  // (This replaces relying on Velocity's Wix connector, which wasn't importing.)
+  //
+  // Set VELOCITY_SHIP_ON_ORDER=true to instead auto create+ship via
+  // /forward-order-orchestration (assigns courier + AWB + deducts wallet).
+  if (String(process.env.VELOCITY_SHIP_ON_ORDER).trim().toLowerCase() === "true") {
     const ship: any = await velocity.createShipment(order);
     if (ship.ok && ship.awb) {
-      // 4) Write tracking back into Wix — the storefront reads it from there.
+      // Write tracking back into Wix — the storefront reads it from there.
       await wix.pushTracking(wixKey, { awb: ship.awb, trackingUrl: ship.trackingUrl });
       order.awb = ship.awb;
       order.trackingUrl = ship.trackingUrl;
       console.log(`[wix-webhook] tracking pushed to Wix: awb=${ship.awb}`);
+      trace.velocity = { mode: "create+ship", ok: true, awb: ship.awb };
     } else if (!ship.ok) {
       console.error("[wix-webhook] Velocity shipment failed:", ship.error);
+      trace.velocity = { mode: "create+ship", ok: false, error: ship.error };
     }
   } else {
-    console.log(
-      "[wix-webhook] Velocity auto-ship disabled (create-only) — Velocity's Wix connector handles order creation; user ships manually."
-    );
+    const created: any = await velocity.createOrderOnly(order);
+    if (created.ok) {
+      console.log(
+        `[wix-webhook] Velocity order created (create-only): velocityOrderId=${created.velocityOrderId} shipmentId=${created.shipmentId}`
+      );
+      trace.velocity = {
+        mode: "create-only",
+        ok: true,
+        dryRun: !!created.dryRun,
+        velocityOrderId: created.velocityOrderId,
+        shipmentId: created.shipmentId,
+      };
+    } else {
+      console.error("[wix-webhook] Velocity create-order failed:", created.error);
+      trace.velocity = { mode: "create-only", ok: false, error: created.error };
+    }
   }
 
   if (!info.phone) {

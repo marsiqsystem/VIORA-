@@ -263,6 +263,92 @@ async function createShipment(o) {
   }
 }
 
+/**
+ * CREATE-ONLY: create a forward order WITHOUT assigning a courier or generating
+ * an AWB (Velocity's `/forward-order` endpoint, vs `/forward-order-orchestration`
+ * which also ships). The order lands in Velocity's "New Orders" list with NO
+ * wallet deduction (response: order_created:1, awb_generated:0); the user picks a
+ * courier + ships it manually there later. Never throws.
+ * Returns { ok, dryRun, velocityOrderId, shipmentId, raw }.
+ */
+async function createOrderOnly(o) {
+  const c = cfg();
+  const body = buildShipmentPayload(o);
+
+  if (c.mock || !c.enabled) {
+    console.log("[velocity] MOCK createOrderOnly (VELOCITY_MOCK/ENABLED gate) — no network.");
+    console.log("[velocity] would POST /forward-order:", JSON.stringify(body, null, 2));
+    return {
+      ok: true,
+      dryRun: true,
+      velocityOrderId: `MOCK-ORD-${o.orderId}`,
+      shipmentId: `MOCK-SHIP-${o.orderId}`,
+      raw: { mock: true },
+    };
+  }
+
+  if (!c.baseUrl || !c.username || !c.password || !c.warehouseId) {
+    console.error("[velocity] creds not fully set — cannot create order.");
+    return { ok: false, dryRun: false, error: "velocity not configured" };
+  }
+
+  try {
+    return await withRetry(
+      async () => {
+        const post = (token) =>
+          fetch(`${c.baseUrl}/custom/api/v1/forward-order`, {
+            method: "POST",
+            headers: { Authorization: token, "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+
+        let token = await getToken();
+        let res = await post(token);
+        if (res.status === 401) {
+          tokenCache = null;
+          token = await getToken(true);
+          res = await post(token);
+        }
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const err = new Error(`velocity create-order failed HTTP ${res.status}`);
+          err.status = res.status;
+          err.data = data;
+          throw err; // withRetry: 5xx/429 retried, 4xx not
+        }
+
+        // Success contract for create-only: status===1 and payload.order_created
+        // (awb_code is intentionally absent here — no courier assigned yet).
+        if (data?.status !== 1 || !data?.payload?.order_created) {
+          console.error(
+            "[velocity] create-order returned non-success:",
+            JSON.stringify(data).slice(0, 400)
+          );
+          return {
+            ok: false,
+            dryRun: false,
+            error: data?.message || `velocity status=${data?.status}`,
+            raw: data,
+          };
+        }
+
+        return {
+          ok: true,
+          dryRun: false,
+          velocityOrderId: data.payload.order_id || null,
+          shipmentId: data.payload.shipment_id || null,
+          raw: data,
+        };
+      },
+      { label: "velocity.createOrderOnly", retries: 3 }
+    );
+  } catch (err) {
+    console.error("[velocity] createOrderOnly failed:", err?.message || err);
+    return { ok: false, dryRun: false, error: err?.message || String(err), data: err?.data };
+  }
+}
+
 // ===========================================================================
 // STATUS WEBHOOK (WF2/WF3) — written against Velocity's tracking payload shape
 // (Shiprocket-style: shipment_status / tracking_number / order_external_id).
@@ -370,6 +456,7 @@ function verifyWebhook(secretHeader) {
 
 export {
   createShipment,
+  createOrderOnly,
   buildShipmentPayload,
   getToken,
   trackShipment,
