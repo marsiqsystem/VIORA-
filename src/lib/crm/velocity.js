@@ -29,10 +29,12 @@ const TOKEN_DEFAULT_TTL_MS = 30 * 60_000;
 function cfg() {
   return {
     baseUrl: (process.env.VELOCITY_BASE_URL || "https://shazam.velocity.in").replace(/\/$/, ""),
-    username: process.env.VELOCITY_USERNAME, // registered mobile number
-    password: process.env.VELOCITY_PASSWORD,
-    warehouseId: process.env.VELOCITY_WAREHOUSE_ID, // pre-registered pickup warehouse
-    pickupLocation: process.env.VELOCITY_PICKUP_LOCATION, // warehouse display name (API requires it)
+    // .trim() every credential — a stray space/newline pasted into the Vercel
+    // dashboard would otherwise silently 401 the auth-token call.
+    username: (process.env.VELOCITY_USERNAME || "").trim(), // registered mobile number
+    password: (process.env.VELOCITY_PASSWORD || "").trim(),
+    warehouseId: (process.env.VELOCITY_WAREHOUSE_ID || "").trim(), // pre-registered pickup warehouse
+    pickupLocation: (process.env.VELOCITY_PICKUP_LOCATION || "").trim(), // warehouse display name (API requires it)
     trackBase: (process.env.VELOCITY_TRACK_URL_BASE || "https://shipfastt.in/track").replace(
       /\/$/,
       ""

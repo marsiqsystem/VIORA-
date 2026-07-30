@@ -66,6 +66,22 @@ async function processOrder(body: any, trace: any = { steps: [] }) {
   // Surface how the running deployment actually parsed the send gate — this is
   // the single most useful diagnostic (true = will send, false = dry-run).
   trace.whatsappSendEnabled = whatsappCfg().sendEnabled;
+  // Masked fingerprint of the Velocity creds AS SEEN BY THIS DEPLOYMENT, so we
+  // can compare Vercel's values against the known-good .env without exposing
+  // them. userLen should be 13 (+917003939432), passLen 14; a trimLen mismatch
+  // means whitespace; a different prefix/suffix/len means a wrong value.
+  const vu = process.env.VELOCITY_USERNAME || "";
+  const vp = process.env.VELOCITY_PASSWORD || "";
+  trace.velocityCreds = {
+    userLen: vu.length,
+    userTrimLen: vu.trim().length,
+    userPrefix: vu.trim().slice(0, 4),
+    userSuffix: vu.trim().slice(-2),
+    passLen: vp.length,
+    passTrimLen: vp.trim().length,
+    enabled: String(process.env.VELOCITY_ENABLED).trim().toLowerCase() === "true",
+    mock: String(process.env.VELOCITY_MOCK).trim().toLowerCase() === "true",
+  };
   console.log(
     `[wix-webhook] order=${info.orderId} phone=${info.phone || "(none)"} ` +
       `name=${info.customerName} amount=${info.amount || "-"} pay=${info.paymentMode} ` +
