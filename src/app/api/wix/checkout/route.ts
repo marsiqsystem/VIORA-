@@ -355,8 +355,20 @@ export async function POST(req: Request) {
     // Wix's automatic order email should be turned off in the dashboard so the
     // customer doesn't also receive the misleading "pay cash to courier" one.
     try {
+      // The create/approve API responses frequently OMIT the sequential Wix
+      // order `number` (they return the GUID only), which is why the email used
+      // to show a random id like "#85de1583" (a GUID slice) instead of the real
+      // order number. Fetch the fully-materialized order — that carries `.number`
+      // (the same value shown in My Orders + the Wix dashboard).
+      let fetchedOrder: any = null;
+      try {
+        fetchedOrder = await (wixClient.orders as any).getOrder(orderId);
+      } catch (fetchErr) {
+        console.warn("Could not fetch order for its number:", fetchErr);
+      }
       const finalOrder =
         committedOrder ||
+        fetchedOrder ||
         (approvedOrderResult as any)?.order ||
         (orderResult as any)?.order;
       const emailAmount = Number.isFinite(finalTotal)
@@ -388,7 +400,9 @@ export async function POST(req: Request) {
           undefined,
         image: li?.image || undefined,
       }));
-      const rawOrderNumber = finalOrder?.number;
+      // Prefer the freshly-fetched order's number (most reliable), then any
+      // number the create/approve/commit responses happened to include.
+      const rawOrderNumber = fetchedOrder?.number ?? finalOrder?.number;
       const hasValidOrderNumber =
         rawOrderNumber != null &&
         String(rawOrderNumber).trim() !== "" &&
