@@ -25,8 +25,8 @@ function cfg() {
     apiKey: process.env.WIX_API_KEY,
     siteId: process.env.WIX_SITE_ID,
     accountId: process.env.WIX_ACCOUNT_ID,
-    enabled: String(process.env.WIX_ENABLED).toLowerCase() === "true",
-    mock: String(process.env.WIX_MOCK).toLowerCase() === "true",
+    enabled: String(process.env.WIX_ENABLED).trim().toLowerCase() === "true",
+    mock: String(process.env.WIX_MOCK).trim().toLowerCase() === "true",
   };
 }
 const isMock = () => {

@@ -17,7 +17,9 @@ function config() {
     phoneNumberId: process.env.PHONE_NUMBER_ID,
     version: process.env.GRAPH_API_VERSION || "v22.0",
     // Live only when explicitly enabled — safe default is dry run.
-    sendEnabled: String(process.env.WHATSAPP_SEND_ENABLED).toLowerCase() === "true",
+    // `.trim()` so a trailing space/newline pasted into the Vercel dashboard
+    // (e.g. "true ") can never silently keep us in dry-run.
+    sendEnabled: String(process.env.WHATSAPP_SEND_ENABLED).trim().toLowerCase() === "true",
   };
 }
 

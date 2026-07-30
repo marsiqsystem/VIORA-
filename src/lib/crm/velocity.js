@@ -44,8 +44,8 @@ function cfg() {
       height: Number(process.env.VELOCITY_DEFAULT_HEIGHT) || 5, // cm
       weight: Number(process.env.VELOCITY_DEFAULT_WEIGHT) || 0.5, // kg
     },
-    enabled: String(process.env.VELOCITY_ENABLED).toLowerCase() === "true",
-    mock: String(process.env.VELOCITY_MOCK).toLowerCase() === "true",
+    enabled: String(process.env.VELOCITY_ENABLED).trim().toLowerCase() === "true",
+    mock: String(process.env.VELOCITY_MOCK).trim().toLowerCase() === "true",
   };
 }
 
@@ -138,6 +138,12 @@ function buildShipmentPayload(o) {
         }))
       : [{ name: o.product || "Jewellery", sku: "SKU-1", units: 1, selling_price: amount }];
 
+  // Package dimensions scale with quantity. The default box (18 x 12 x 4 cm,
+  // 0.2 kg) holds ONE unit; every extra unit is stacked on top, so only the
+  // HEIGHT grows — length & breadth stay fixed — and weight adds up per unit.
+  // e.g. qty 2 -> 18 x 12 x 8 cm, 0.4 kg.
+  const totalUnits = items.reduce((sum, it) => sum + (Number(it.units) || 1), 0) || 1;
+
   return {
     // Send the Wix order GUID as Velocity's order_id so the status webhook's
     // order_external_id maps straight back to the Wix order (falls back to the
@@ -158,8 +164,8 @@ function buildShipmentPayload(o) {
     cod_collectible: isCOD ? amount : 0,
     length: c.dims.length,
     breadth: c.dims.breadth,
-    height: c.dims.height,
-    weight: c.dims.weight,
+    height: c.dims.height * totalUnits,
+    weight: Number((c.dims.weight * totalUnits).toFixed(3)),
     warehouse_id: c.warehouseId,
     order_items: items,
   };
