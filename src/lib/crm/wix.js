@@ -96,6 +96,28 @@ async function getOrder(orderId) {
   }
 }
 
+/** Correlate by the human, sequential order NUMBER (what we now send to Velocity
+ * as order_id, and what its status webhook echoes back as order_external_id).
+ * Never throws. */
+async function findOrderByNumber(number) {
+  if (number == null || String(number).trim() === "") return null;
+  if (isMock()) {
+    for (const rec of mockDB.values()) if (String(rec.orderId) === String(number)) return rec;
+    return null;
+  }
+  try {
+    const res = await client().orders.searchOrders({
+      filter: { number: String(number) },
+      cursorPaging: { limit: 1 },
+    });
+    const first = (res?.orders || [])[0];
+    return first ? normalize(first) : null;
+  } catch (e) {
+    console.warn(`[wix] findOrderByNumber failed for ${number}:`, e?.message || e);
+    return null;
+  }
+}
+
 /** Fallback correlation by AWB. Primary correlation is the Wix GUID that Velocity
  * echoes back, so this is rarely needed; Wix doesn't expose tracking number as a
  * filterable field, so in real mode we safely no-op. */
@@ -262,6 +284,7 @@ function ensureMockOrder(order) {
 
 export {
   getOrder,
+  findOrderByNumber,
   findOrderByAwb,
   queryDeliveredNeedingReview,
   pushTracking,

@@ -39,12 +39,15 @@ function cfg() {
       /\/$/,
       ""
     ),
-    // Default parcel dimensions/weight when a per-order value isn't supplied.
+    // Viora's standard jewellery package — FIXED. Hardcoded (not env) so a wrong
+    // VELOCITY_DEFAULT_* value in a dashboard can't silently change it (a stale
+    // env was sending breadth 10 instead of 12). Height & weight scale with
+    // quantity in buildShipmentPayload; length & breadth stay constant.
     dims: {
-      length: Number(process.env.VELOCITY_DEFAULT_LENGTH) || 10, // cm
-      breadth: Number(process.env.VELOCITY_DEFAULT_BREADTH) || 10, // cm
-      height: Number(process.env.VELOCITY_DEFAULT_HEIGHT) || 5, // cm
-      weight: Number(process.env.VELOCITY_DEFAULT_WEIGHT) || 0.5, // kg
+      length: 18, // cm
+      breadth: 12, // cm
+      height: 4, // cm (per unit)
+      weight: 0.2, // kg (per unit)
     },
     enabled: String(process.env.VELOCITY_ENABLED).trim().toLowerCase() === "true",
     mock: String(process.env.VELOCITY_MOCK).trim().toLowerCase() === "true",
@@ -147,10 +150,13 @@ function buildShipmentPayload(o) {
   const totalUnits = items.reduce((sum, it) => sum + (Number(it.units) || 1), 0) || 1;
 
   return {
-    // Send the Wix order GUID as Velocity's order_id so the status webhook's
-    // order_external_id maps straight back to the Wix order (falls back to the
-    // human order number if the GUID isn't available).
-    order_id: o.orderGuid || o.orderId,
+    // Use the human, sequential order NUMBER as Velocity's order_id so the
+    // Velocity dashboard shows a readable id (e.g. the same number as the site /
+    // email / Wix) instead of the internal GUID. The status webhook echoes this
+    // back as order_external_id; velocity-webhook correlates it via
+    // wix.findOrderByNumber (with getOrder/AWB as fallbacks). Falls back to the
+    // GUID only if no number is available.
+    order_id: o.orderId || o.orderGuid,
     order_date: formatOrderDate(new Date()),
     billing_customer_name: o.name || "Customer",
     billing_address: address.line1 || "",

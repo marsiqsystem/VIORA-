@@ -73,8 +73,11 @@ export async function POST(req: NextRequest) {
     );
     if (status === "OTHER") return new NextResponse(null, { status: 200 });
 
-    // Recover the customer from Wix: reference (reliable) first, AWB fallback.
+    // Recover the customer from Wix. `reference` (order_external_id) is now the
+    // human order NUMBER we sent to Velocity — look it up by number first, then
+    // by GUID (in case an older order sent the GUID), then by AWB as a last resort.
     const order =
+      (reference && (await wix.findOrderByNumber(reference))) ||
       (reference && (await wix.getOrder(reference))) ||
       (awb && (await wix.findOrderByAwb(awb))) ||
       null;
