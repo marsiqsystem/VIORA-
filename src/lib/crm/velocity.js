@@ -150,13 +150,13 @@ function buildShipmentPayload(o) {
   const totalUnits = items.reduce((sum, it) => sum + (Number(it.units) || 1), 0) || 1;
 
   return {
-    // Use the human, sequential order NUMBER as Velocity's order_id so the
-    // Velocity dashboard shows a readable id (e.g. the same number as the site /
-    // email / Wix) instead of the internal GUID. The status webhook echoes this
-    // back as order_external_id; velocity-webhook correlates it via
-    // wix.findOrderByNumber (with getOrder/AWB as fallbacks). Falls back to the
-    // GUID only if no number is available.
-    order_id: o.orderId || o.orderGuid,
+    // Velocity order_id = "VJ-#<Wix order number>" (e.g. VJ-#10207) so the
+    // Velocity dashboard id visibly matches the Wix/site/email order (#10207) and
+    // is easy to reconcile. The status webhook echoes this back as
+    // order_external_id; velocity-webhook strips the "VJ-#" prefix and correlates
+    // by number (wix.findOrderByNumber, with getOrder/AWB as fallbacks). Falls
+    // back to the GUID only if no human number is available.
+    order_id: o.orderId ? `VJ-#${o.orderId}` : o.orderGuid,
     order_date: formatOrderDate(new Date()),
     billing_customer_name: o.name || "Customer",
     billing_address: address.line1 || "",

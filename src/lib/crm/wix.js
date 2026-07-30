@@ -101,13 +101,17 @@ async function getOrder(orderId) {
  * Never throws. */
 async function findOrderByNumber(number) {
   if (number == null || String(number).trim() === "") return null;
+  // Velocity echoes our order_id back (e.g. "VJ-#10207"); strip the "VJ-#"
+  // prefix so we search Wix by the bare number (10207).
+  const num = String(number).replace(/^\s*VJ-#?/i, "").trim();
+  if (!num) return null;
   if (isMock()) {
-    for (const rec of mockDB.values()) if (String(rec.orderId) === String(number)) return rec;
+    for (const rec of mockDB.values()) if (String(rec.orderId) === num) return rec;
     return null;
   }
   try {
     const res = await client().orders.searchOrders({
-      filter: { number: String(number) },
+      filter: { number: num },
       cursorPaging: { limit: 1 },
     });
     const first = (res?.orders || [])[0];
