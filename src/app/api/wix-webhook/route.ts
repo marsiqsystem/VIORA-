@@ -139,7 +139,21 @@ async function processOrder(body: any, trace: any = { steps: [] }) {
   }
 
   // 5) WF1 with Wix-flag idempotency.
-  const current = (await wix.getOrder(wixKey)) || order;
+  // Idempotency is BEST-EFFORT: a Wix read/write failure must NEVER block the
+  // customer's WhatsApp confirmation. If we can't read the flag, we send anyway
+  // — a rare double-send on a webhook retry is far better than never sending.
+  // (Root cause this guards: raw Wix REST getOrder was throwing a 400 and taking
+  // the whole handler down before the send.)
+  let current: any = order;
+  try {
+    current = (await wix.getOrder(wixKey)) || order;
+  } catch (e: any) {
+    console.warn(
+      "[wix-webhook] getOrder failed — sending WF1 without idempotency check:",
+      e?.message || e
+    );
+    trace.steps.push(`wix getOrder failed (${e?.message || e}) — proceeding to send anyway`);
+  }
   if (wix.getFlag(current, WF1_FLAG)) {
     console.log(`[wix-webhook] ${WF1_FLAG} already set for ${info.orderId} — skip WF1.`);
     trace.steps.push("skipped: WF1 flag already set (idempotent)");
@@ -155,7 +169,14 @@ async function processOrder(body: any, trace: any = { steps: [] }) {
     status: result.status || null,
   };
   if (result.ok && !result.dryRun) {
-    await wix.setFlag(wixKey, WF1_FLAG);
+    // Flag write is also best-effort — the send already succeeded; a Wix write
+    // failure here must not turn a delivered message into a crash/retry.
+    try {
+      await wix.setFlag(wixKey, WF1_FLAG);
+    } catch (e: any) {
+      console.warn("[wix-webhook] setFlag failed (message already sent):", e?.message || e);
+      trace.steps.push("WF1 sent but setFlag failed (idempotency not recorded)");
+    }
     console.log(`[wix-webhook] WF1 ${T.orderConfirmation.name} sent.`);
     trace.steps.push("WF1 sent (live)");
   } else if (result.dryRun) {

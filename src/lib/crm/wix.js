@@ -90,6 +90,13 @@ async function getOrder(orderId) {
       if (res.status === 404) return null;
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        // A 4xx on a flag lookup (bad id format, perms, wrong endpoint) means we
+        // simply can't read this order — return null so callers treat it as "no
+        // flag" and the WhatsApp send is never blocked. Only 5xx is worth a retry.
+        if (res.status < 500) {
+          console.warn(`[wix] getOrder ${res.status} for ${orderId} — treating as no order/flag`);
+          return null;
+        }
         const e = new Error(`wix getOrder ${res.status}`);
         e.status = res.status;
         throw e;
