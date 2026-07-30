@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
     !!process.env.CRON_SECRET &&
     req.nextUrl.searchParams.get("debug") === process.env.CRON_SECRET;
 
-  const trace: any = { steps: [] };
+  const trace: any = { build: "wix-sdk-v2", steps: [] };
   try {
     await processOrder(body, trace);
   } catch (err: any) {
