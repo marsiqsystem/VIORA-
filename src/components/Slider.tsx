@@ -11,7 +11,7 @@ import Link from "next/link";
 const Slider = () => {
   return (
     <section className="w-full bg-platinum">
-      <Link href="/list" aria-label="Shop the Viora Jewels Rakhi Combo">
+      <Link href="/list?cat=rakhi-special#product-grid" aria-label="Shop the Viora Jewels Rakhi Special collection">
         {/* Desktop / tablet */}
         <Image
           src="/hero-rakhi-desktop.png"
