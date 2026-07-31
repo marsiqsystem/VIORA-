@@ -38,6 +38,28 @@ export type MetaUserData = {
   country?: string;
 };
 
+// Cookie-consent gate. Meta Pixel + Conversions API are ADVERTISING tools, so
+// they may only fire once the visitor has granted marketing consent in the
+// banner. Mirrors the storage ConsentManager writes ("viora_consent_v1").
+const CONSENT_STORAGE_KEY = "viora_consent_v1";
+
+/**
+ * True only when the visitor has explicitly opted into marketing cookies.
+ * Returns false when no choice has been made yet (banner still open) — we never
+ * track before an explicit opt-in, and never for someone who declined.
+ */
+export function hasMarketingConsent(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = window.localStorage.getItem(CONSENT_STORAGE_KEY);
+    if (!raw) return false;
+    const c = JSON.parse(raw) as { marketing?: boolean };
+    return c?.marketing === true;
+  } catch {
+    return false;
+  }
+}
+
 const generateEventId = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
@@ -157,6 +179,11 @@ export async function trackMetaEvent(
   explicitEventId?: string
 ) {
   if (typeof window === "undefined") return;
+
+  // Consent gate: no Pixel and no CAPI unless the visitor opted into marketing.
+  // (The browser Pixel is already gated by fbq not loading, but the server-side
+  // CAPI fetch would otherwise fire for everyone — this closes that gap.)
+  if (!hasMarketingConsent()) return;
 
   const eventId = explicitEventId || generateEventId();
 

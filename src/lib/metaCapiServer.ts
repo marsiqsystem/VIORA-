@@ -75,7 +75,7 @@ export async function sendServerCapi(opts: ServerCapiOptions): Promise<boolean> 
 
   try {
     const res = await fetch(
-      `https://graph.facebook.com/v19.0/${pixelId}/events?access_token=${encodeURIComponent(
+      `https://graph.facebook.com/v21.0/${pixelId}/events?access_token=${encodeURIComponent(
         accessToken
       )}`,
       {

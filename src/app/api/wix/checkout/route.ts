@@ -135,6 +135,10 @@ export async function POST(req: Request) {
     const body = await req.json();
     const checkoutId = normalizeCheckoutId(body?.checkoutId);
     const details = body?.details as Partial<CheckoutAddressPayload> | undefined;
+    // Only send the Meta Purchase (Conversions API) event if the buyer opted
+    // into marketing cookies. Meta is an advertising tool, so a declined buyer
+    // must not have their purchase shared for ad measurement.
+    const marketingConsent = body?.marketingConsent === true;
 
     if (!checkoutId) {
       return NextResponse.json({ error: "Missing checkoutId." }, { status: 400 });
@@ -488,7 +492,9 @@ export async function POST(req: Request) {
         req.headers.get("x-real-ip") ||
         undefined;
 
-      void sendServerCapi({
+      if (!marketingConsent)
+        console.log("[capi] Purchase not sent — buyer declined marketing cookies.");
+      else void sendServerCapi({
         eventName: "Purchase",
         eventId: `purchase_${orderId}`,
         eventSourceUrl: req.headers.get("referer") || undefined,

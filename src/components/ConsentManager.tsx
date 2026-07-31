@@ -75,36 +75,39 @@ const ConsentManager = () => {
             {!showCustomize ? (
               <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div className="text-sm text-gray-700 md:max-w-3xl">
-                  <strong className="text-primary">We use cookies.</strong>{" "}
-                  Essential cookies keep the site working. With your consent,
-                  we also use Google Analytics &amp; Microsoft Clarity to
-                  understand usage, and Meta Pixel to measure ads. See our{" "}
-                  <a
-                    href="/privacy-policy"
-                    className="text-accent underline"
-                  >
+                  <strong className="text-primary">
+                    We use cookies to make Viora better for you.
+                  </strong>{" "}
+                  Essential cookies keep the site working. With your consent, we
+                  also use analytics &amp; Meta Pixel to understand what you love
+                  and show you relevant offers &amp; deals. It helps us improve
+                  your experience &mdash; you can change this anytime. See our{" "}
+                  <a href="/privacy-policy" className="text-accent underline">
                     Privacy Policy
                   </a>
                   .
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-3 md:flex-nowrap">
+                  {/* Accept is the primary, most prominent choice. Reject &
+                      Customize stay clearly available (honest consent) but are
+                      styled as lighter secondary actions. */}
+                  <button
+                    onClick={acceptAll}
+                    className="order-1 rounded-full bg-accent px-7 py-2.5 text-sm font-bold text-white shadow-md transition-colors hover:bg-primary md:order-3"
+                  >
+                    Accept all
+                  </button>
                   <button
                     onClick={() => setShowCustomize(true)}
-                    className="rounded-full border border-primary px-4 py-2 text-sm font-semibold text-primary hover:bg-primary hover:text-white"
+                    className="order-2 text-sm font-semibold text-primary underline-offset-2 hover:underline"
                   >
                     Customize
                   </button>
                   <button
                     onClick={rejectAll}
-                    className="rounded-full border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+                    className="order-3 text-sm font-medium text-gray-500 underline-offset-2 hover:underline md:order-1"
                   >
                     Reject all
-                  </button>
-                  <button
-                    onClick={acceptAll}
-                    className="rounded-full bg-accent px-5 py-2 text-sm font-semibold text-white hover:bg-primary"
-                  >
-                    Accept all
                   </button>
                 </div>
               </div>

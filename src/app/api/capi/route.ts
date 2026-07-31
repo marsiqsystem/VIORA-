@@ -91,7 +91,18 @@ export async function POST(req: NextRequest) {
 
   const cookieStore = cookies();
   const fbp = cookieStore.get("_fbp")?.value;
-  const fbc = cookieStore.get("_fbc")?.value;
+  let fbc = cookieStore.get("_fbc")?.value;
+  // Attribution fallback: if the _fbc cookie isn't set yet but the visitor
+  // arrived from a Meta ad (fbclid in the URL), synthesise the click id in
+  // Meta's fbc format so ad-click attribution / match quality isn't lost.
+  if (!fbc && eventSourceUrl) {
+    try {
+      const fbclid = new URL(eventSourceUrl).searchParams.get("fbclid");
+      if (fbclid) fbc = `fb.1.${Math.floor(Date.now() / 1000)}.${fbclid}`;
+    } catch {
+      /* malformed url — ignore */
+    }
+  }
 
   const h = headers();
   const userAgent = h.get("user-agent") || undefined;
@@ -131,7 +142,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const res = await fetch(
-      `https://graph.facebook.com/v19.0/${pixelId}/events?access_token=${encodeURIComponent(
+      `https://graph.facebook.com/v21.0/${pixelId}/events?access_token=${encodeURIComponent(
         accessToken
       )}`,
       {

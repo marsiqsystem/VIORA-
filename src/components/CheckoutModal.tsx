@@ -12,7 +12,7 @@ import {
   trackAddPaymentInfo,
   trackInitiateCheckout,
 } from "@/lib/metaPixel";
-import { trackMetaEvent, setMetaUserData } from "@/lib/metaEvents";
+import { trackMetaEvent, setMetaUserData, hasMarketingConsent } from "@/lib/metaEvents";
 
 type PaymentMethod = "PREPAID" | "COD";
 
@@ -266,6 +266,9 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         checkoutId,
+        // Whether the buyer opted into marketing cookies — the server uses this
+        // to decide if the Meta Purchase (Conversions API) event may fire.
+        marketingConsent: hasMarketingConsent(),
         details: {
           email: email.trim(),
           fullName: fullName.trim(),
