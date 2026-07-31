@@ -12,6 +12,7 @@ import { extractOrderInfo } from "@/lib/crm/wixOrder";
 import * as velocity from "@/lib/crm/velocity";
 import * as wix from "@/lib/crm/wix";
 import * as notify from "@/lib/crm/notify";
+import * as idempotency from "@/lib/crm/idempotency";
 import { config as whatsappCfg } from "@/lib/crm/whatsapp";
 import T from "@/lib/crm/templates";
 
@@ -169,26 +170,23 @@ async function processOrder(body: any, trace: any = { steps: [] }) {
     return;
   }
 
-  // 5) WF1 with Wix-flag idempotency.
-  // Idempotency is BEST-EFFORT: a Wix read/write failure must NEVER block the
-  // customer's WhatsApp confirmation. If we can't read the flag, we send anyway
-  // — a rare double-send on a webhook retry is far better than never sending.
-  // (Root cause this guards: raw Wix REST getOrder was throwing a 400 and taking
-  // the whole handler down before the send.)
-  let current: any = order;
-  try {
-    current = (await wix.getOrder(wixKey)) || order;
-  } catch (e: any) {
-    console.warn(
-      "[wix-webhook] getOrder failed — sending WF1 without idempotency check:",
-      e?.message || e
-    );
-    trace.steps.push(`wix getOrder failed (${e?.message || e}) — proceeding to send anyway`);
-  }
-  if (wix.getFlag(current, WF1_FLAG)) {
-    console.log(`[wix-webhook] ${WF1_FLAG} already set for ${info.orderId} — skip WF1.`);
-    trace.steps.push("skipped: WF1 flag already set (idempotent)");
+  // 5) WF1 with KV-backed idempotency (claim-before-send).
+  // Wix can't hold our dedupe flag (its API rejects extendedFields/customFields
+  // writes for this API key), so the marker lives in Vercel KV / Upstash. We
+  // atomically CLAIM a per-order key BEFORE sending; a duplicate webhook finds
+  // the key already claimed and skips. If the send then fails or is a dry-run,
+  // we RELEASE the claim so a legitimate retry can still deliver.
+  // FAIL-OPEN: if KV is unconfigured/down, claimOnce reports claimed+degraded so
+  // the confirmation still goes out — a missed message is worse than a rare dupe.
+  const wf1Key = `${WF1_FLAG}:${info.orderId}`;
+  const claim = await idempotency.claimOnce(wf1Key);
+  if (!claim.claimed) {
+    console.log(`[wix-webhook] WF1 already claimed for ${info.orderId} — skip (idempotent).`);
+    trace.steps.push("skipped: WF1 already sent (KV idempotent)");
     return;
+  }
+  if (claim.degraded) {
+    trace.steps.push("KV idempotency unavailable — proceeding without dedupe (fail-open)");
   }
 
   const result: any = await notify.sendOrderConfirmation(order);
@@ -200,21 +198,18 @@ async function processOrder(body: any, trace: any = { steps: [] }) {
     status: result.status || null,
   };
   if (result.ok && !result.dryRun) {
-    // Flag write is also best-effort — the send already succeeded; a Wix write
-    // failure here must not turn a delivered message into a crash/retry.
-    try {
-      await wix.setFlag(wixKey, WF1_FLAG);
-    } catch (e: any) {
-      console.warn("[wix-webhook] setFlag failed (message already sent):", e?.message || e);
-      trace.steps.push("WF1 sent but setFlag failed (idempotency not recorded)");
-    }
     console.log(`[wix-webhook] WF1 ${T.orderConfirmation.name} sent.`);
     trace.steps.push("WF1 sent (live)");
-  } else if (result.dryRun) {
-    console.log("[wix-webhook] WF1 DRY RUN (flag not set).");
-    trace.steps.push("WF1 DRY RUN — send gate is OFF in this deployment");
   } else {
-    console.error("[wix-webhook] WF1 FAILED:", result.error || result.data);
-    trace.steps.push("WF1 FAILED — see trace.send.error");
+    // The guarded action did NOT deliver (dry-run or failure) — release the
+    // claim so re-firing (or flipping the send gate on) can send later.
+    await idempotency.release(wf1Key);
+    if (result.dryRun) {
+      console.log("[wix-webhook] WF1 DRY RUN (claim released).");
+      trace.steps.push("WF1 DRY RUN — send gate is OFF in this deployment");
+    } else {
+      console.error("[wix-webhook] WF1 FAILED:", result.error || result.data);
+      trace.steps.push("WF1 FAILED — see trace.send.error");
+    }
   }
 }
