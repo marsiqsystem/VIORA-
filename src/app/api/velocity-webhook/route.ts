@@ -18,6 +18,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as velocity from "@/lib/crm/velocity";
 import * as wix from "@/lib/crm/wix";
 import * as notify from "@/lib/crm/notify";
+import { dispatchCancellationOnce } from "@/lib/crm/cancel";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -93,6 +94,11 @@ export async function POST(req: NextRequest) {
       // Stamp delivery in Wix so the review queue (WF4) can find it in 3 days.
       await wix.markDelivered(order.orderGuid || order.orderId, Date.now());
       await dispatchOnce(order, "wa_wf3_sent", notify.sendDelivered);
+    } else if (status === "CANCELLED") {
+      // Cancellation can also be triggered from Wix (see /api/wix-cancel-webhook).
+      // Dedupe on a SHARED KV key so cancelling in one system that syncs to the
+      // other still sends the customer exactly one message.
+      await dispatchCancellationOnce(order);
     }
   } catch (err) {
     console.error("[velocity-webhook] processing error:", err);

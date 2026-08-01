@@ -368,12 +368,15 @@ async function createOrderOnly(o) {
  * Map a raw Velocity status webhook to our internal status enum. We only act on
  * the two states that trigger a customer message (WF2/WF3); everything else is
  * OTHER and acknowledged with a 200.
- * @returns {"OUT_FOR_DELIVERY"|"DELIVERED"|"OTHER"}
+ * @returns {"OUT_FOR_DELIVERY"|"DELIVERED"|"CANCELLED"|"OTHER"}
  */
 function normalizeStatus(raw) {
   const s = String(raw || "").toUpperCase().replace(/[\s-]+/g, "_");
   if (["OUT_FOR_DELIVERY", "OFD", "OUT_FOR_DELIVER"].includes(s)) return "OUT_FOR_DELIVERY";
   if (["DELIVERED", "DELIVER", "COMPLETED"].includes(s)) return "DELIVERED";
+  // Order cancelled at the fulfilment stage. RTO (return-to-origin) is a distinct
+  // state and deliberately NOT mapped here — we don't message "cancelled" for a return.
+  if (["CANCELLED", "CANCELED", "CANCEL"].includes(s)) return "CANCELLED";
   return "OTHER";
 }
 

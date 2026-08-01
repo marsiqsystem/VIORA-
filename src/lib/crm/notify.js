@@ -24,6 +24,11 @@ function fromRow(row) {
   };
 }
 
+// Customer-facing payment label. Our order carries "PREPAID" / "COD"; the
+// message reads better as words.
+const prettyPayment = (m) =>
+  String(m || "").toUpperCase() === "PREPAID" ? "Paid Online" : "Cash on Delivery";
+
 // Turn a product name into a URL-safe slug for the review-link button suffix.
 // Placeholder until we wire the real Wix product slug through the pipeline.
 const slugify = (s) =>
@@ -97,12 +102,35 @@ function sendAbandonedCart(o) {
   });
 }
 
+// --- Order cancelled (fired when the order is cancelled in Wix or Velocity) ---
+// body {{1}} name, {{2}} order id, {{3}} product, {{4}} amount, {{5}} payment mode.
+// One template covers both reasons (customer request / couldn't connect on call);
+// the approved body text mentions both, so no reason variable is needed.
+function sendOrderCancelled(o) {
+  return sendTemplate({
+    to: o.phone,
+    templateName: T.orderCancelled.name,
+    languageCode: T.orderCancelled.lang,
+    // Same as confirmation: this order's product photo when we have it, else the logo.
+    headerImageUrl: o.productImage || T.orderCancelled.headerImageUrl,
+    bodyParams: [
+      o.name,
+      o.orderId,
+      o.product,
+      o.amount,
+      prettyPayment(o.paymentMode),
+    ],
+  });
+}
+
 export {
   fromRow,
   slugify,
+  prettyPayment,
   sendOrderConfirmation,
   sendOutForDelivery,
   sendDelivered,
   sendReviewRequest,
   sendAbandonedCart,
+  sendOrderCancelled,
 };

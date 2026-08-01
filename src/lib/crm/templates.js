@@ -51,4 +51,10 @@ export default {
     lang: LANG,
     // body {{1}} name, {{2}} product, {{3}} value ; button url {{1}} cart token
   },
+  orderCancelled: {
+    name: process.env.TPL_ORDER_CANCELLED || "order_cancelled_v1",
+    lang: LANG,
+    headerImageUrl: HEADER_IMAGE_URL, // template has an IMAGE header (product photo / logo)
+    // body {{1}} name, {{2}} order id, {{3}} product, {{4}} amount, {{5}} payment mode
+  },
 };
