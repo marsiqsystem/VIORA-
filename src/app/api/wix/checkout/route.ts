@@ -364,11 +364,31 @@ export async function POST(req: Request) {
       // to show a random id like "#85de1583" (a GUID slice) instead of the real
       // order number. Fetch the fully-materialized order — that carries `.number`
       // (the same value shown in My Orders + the Wix dashboard).
+      // Re-fetch the materialized order to get its sequential `number`. This can
+      // fail two ways right after checkout: the read can throw transiently, or a
+      // just-created order isn't yet readable (read-after-write lag) so `number`
+      // comes back empty. Retry a few times before giving up — otherwise the
+      // email falls back to a GUID slice like "#8f5a6030".
       let fetchedOrder: any = null;
-      try {
-        fetchedOrder = await (wixClient.orders as any).getOrder(orderId);
-      } catch (fetchErr) {
-        console.warn("Could not fetch order for its number:", fetchErr);
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          const o = await (wixClient.orders as any).getOrder(orderId);
+          if (o) {
+            fetchedOrder = o;
+            const n = o.number;
+            // Got the real sequential number — stop retrying.
+            if (n != null && String(n).trim() !== "" && String(n).trim() !== "0") {
+              break;
+            }
+          }
+        } catch (fetchErr) {
+          console.warn(
+            `[checkout] getOrder for number failed (attempt ${attempt + 1}/4):`,
+            (fetchErr as any)?.message || fetchErr
+          );
+        }
+        // Brief backoff before retrying — give Wix a moment to materialize the order.
+        if (attempt < 3) await new Promise((r) => setTimeout(r, 500));
       }
       const finalOrder =
         committedOrder ||
@@ -414,6 +434,12 @@ export async function POST(req: Request) {
       const orderNumber = hasValidOrderNumber
         ? `#${rawOrderNumber}`
         : `#${String(orderId).slice(-8)}`;
+      if (!hasValidOrderNumber) {
+        console.warn(
+          `[checkout] No Wix order number resolved for order ${orderId} after retries; ` +
+            `email will show the GUID fallback ${orderNumber}.`
+        );
+      }
 
       const ps = (finalOrder?.priceSummary as any) || {};
       const summary = {
