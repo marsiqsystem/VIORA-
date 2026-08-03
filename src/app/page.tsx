@@ -117,10 +117,16 @@ const HomePage = async () => {
           />
         </Suspense>
         <Suspense fallback={<Skeleton />}>
+          {/* Rakhi Special push: the Rakhi Luxe Gift Set was buried at the
+              bottom of All Products where shoppers never saw it, so it now
+              leads this homepage rail. Zara Crystal is moved to the end (with
+              limit 4 it drops off this rail). Pulls from allProducts so the
+              Rakhi set is guaranteed to be in the pool regardless of which
+              collections it's tagged into. */}
           <ProductList
-            categoryId={WIX_COLLECTION_IDS.newArrivals}
+            categoryId={WIX_COLLECTION_IDS.allProducts}
             limit={4}
-            featuredNames={["Zara Crystal Set", "Rosa Blush Set", "Scarlet Bloom Set", "Crystal Wings Set"]}
+            featuredNames={["Rakhi Luxe Gift Set", "Rosa Blush Set", "Scarlet Bloom Set", "Crystal Wings Set", "Zara Crystal Set"]}
           />
         </Suspense>
       </section>
