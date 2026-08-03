@@ -10,7 +10,7 @@ export const WIX_COLLECTION_IDS = {
 } as const;
 
 export const ALL_PRODUCTS_FEATURED_ORDER = [
-  "noble teardrop harmony set",
+  "rakhi luxe gift set",
   "eternal shine jewelry set",
   "pearl whisper diamond style earrings",
   "emerald bloom ensemble jewelry set",

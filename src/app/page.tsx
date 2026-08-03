@@ -117,16 +117,16 @@ const HomePage = async () => {
           />
         </Suspense>
         <Suspense fallback={<Skeleton />}>
-          {/* Rakhi Special push: the Rakhi Luxe Gift Set was buried at the
-              bottom of All Products where shoppers never saw it, so it now
-              leads this homepage rail. Zara Crystal is moved to the end (with
-              limit 4 it drops off this rail). Pulls from allProducts so the
-              Rakhi set is guaranteed to be in the pool regardless of which
-              collections it's tagged into. */}
+          {/* Rakhi Special push: the Rakhi Luxe Gift Set now leads the very
+              first rail (via ALL_PRODUCTS_FEATURED_ORDER), so it takes the
+              old Noble Teardrop slot at the top of the grid. Noble Teardrop
+              in turn leads this second rail. Zara Crystal stays at the end
+              (drops off under the limit-4 cap). Pulls from allProducts so
+              every set here is guaranteed to be in the pool. */}
           <ProductList
             categoryId={WIX_COLLECTION_IDS.allProducts}
             limit={4}
-            featuredNames={["Rakhi Luxe Gift Set", "Rosa Blush Set", "Scarlet Bloom Set", "Crystal Wings Set", "Zara Crystal Set"]}
+            featuredNames={["Noble Teardrop Harmony Set", "Rosa Blush Set", "Scarlet Bloom Set", "Crystal Wings Set", "Zara Crystal Set"]}
           />
         </Suspense>
       </section>
