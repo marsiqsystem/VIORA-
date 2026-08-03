@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { wixAdminClientServer } from "@/lib/wixAdminClientServer";
 import { sendOrderConfirmationEmail } from "@/lib/orderEmail";
 import { sendServerCapi } from "@/lib/metaCapiServer";
+import { readCookieRaw } from "@/lib/metaFbc";
 
 type CheckoutAddressPayload = {
   email: string;
@@ -505,12 +506,12 @@ export async function POST(req: Request) {
         .filter(Boolean) as string[]);
 
       const cookieHeader = req.headers.get("cookie") || "";
-      const readCookie = (name: string) => {
-        const m = new RegExp(`(?:^|; )${name}=([^;]+)`).exec(cookieHeader);
-        return m ? decodeURIComponent(m[1]) : undefined;
-      };
-      const fbp = readCookie("_fbp");
-      const fbc = readCookie("_fbc");
+      // Meta's _fbc / _fbp cookies must be forwarded to the Conversions API
+      // byte-for-byte. decodeURIComponent() would rewrite the embedded fbclid,
+      // which Meta flags as "modified fbclid value in fbc" and tanks match
+      // quality — so read these two RAW (see src/lib/metaFbc.ts).
+      const fbp = readCookieRaw(cookieHeader, "_fbp");
+      const fbc = readCookieRaw(cookieHeader, "_fbc");
       const userAgent = req.headers.get("user-agent") || undefined;
       const forwardedFor = req.headers.get("x-forwarded-for") || "";
       const clientIp =

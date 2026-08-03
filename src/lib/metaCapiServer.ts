@@ -41,6 +41,12 @@ export async function sendServerCapi(opts: ServerCapiOptions): Promise<boolean> 
   const user_data: Record<string, string> = {};
   if (opts.fbp) user_data.fbp = opts.fbp;
   if (opts.fbc) user_data.fbc = opts.fbc;
+  // When a Test Event Code is configured, log the exact fbc being sent so we
+  // can eyeball it against the browser's _fbc cookie char-for-char in Meta's
+  // Payload Helper / Test Events tab. Silent in normal prod traffic.
+  if (testEventCode) {
+    console.log(`[capi] Purchase fbc sent verbatim: ${opts.fbc ?? "(none)"}`);
+  }
   if (opts.clientIp) user_data.client_ip_address = opts.clientIp;
   if (opts.userAgent) user_data.client_user_agent = opts.userAgent;
 
