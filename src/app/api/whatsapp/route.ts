@@ -10,6 +10,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { handleInbound } from "@/lib/crm/autoReply";
+import { ingestWebhook } from "@/lib/crm/inbox-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,6 +47,14 @@ export async function POST(req: NextRequest) {
     await handleInbound(body);
   } catch (err) {
     console.error("Inbound handling error:", err);
+  }
+  // Persist the same body into the two-way inbox store (customer replies +
+  // delivery/read ticks). Purely additive to the auto-reply pipeline above and
+  // failure-isolated — a store hiccup must never break the webhook ack.
+  try {
+    await ingestWebhook(body);
+  } catch (err) {
+    console.error("Inbox ingest error:", err);
   }
   // Always 200 so Meta doesn't disable the webhook or retry-storm.
   return new NextResponse(null, { status: 200 });

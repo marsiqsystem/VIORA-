@@ -17,6 +17,7 @@ import { logLead } from "./sheets";
 import { generateReply, isConfigured as aiConfigured } from "./gemini";
 import { sendText } from "./whatsapp";
 import { VIORA_SYSTEM_PROMPT } from "./prompts";
+import { recordOutbound } from "./inbox-store";
 
 const aiEnabled = () =>
   String(process.env.AI_AUTOREPLY_ENABLED).toLowerCase() === "true";
@@ -68,6 +69,13 @@ async function handleMessage(msg) {
       console.log(`[auto-reply] ${intent} ack simulated (WHATSAPP_SEND_ENABLED=false).`);
     else if (sent.ok) console.log(`[auto-reply] ${intent} ack delivered to ${msg.from}.`);
     else console.error(`[auto-reply] ${intent} ack send failed:`, sent.error || sent.data);
+    // Mirror the ack into the inbox thread (best-effort, never blocks).
+    await recordOutbound({
+      to: msg.from,
+      text: body,
+      wamid: sent?.data?.messages?.[0]?.id,
+      status: sent?.dryRun ? "pending" : "sent",
+    });
     return; // handled — don't also run the AI path on a button tap
   }
 
@@ -101,6 +109,13 @@ async function handleMessage(msg) {
   if (sent.dryRun) console.log("[auto-reply] reply simulated (WHATSAPP_SEND_ENABLED=false).");
   else if (sent.ok) console.log("[auto-reply] reply delivered.");
   else console.error("[auto-reply] reply send failed:", sent.error || sent.data);
+  // Mirror the AI reply into the inbox thread (best-effort, never blocks).
+  await recordOutbound({
+    to: msg.from,
+    text: ai.text,
+    wamid: sent?.data?.messages?.[0]?.id,
+    status: sent?.dryRun ? "pending" : "sent",
+  });
 }
 
 /** Entry point: parse a raw webhook body and handle every inbound message. */
