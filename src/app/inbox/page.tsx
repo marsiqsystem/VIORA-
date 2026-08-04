@@ -115,6 +115,8 @@ export default function InboxPage() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
+  const [composing, setComposing] = useState(false);
+  const [newPhone, setNewPhone] = useState("");
 
   const keyRef = useRef(key);
   const activeRef = useRef(active);
@@ -227,6 +229,20 @@ export default function InboxPage() {
     setAuthError("");
   };
 
+  // Start a chat with a manually-entered number (WhatsApp-style "new chat").
+  // A bare 10-digit number is assumed to be Indian (+91). NOTE: WhatsApp only
+  // allows a free-form text to a NEW number if they messaged you in the last
+  // 24h — otherwise an approved template is required, so the composer will be
+  // locked for a truly cold number.
+  const startNewChat = () => {
+    let phone = newPhone.replace(/[^\d]/g, "");
+    if (phone.length === 10) phone = "91" + phone; // default to India
+    if (phone.length < 11) return; // too short to be a valid international number
+    setComposing(false);
+    setNewPhone("");
+    openConv(phone);
+  };
+
   // --- setup-needed screen ---
   if (needsSetup) {
     return (
@@ -265,13 +281,44 @@ export default function InboxPage() {
   const canType = thread?.withinWindow !== false;
 
   return (
-    <div style={{ display: "flex", height: "100dvh", background: C.bgChat, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif", color: C.text }}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", height: "100dvh", background: C.bgChat, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif", color: C.text }}>
       {/* LEFT: conversation list */}
       <aside style={{ width: 340, minWidth: 300, borderRight: `1px solid ${C.border}`, background: C.bgList, display: "flex", flexDirection: "column", }}>
         <header style={{ background: C.plum, color: "#fff", padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <strong style={{ fontSize: 17, letterSpacing: 0.3 }}>Viora Inbox</strong>
-          <span style={{ fontSize: 11, opacity: 0.85 }}>{MOCK ? "MOCK" : "live"}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 11, opacity: 0.85 }}>{MOCK ? "MOCK" : "live"}</span>
+            <button
+              onClick={() => setComposing((v) => !v)}
+              title="New chat"
+              style={{ background: "rgba(255,255,255,.18)", color: "#fff", border: "none", borderRadius: "50%", width: 30, height: 30, fontSize: 20, lineHeight: 1, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+            >
+              {composing ? "×" : "+"}
+            </button>
+          </div>
         </header>
+
+        {composing && (
+          <div style={{ padding: 14, borderBottom: `1px solid ${C.border}`, background: "#faf3f5" }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: C.plum }}>New chat</div>
+            <input
+              type="tel"
+              value={newPhone}
+              onChange={(e) => setNewPhone(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && startNewChat()}
+              placeholder="Phone e.g. 9812345678 or 919812345678"
+              style={{ width: "100%", padding: "9px 11px", borderRadius: 8, border: `1px solid ${C.border}`, fontSize: 14, boxSizing: "border-box" }}
+            />
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <button onClick={startNewChat} disabled={newPhone.replace(/[^\d]/g, "").length < 10} style={{ ...btn(C.plum), width: "auto", padding: "8px 18px", fontSize: 14, opacity: newPhone.replace(/[^\d]/g, "").length < 10 ? 0.5 : 1 }}>Start chat</button>
+              <button onClick={() => { setComposing(false); setNewPhone(""); }} style={{ background: "transparent", border: `1px solid ${C.border}`, borderRadius: 10, padding: "8px 18px", fontSize: 14, cursor: "pointer", color: C.sub }}>Cancel</button>
+            </div>
+            <div style={{ fontSize: 11, color: C.sub, marginTop: 8, lineHeight: 1.4 }}>
+              10 digits = India (+91) auto-added. ⚠️ You can send a free-form message only if they messaged you in the last 24h — otherwise WhatsApp needs an approved template.
+            </div>
+          </div>
+        )}
+
         <div style={{ overflowY: "auto", flex: 1 }}>
           {convs.length === 0 && (
             <div style={{ padding: 24, color: C.sub, fontSize: 14, textAlign: "center" }}>
@@ -380,7 +427,7 @@ export default function InboxPage() {
 
 function Centered({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, background: "#f4eef0", fontFamily: "system-ui, sans-serif", padding: 20 }}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 9999, minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, background: "#f4eef0", fontFamily: "system-ui, sans-serif", padding: 20 }}>
       {children}
     </div>
   );
