@@ -36,6 +36,18 @@ type Message = {
   mediaId?: string;
   mime?: string;
   filename?: string;
+  imageUrl?: string;
+};
+type Template = {
+  name: string;
+  language: string;
+  category: string;
+  bodyText: string;
+  bodyVars: number;
+  headerFormat: string;
+  headerVars: number;
+  hasUrlButton: boolean;
+  urlButtonIndex: number | null;
 };
 
 // A small, dependency-free emoji tray for the composer (CSP blocks CDNs, so no
@@ -150,6 +162,12 @@ export default function InboxPage() {
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [tplOpen, setTplOpen] = useState(false);
+  const [tpls, setTpls] = useState<Template[]>([]);
+  const [tplLoading, setTplLoading] = useState(false);
+  const [tplError, setTplError] = useState("");
+  const [tplSending, setTplSending] = useState("");
 
   const keyRef = useRef(key);
   const activeRef = useRef(active);
@@ -157,6 +175,7 @@ export default function InboxPage() {
   activeRef.current = active;
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const docRef = useRef<HTMLInputElement | null>(null);
 
   const api = useCallback(async (path: string, init?: RequestInit) => {
     const res = await fetch(path, {
@@ -227,12 +246,13 @@ export default function InboxPage() {
     }
   }, [draft, sending, api, loadThread, loadConvs]);
 
-  // --- send a photo: upload to Meta, then send by media id ---
-  const sendPhoto = useCallback(async (file: File) => {
+  // --- send a photo OR document: upload to Meta, then send by media id ---
+  const sendAttachment = useCallback(async (file: File) => {
     const phone = activeRef.current;
     if (!file || !phone || uploading) return;
     setUploading(true);
     setSendError("");
+    setAttachOpen(false);
     const caption = draft.trim();
     try {
       const form = new FormData();
@@ -244,30 +264,82 @@ export default function InboxPage() {
       });
       const upData = await up.json();
       if (!upData.ok || !upData.mediaId) {
-        setSendError(typeof upData.error === "string" ? upData.error : "Photo upload failed.");
+        setSendError(typeof upData.error === "string" ? upData.error : "Upload failed.");
         return;
       }
-      // optimistic image bubble
+      const kind = upData.kind === "document" ? "document" : "image";
+      const fname = upData.filename || file.name || "";
+      // optimistic bubble
       const optimistic: Message = {
-        id: `tmp_${Date.now()}`, dir: "out", text: caption || "📷 Photo",
-        ts: Date.now(), status: "pending", type: "image", mediaId: upData.mediaId,
+        id: `tmp_${Date.now()}`, dir: "out",
+        text: caption || (kind === "document" ? `📄 ${fname || "Document"}` : "📷 Photo"),
+        ts: Date.now(), status: "pending", type: kind, mediaId: upData.mediaId,
+        filename: kind === "document" ? fname : undefined,
       };
       setThread((t) => (t ? { ...t, messages: [...t.messages, optimistic] } : t));
       setDraft("");
       const res = await api("/api/inbox/send", {
         method: "POST",
-        body: JSON.stringify({ to: phone, mediaId: upData.mediaId, text: caption }),
+        body: JSON.stringify({ to: phone, mediaId: upData.mediaId, kind, filename: fname, text: caption }),
       });
       const data = await res.json();
       if (!data.ok) setSendError(typeof data.error === "string" ? data.error : "Send failed.");
       await loadThread(phone);
       loadConvs();
     } catch {
-      setSendError("Network error while sending photo.");
+      setSendError("Network error while sending the file.");
     } finally {
       setUploading(false);
     }
   }, [draft, uploading, api, loadThread, loadConvs]);
+
+  // --- approved templates: load list + send one to this chat ---
+  const openTemplates = useCallback(async () => {
+    setTplOpen(true);
+    setAttachOpen(false);
+    setTplError("");
+    if (tpls.length) return;
+    setTplLoading(true);
+    try {
+      const res = await api("/api/templates");
+      const data = await res.json();
+      if (data.ok) setTpls(data.templates || []);
+      else setTplError(typeof data.error === "string" ? data.error : "Could not load templates.");
+    } catch {
+      setTplError("Network error loading templates.");
+    } finally {
+      setTplLoading(false);
+    }
+  }, [api, tpls.length]);
+
+  const sendTemplateToChat = useCallback(async (tpl: Template) => {
+    const phone = activeRef.current;
+    if (!phone || tplSending) return;
+    setTplSending(tpl.name);
+    setSendError("");
+    try {
+      // {{1}} auto-fills the customer's name; other body vars go out blank here
+      // (use the Broadcast page for multi-variable / image templates).
+      const custName = thread?.name || "";
+      const bodyParams = tpl.bodyVars >= 1 ? [custName] : [];
+      const res = await api("/api/inbox/send-template", {
+        method: "POST",
+        body: JSON.stringify({ to: phone, templateName: tpl.name, languageCode: tpl.language, bodyParams }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        setSendError(typeof data.error === "string" ? data.error : "Template send failed.");
+      } else {
+        setTplOpen(false);
+        await loadThread(phone);
+        loadConvs();
+      }
+    } catch {
+      setSendError("Network error while sending template.");
+    } finally {
+      setTplSending("");
+    }
+  }, [api, tplSending, thread?.name, loadThread, loadConvs]);
 
   // --- track viewport so we can switch to a WhatsApp-style single-pane on phones ---
   useEffect(() => {
@@ -401,10 +473,10 @@ export default function InboxPage() {
             {!MOCK && (
               <button
                 onClick={lock}
-                title="Lock — clears the saved passcode on this device"
-                style={{ background: "rgba(255,255,255,.16)", color: "#fff", border: "none", borderRadius: 8, padding: "5px 9px", fontSize: 12, lineHeight: 1, cursor: "pointer" }}
+                title="Log out — you'll need the passcode again next time"
+                style={{ background: "rgba(255,255,255,.16)", color: "#fff", border: "none", borderRadius: 8, padding: "5px 10px", fontSize: 12, lineHeight: 1, cursor: "pointer", whiteSpace: "nowrap" }}
               >
-                🔒
+                🔓 Log out
               </button>
             )}
             <button
@@ -537,11 +609,16 @@ export default function InboxPage() {
                 const out = m.dir === "out";
                 const prev = thread.messages[i - 1];
                 const showDay = !prev || dayLabel(prev.ts) !== dayLabel(m.ts);
-                const isImage = m.type === "image" && !!m.mediaId;
-                const caption = m.text && m.text !== "📷 Photo" ? m.text : "";
-                const imgSrc = isImage
-                  ? `/api/inbox/media?id=${encodeURIComponent(m.mediaId!)}&key=${encodeURIComponent(key)}`
+                // An image bubble can come from a public URL (template header
+                // photo) or a proxied Meta media id (a sent/received photo).
+                const isImage = m.type === "image" && (!!m.mediaId || !!m.imageUrl);
+                const isDoc = m.type === "document";
+                const proxy = m.mediaId
+                  ? `/api/inbox/media?id=${encodeURIComponent(m.mediaId)}&key=${encodeURIComponent(key)}`
                   : "";
+                const imgSrc = m.imageUrl || proxy;
+                const placeholder = m.text === "📷 Photo" || m.text === `📄 ${m.filename || "Document"}`;
+                const caption = m.text && !placeholder ? m.text : "";
                 return (
                   <div key={m.id} style={{ display: "contents" }}>
                     {showDay && (
@@ -551,14 +628,20 @@ export default function InboxPage() {
                     )}
                     <div style={{ alignSelf: out ? "flex-end" : "flex-start", maxWidth: "72%" }}>
                       <div title={fullStamp(m.ts)} style={{ background: out ? C.outBubble : C.inBubble, border: `1px solid ${C.border}`, borderRadius: 12, padding: isImage ? 4 : "8px 11px", fontSize: 14, lineHeight: 1.4, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                        {isImage && (
+                        {isImage && imgSrc && (
                           <a href={imgSrc} target="_blank" rel="noreferrer" style={{ display: "block" }}>
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={imgSrc} alt={caption || "Photo"} style={{ maxWidth: "100%", width: 240, maxHeight: 280, objectFit: "cover", borderRadius: 9, display: "block" }} />
                           </a>
                         )}
+                        {isDoc && (
+                          <a href={proxy || "#"} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, color: C.plum, textDecoration: "none", padding: "2px 2px 6px" }}>
+                            <span style={{ fontSize: 22 }}>📄</span>
+                            <span style={{ fontWeight: 600, wordBreak: "break-all" }}>{m.filename || "Document"}</span>
+                          </a>
+                        )}
                         <div style={{ padding: isImage ? "4px 7px 2px" : 0 }}>
-                          {caption || (isImage ? "" : m.text)}
+                          {caption || (isImage || isDoc ? "" : m.text)}
                           <span style={{ float: "right", marginLeft: 10, marginTop: 6, fontSize: 10, color: C.sub, display: "inline-flex", gap: 4, alignItems: "center" }}>
                             {clock(m.ts)} {out && <Ticks status={m.status} />}
                           </span>
@@ -573,10 +656,18 @@ export default function InboxPage() {
             {/* composer */}
             <div style={{ borderTop: `1px solid ${C.border}`, background: "#fff", padding: 12 }}>
               {sendError && <div style={{ color: "#c0392b", fontSize: 12, marginBottom: 8 }}>{sendError}</div>}
+              {/* hidden pickers — available whether or not the window is open */}
+              <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" style={{ display: "none" }}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) sendAttachment(f); e.target.value = ""; }} />
+              <input ref={docRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,application/pdf" style={{ display: "none" }}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) sendAttachment(f); e.target.value = ""; }} />
+
               {!canType ? (
-                <div style={{ color: C.sub, fontSize: 13, textAlign: "center", padding: "8px 4px" }}>
-                  ⏳ 24-hour reply window closed for this customer. WhatsApp only allows an approved
-                  <b> template</b> now (e.g. order / delivery messages fire automatically).
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "center", padding: "6px 4px" }}>
+                  <div style={{ color: C.sub, fontSize: 13, textAlign: "center" }}>
+                    ⏳ 24-hour reply window closed. WhatsApp allows only an approved <b>template</b> now.
+                  </div>
+                  <button onClick={openTemplates} style={{ ...btn(C.plum), width: "auto", padding: "10px 22px" }}>📄 Send a template</button>
                 </div>
               ) : (
                 <div style={{ position: "relative" }}>
@@ -589,16 +680,16 @@ export default function InboxPage() {
                       ))}
                     </div>
                   )}
-                  <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                  {attachOpen && (
+                    <div style={{ position: "absolute", bottom: "100%", left: 74, marginBottom: 8, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 12, boxShadow: "0 6px 24px rgba(0,0,0,.12)", padding: 6, zIndex: 5, minWidth: 150 }}>
+                      <button onClick={() => { setAttachOpen(false); fileRef.current?.click(); }} style={menuItem}>🖼️ Photo</button>
+                      <button onClick={() => { setAttachOpen(false); docRef.current?.click(); }} style={menuItem}>📄 Document</button>
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
+                    <button onClick={openTemplates} title="Send approved template" style={iconBtn}>🗒️</button>
                     <button onClick={() => setEmojiOpen((v) => !v)} title="Emoji" style={iconBtn}>😊</button>
-                    <input
-                      ref={fileRef}
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      style={{ display: "none" }}
-                      onChange={(e) => { const f = e.target.files?.[0]; if (f) sendPhoto(f); e.target.value = ""; }}
-                    />
-                    <button onClick={() => fileRef.current?.click()} disabled={uploading} title="Attach photo" style={{ ...iconBtn, opacity: uploading ? 0.5 : 1 }}>
+                    <button onClick={() => setAttachOpen((v) => !v)} disabled={uploading} title="Attach photo or document" style={{ ...iconBtn, opacity: uploading ? 0.5 : 1 }}>
                       {uploading ? "…" : "📎"}
                     </button>
                     <textarea
@@ -609,7 +700,7 @@ export default function InboxPage() {
                       rows={1}
                       style={{ flex: 1, resize: "none", maxHeight: 120, padding: "10px 12px", borderRadius: 20, border: `1px solid ${C.border}`, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }}
                     />
-                    <button onClick={send} disabled={sending || !draft.trim()} style={{ ...btn(C.plum), width: "auto", padding: "10px 20px", opacity: sending || !draft.trim() ? 0.5 : 1 }}>
+                    <button onClick={send} disabled={sending || !draft.trim()} style={{ ...btn(C.plum), width: "auto", padding: "10px 18px", opacity: sending || !draft.trim() ? 0.5 : 1 }}>
                       {sending ? "…" : "Send"}
                     </button>
                   </div>
@@ -619,6 +710,48 @@ export default function InboxPage() {
           </>
         )}
       </main>
+      )}
+
+      {/* Send-approved-template modal */}
+      {tplOpen && (
+        <div onClick={() => setTplOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 460, maxHeight: "82vh", overflowY: "auto", padding: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <h3 style={{ margin: 0, color: C.plum, fontSize: 17 }}>Send a template</h3>
+              <button onClick={() => setTplOpen(false)} style={{ background: "transparent", border: "none", fontSize: 24, lineHeight: 1, cursor: "pointer", color: C.sub }}>×</button>
+            </div>
+            <p style={{ color: C.sub, fontSize: 12.5, margin: "0 0 10px" }}>
+              Approved templates reach the customer even outside the 24-hour window. <b>{"{{1}}"}</b> auto-fills {thread?.name || "the customer"}’s name.
+            </p>
+            {tplLoading && <div style={{ color: C.sub, fontSize: 13, padding: "12px 0" }}>Loading templates…</div>}
+            {tplError && <div style={{ color: "#c0392b", fontSize: 13 }}>{tplError}</div>}
+            {!tplLoading && !tplError && tpls.length === 0 && <div style={{ color: C.sub, fontSize: 13 }}>No approved templates found.</div>}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
+              {tpls.map((t) => {
+                const quick = t.headerFormat !== "IMAGE" && t.bodyVars <= 1;
+                const busy = tplSending === t.name;
+                return (
+                  <div key={`${t.name}:${t.language}`} style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: "10px 12px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                      <strong style={{ fontSize: 13 }}>{t.name}</strong>
+                      <span style={{ fontSize: 10, color: C.sub, border: `1px solid ${C.border}`, borderRadius: 6, padding: "1px 6px" }}>{t.language}</span>
+                    </div>
+                    <div style={{ fontSize: 12.5, color: C.sub, marginTop: 4, whiteSpace: "pre-wrap", maxHeight: 66, overflow: "hidden" }}>{t.bodyText}</div>
+                    {quick ? (
+                      <button onClick={() => sendTemplateToChat(t)} disabled={!!tplSending} style={{ ...btn(C.plum), width: "auto", padding: "7px 18px", fontSize: 13, marginTop: 8, opacity: tplSending ? 0.6 : 1 }}>
+                        {busy ? "Sending…" : "Send"}
+                      </button>
+                    ) : (
+                      <div style={{ fontSize: 11.5, color: C.sub, marginTop: 8 }}>
+                        🖼️ Image / multi-field template — send it from the <a href="/broadcast" style={{ color: C.plum }}>Broadcast</a> page.
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -644,4 +777,17 @@ const iconBtn: React.CSSProperties = {
   cursor: "pointer",
   padding: "6px 4px",
   flexShrink: 0,
+};
+
+const menuItem: React.CSSProperties = {
+  display: "block",
+  width: "100%",
+  textAlign: "left",
+  background: "transparent",
+  border: "none",
+  padding: "9px 12px",
+  fontSize: 14,
+  cursor: "pointer",
+  borderRadius: 8,
+  color: "#2a2126",
 };

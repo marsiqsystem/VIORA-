@@ -9,6 +9,7 @@
 
 import { sendTemplate } from "./whatsapp";
 import { recordOutbound } from "./inbox-store";
+import { renderTemplateBody } from "./templateText";
 import T from "./templates";
 
 /** Normalize a SQLite order row (snake_case) into the shape used below. */
@@ -44,9 +45,10 @@ const money = (v) => {
 // customer sees — order confirmed → out for delivery → delivered → review —
 // interleaved with the customer's own replies, exactly like WhatsApp.
 //
-// A readable one-line version of each template (Meta only stores the raw
-// {{n}} params, so we render the sentence here for display). These are for the
-// inbox thread ONLY — the actual approved copy sent to Meta is unchanged.
+// The thread stores the REAL approved template body (fetched from Meta by
+// `renderTemplateBody` and filled with the params we sent), so it matches what
+// the customer received word-for-word. The `render.*` map below is only a
+// FALLBACK used if Meta can't be reached — never the primary text.
 const render = {
   orderConfirmation: (o) =>
     `✅ Hi ${o.name}, your Viora order #${o.orderId} for ${money(o.amount)} (${o.paymentMode || "—"}) is confirmed! 💛 Tap *Confirm* to lock it in, or *Cancel* if you've changed your mind.`,
@@ -71,7 +73,7 @@ const render = {
  * inbox stays truthful — it shows what WhatsApp actually shows, no dry-run or
  * failed sends. The Meta message id enables delivery ticks (sent/delivered/read).
  */
-async function logOutbound(phone, text, res, name) {
+async function logOutbound(phone, text, res, name, imageUrl) {
   try {
     if (!res || res.ok !== true || res.dryRun === true) return;
     const wamid = res?.data?.messages?.[0]?.id;
@@ -79,10 +81,26 @@ async function logOutbound(phone, text, res, name) {
     // placeholder fromRow() falls back to, which would overwrite a good name.
     const nm = String(name ?? "").trim();
     const cleanName = nm && nm.toLowerCase() !== "customer" ? nm : undefined;
-    await recordOutbound({ to: phone, text, wamid, name: cleanName });
+    // A template with an IMAGE header (order confirmation / cancelled) shows the
+    // same photo the customer got, with the body text as the caption.
+    const url = String(imageUrl ?? "").trim();
+    await recordOutbound({
+      to: phone,
+      text,
+      wamid,
+      name: cleanName,
+      ...(url ? { type: "image", imageUrl: url } : {}),
+    });
   } catch {
     /* inbox mirror is best-effort; never surface here */
   }
+}
+
+// Resolve the REAL approved body text for a template send (falls back to the
+// hand-written `render.*` line only if Meta can't be reached).
+async function realText(name, lang, params, fallback) {
+  const real = await renderTemplateBody(name, lang, params);
+  return real || fallback;
 }
 
 // Turn a product name into a URL-safe slug for the review-link button suffix.
@@ -98,73 +116,84 @@ const slugify = (s) =>
 // {{1}} name, {{2}} order id, {{3}} amount, {{4}} payment mode.
 // Confirm/Cancel are static quick replies — no params on send.
 async function sendOrderConfirmation(o) {
+  const bodyParams = [o.name, o.orderId, o.amount, o.paymentMode];
+  const headerImageUrl = o.productImage || T.orderConfirmation.headerImageUrl;
   const res = await sendTemplate({
     to: o.phone,
     templateName: T.orderConfirmation.name,
     languageCode: T.orderConfirmation.lang,
     // The template's IMAGE header: use this order's product photo when we have
     // it, else the Viora logo. (A header image is required — never send empty.)
-    headerImageUrl: o.productImage || T.orderConfirmation.headerImageUrl,
-    bodyParams: [o.name, o.orderId, o.amount, o.paymentMode],
+    headerImageUrl,
+    bodyParams,
   });
-  await logOutbound(o.phone, render.orderConfirmation(o), res, o.name);
+  const text = await realText(T.orderConfirmation.name, T.orderConfirmation.lang, bodyParams, render.orderConfirmation(o));
+  await logOutbound(o.phone, text, res, o.name, headerImageUrl);
   return res;
 }
 
 // --- Workflow 2: out for delivery --------------------------------------------
 // body {{1}} name, {{2}} order id, {{3}} product, {{4}} amount ; button url {{1}} tracking suffix.
 async function sendOutForDelivery(o) {
+  const bodyParams = [o.name, o.orderId, o.product, o.amount];
   const res = await sendTemplate({
     to: o.phone,
     templateName: T.outForDelivery.name,
     languageCode: T.outForDelivery.lang,
-    bodyParams: [o.name, o.orderId, o.product, o.amount],
+    bodyParams,
     // The AWB is the suffix that fills the template button's tracking URL {{1}}.
     urlButtons: [{ index: "0", param: o.awb }],
   });
-  await logOutbound(o.phone, render.outForDelivery(o), res, o.name);
+  const text = await realText(T.outForDelivery.name, T.outForDelivery.lang, bodyParams, render.outForDelivery(o));
+  await logOutbound(o.phone, text, res, o.name);
   return res;
 }
 
 // --- Workflow 3: delivered ----------------------------------------------------
 // body {{1}} name, {{2}} order id.
 async function sendDelivered(o) {
+  const bodyParams = [o.name, o.orderId];
   const res = await sendTemplate({
     to: o.phone,
     templateName: T.delivered.name,
     languageCode: T.delivered.lang,
-    bodyParams: [o.name, o.orderId],
+    bodyParams,
   });
-  await logOutbound(o.phone, render.delivered(o), res, o.name);
+  const text = await realText(T.delivered.name, T.delivered.lang, bodyParams, render.delivered(o));
+  await logOutbound(o.phone, text, res, o.name);
   return res;
 }
 
 // --- Workflow 4: review request (2-3 days post-delivery) ---------------------
 // body {{1}} name, {{2}} order id ; button url {{1}} product slug.
 async function sendReviewRequest(o) {
+  const bodyParams = [o.name, o.orderId];
   const res = await sendTemplate({
     to: o.phone,
     templateName: T.reviewRequest.name,
     languageCode: T.reviewRequest.lang,
-    bodyParams: [o.name, o.orderId],
+    bodyParams,
     // TODO: pass the real Wix product slug through the store instead of slugifying the name.
     urlButtons: [{ index: "0", param: slugify(o.product) }],
   });
-  await logOutbound(o.phone, render.reviewRequest(o), res, o.name);
+  const text = await realText(T.reviewRequest.name, T.reviewRequest.lang, bodyParams, render.reviewRequest(o));
+  await logOutbound(o.phone, text, res, o.name);
   return res;
 }
 
 // --- Workflow 5: abandoned cart ----------------------------------------------
 // body {{1}} name, {{2}} product, {{3}} value ; button url {{1}} cart recovery token.
 async function sendAbandonedCart(o) {
+  const bodyParams = [o.name, o.product, o.amount];
   const res = await sendTemplate({
     to: o.phone,
     templateName: T.abandonedCart.name,
     languageCode: T.abandonedCart.lang,
-    bodyParams: [o.name, o.product, o.amount],
+    bodyParams,
     urlButtons: [{ index: "0", param: o.cartToken }],
   });
-  await logOutbound(o.phone, render.abandonedCart(o), res, o.name);
+  const text = await realText(T.abandonedCart.name, T.abandonedCart.lang, bodyParams, render.abandonedCart(o));
+  await logOutbound(o.phone, text, res, o.name);
   return res;
 }
 
@@ -173,21 +202,18 @@ async function sendAbandonedCart(o) {
 // One template covers both reasons (customer request / couldn't connect on call);
 // the approved body text mentions both, so no reason variable is needed.
 async function sendOrderCancelled(o) {
+  const bodyParams = [o.name, o.orderId, o.product, o.amount, prettyPayment(o.paymentMode)];
+  const headerImageUrl = o.productImage || T.orderCancelled.headerImageUrl;
   const res = await sendTemplate({
     to: o.phone,
     templateName: T.orderCancelled.name,
     languageCode: T.orderCancelled.lang,
     // Same as confirmation: this order's product photo when we have it, else the logo.
-    headerImageUrl: o.productImage || T.orderCancelled.headerImageUrl,
-    bodyParams: [
-      o.name,
-      o.orderId,
-      o.product,
-      o.amount,
-      prettyPayment(o.paymentMode),
-    ],
+    headerImageUrl,
+    bodyParams,
   });
-  await logOutbound(o.phone, render.orderCancelled(o), res, o.name);
+  const text = await realText(T.orderCancelled.name, T.orderCancelled.lang, bodyParams, render.orderCancelled(o));
+  await logOutbound(o.phone, text, res, o.name, headerImageUrl);
   return res;
 }
 

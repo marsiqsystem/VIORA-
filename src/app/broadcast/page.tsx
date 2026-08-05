@@ -320,7 +320,7 @@ export default function BroadcastPage() {
         <strong style={{ fontSize: 18 }}>Viora Broadcast</strong>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <a href="/inbox" style={{ color: "#fff", fontSize: 13, opacity: 0.9 }}>Go to Inbox →</a>
-          <button onClick={lock} title="Lock — clears the saved passcode on this device" style={{ background: "rgba(255,255,255,.16)", color: "#fff", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, cursor: "pointer" }}>🔒 Lock</button>
+          <button onClick={lock} title="Log out — you'll need the passcode again next time" style={{ background: "rgba(255,255,255,.16)", color: "#fff", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, cursor: "pointer" }}>🔓 Log out</button>
         </div>
       </header>
 

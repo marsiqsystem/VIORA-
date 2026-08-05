@@ -15,9 +15,20 @@ import { authOk, authConfigured, keyFromRequest } from "@/lib/crm/inbox-store";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// WhatsApp caps images at 5MB; reject early with a clear message.
-const MAX_BYTES = 5 * 1024 * 1024;
-const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp"]);
+// WhatsApp caps: images 5MB, documents 100MB (we cap docs at 16MB to stay well
+// under the serverless request limit). Reject early with a clear message.
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_DOC_BYTES = 16 * 1024 * 1024;
+const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const DOC_MIMES = new Set([
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/plain",
+  "text/csv",
+]);
 
 export async function POST(req: NextRequest) {
   if (!authConfigured()) {
@@ -40,21 +51,24 @@ export async function POST(req: NextRequest) {
   }
 
   const mime = file.type || "application/octet-stream";
-  if (!ALLOWED.has(mime)) {
+  const isImage = IMAGE_MIMES.has(mime);
+  const isDoc = DOC_MIMES.has(mime);
+  if (!isImage && !isDoc) {
     return NextResponse.json(
-      { ok: false, error: "Only JPG, PNG or WebP images are supported." },
+      { ok: false, error: "Unsupported file type (images: JPG/PNG/WebP; docs: PDF/Word/Excel/CSV/TXT)." },
       { status: 415 }
     );
   }
-  if (file.size > MAX_BYTES) {
+  const cap = isImage ? MAX_IMAGE_BYTES : MAX_DOC_BYTES;
+  if (file.size > cap) {
     return NextResponse.json(
-      { ok: false, error: "Image too large (max 5MB)." },
+      { ok: false, error: `File too large (max ${isImage ? "5MB" : "16MB"}).` },
       { status: 413 }
     );
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  const up = await uploadMedia({ buffer, mime, filename: file.name || "photo" });
+  const up = await uploadMedia({ buffer, mime, filename: file.name || (isImage ? "photo" : "document") });
   if (!up.ok || !up.id) {
     return NextResponse.json(
       { ok: false, error: typeof up.error === "string" ? up.error : "Upload failed." },
@@ -62,5 +76,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  return NextResponse.json({ ok: true, mediaId: up.id, mime, dryRun: !!up.dryRun });
+  return NextResponse.json({
+    ok: true,
+    mediaId: up.id,
+    mime,
+    kind: isImage ? "image" : "document",
+    filename: file.name || "",
+    dryRun: !!up.dryRun,
+  });
 }

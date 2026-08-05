@@ -205,6 +205,23 @@ function sendImage({ to, mediaId, link, caption }, opts) {
 }
 
 /**
+ * Send a document message (PDF, etc.) by Meta media id. 24-hour-window only,
+ * like sendText/sendImage. Used by the inbox composer's document attachment.
+ *
+ * @param {{to:string, mediaId:string, filename?:string, caption?:string}} p
+ * @param {object} [opts]
+ */
+function sendDocument({ to, mediaId, filename, caption }, opts) {
+  const document = { id: mediaId };
+  if (filename) document.filename = filename;
+  if (caption) document.caption = caption;
+  return sendRaw(
+    { messaging_product: "whatsapp", recipient_type: "individual", to, type: "document", document },
+    opts
+  );
+}
+
+/**
  * Upload a media file to Meta and return its media id (reusable for ~30 days).
  * The inbox uploads the operator's attachment here, then sends it by id so no
  * public hosting is needed. Never throws.
@@ -309,6 +326,7 @@ export {
   sendText,
   sendTemplate,
   sendImage,
+  sendDocument,
   uploadMedia,
   fetchMediaBytes,
   listTemplates,

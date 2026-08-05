@@ -263,11 +263,12 @@ async function ingestWebhook(body) {
  *                           the conversation title — authoritative over the
  *                           WhatsApp profile name — so an operator sees
  *                           "Zeeshan Shamim", not a bare number.
- * @param {string} [p.type]  message kind: 'text' (default) or 'image'.
- * @param {string} [p.mediaId] Meta media id for an image message (renders inline
- *                           via the media proxy).
+ * @param {string} [p.type]  message kind: 'text' (default), 'image' or 'document'.
+ * @param {string} [p.mediaId] Meta media id (uploaded photo/doc) — renders via the media proxy.
+ * @param {string} [p.imageUrl] public image URL (e.g. a template's header image) — rendered directly.
+ * @param {string} [p.filename] document file name (for a 'document' message).
  */
-async function recordOutbound({ to, text, wamid, ts, status = "sent", name, type = "text", mediaId } = {}) {
+async function recordOutbound({ to, text, wamid, ts, status = "sent", name, type = "text", mediaId, imageUrl, filename } = {}) {
   if (!isConfigured()) return { ok: false };
   const phone = normPhone(to);
   if (!phone) return { ok: false };
@@ -281,6 +282,8 @@ async function recordOutbound({ to, text, wamid, ts, status = "sent", name, type
       ts: tsMs,
       type,
       ...(mediaId ? { mediaId } : {}),
+      ...(imageUrl ? { imageUrl } : {}),
+      ...(filename ? { filename } : {}),
     });
     if (wamid) {
       try {
