@@ -15,6 +15,9 @@ function config() {
   return {
     token: process.env.WHATSAPP_ACCESS_TOKEN,
     phoneNumberId: process.env.PHONE_NUMBER_ID,
+    // WhatsApp Business Account (WABA) id — needed to LIST approved templates for
+    // the broadcast composer. Either env name works.
+    businessId: (process.env.WHATSAPP_BUSINESS_ID || process.env.WABA_ID || "").trim(),
     version: process.env.GRAPH_API_VERSION || "v22.0",
     // Live only when explicitly enabled — safe default is dry run.
     // `.trim()` so a trailing space/newline pasted into the Vercel dashboard
@@ -120,6 +123,7 @@ function sendText({ to, body }, opts) {
  *        one entry per dynamic URL button: `index` is the button's position in
  *        the template (0-based, as a string), `param` is the SUFFIX that fills
  *        that button's {{1}} (e.g. the AWB, product slug, or cart token).
+ * @param {object} [opts]
  */
 function sendTemplate(
   {
@@ -183,4 +187,130 @@ function sendTemplate(
   );
 }
 
-export { sendRaw, sendText, sendTemplate, config };
+/**
+ * Send an image message by Meta media id (uploaded via uploadMedia) or a public
+ * link. Like sendText, only allowed inside the 24-hour service window. Used by
+ * the inbox composer's attach button.
+ *
+ * @param {{to:string, mediaId?:string, link?:string, caption?:string}} p
+ * @param {object} [opts]
+ */
+function sendImage({ to, mediaId, link, caption }, opts) {
+  const image = mediaId ? { id: mediaId } : { link };
+  if (caption) image.caption = caption;
+  return sendRaw(
+    { messaging_product: "whatsapp", recipient_type: "individual", to, type: "image", image },
+    opts
+  );
+}
+
+/**
+ * Upload a media file to Meta and return its media id (reusable for ~30 days).
+ * The inbox uploads the operator's attachment here, then sends it by id so no
+ * public hosting is needed. Never throws.
+ *
+ * @param {{buffer:ArrayBuffer|Uint8Array|Buffer, mime:string, filename?:string}} p
+ * @returns {Promise<{ok:boolean, id?:string, dryRun?:boolean, error?:any}>}
+ */
+async function uploadMedia({ buffer, mime, filename = "upload" }) {
+  const { token, phoneNumberId, version, sendEnabled } = config();
+  if (!token || !phoneNumberId) return { ok: false, error: "whatsapp not configured" };
+  if (!sendEnabled) {
+    // Dry-run: don't hit Meta; hand back a fake id so the flow can be exercised.
+    return { ok: true, dryRun: true, id: `MOCK-MEDIA-${Date.now()}` };
+  }
+  try {
+    const form = new FormData();
+    form.append("messaging_product", "whatsapp");
+    form.append("type", mime);
+    form.append("file", new Blob([buffer], { type: mime }), filename);
+    const res = await fetch(`${GRAPH}/${version}/${phoneNumberId}/media`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.id) {
+      console.error(`[whatsapp] media upload failed (HTTP ${res.status}):`, JSON.stringify(data));
+      return { ok: false, error: data?.error || `HTTP ${res.status}` };
+    }
+    return { ok: true, id: data.id };
+  } catch (error) {
+    console.error("[whatsapp] media upload network error:", error);
+    return { ok: false, error };
+  }
+}
+
+/**
+ * Resolve a media id to its (short-lived, auth-required) CDN URL, then download
+ * the bytes. Used by the inbox media proxy so a customer's photo renders inline
+ * without persisting it anywhere. Never throws.
+ *
+ * @returns {Promise<{ok:boolean, buffer?:Buffer, mime?:string, error?:any}>}
+ */
+async function fetchMediaBytes(mediaId) {
+  const { token, version } = config();
+  if (!token) return { ok: false, error: "whatsapp not configured" };
+  if (!mediaId) return { ok: false, error: "no media id" };
+  try {
+    // 1) media id -> temporary URL + mime.
+    const metaRes = await fetch(`${GRAPH}/${version}/${mediaId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const meta = await metaRes.json().catch(() => ({}));
+    if (!metaRes.ok || !meta?.url) {
+      return { ok: false, error: meta?.error || `HTTP ${metaRes.status}` };
+    }
+    // 2) download the bytes (the CDN URL also requires the bearer token).
+    const binRes = await fetch(meta.url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!binRes.ok) return { ok: false, error: `media download HTTP ${binRes.status}` };
+    const buffer = Buffer.from(await binRes.arrayBuffer());
+    return { ok: true, buffer, mime: meta.mime_type || "application/octet-stream" };
+  } catch (error) {
+    console.error("[whatsapp] fetchMediaBytes error:", error);
+    return { ok: false, error };
+  }
+}
+
+/**
+ * List the WABA's message templates (for the broadcast composer). Returns the
+ * raw template objects (name, status, language, category, components) so the
+ * caller can filter to APPROVED and parse variables. Never throws.
+ *
+ * @returns {Promise<{ok:boolean, templates?:any[], error?:any}>}
+ */
+async function listTemplates() {
+  const { token, businessId, version } = config();
+  if (!token || !businessId) {
+    return { ok: false, error: "WHATSAPP_ACCESS_TOKEN / WHATSAPP_BUSINESS_ID not configured" };
+  }
+  try {
+    const out = [];
+    let url =
+      `${GRAPH}/${version}/${businessId}/message_templates` +
+      `?fields=name,status,language,category,components&limit=100`;
+    // Follow paging so all templates come back, not just the first page.
+    for (let page = 0; page < 20 && url; page++) {
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, error: data?.error || `HTTP ${res.status}` };
+      for (const t of data?.data || []) out.push(t);
+      url = data?.paging?.next || "";
+    }
+    return { ok: true, templates: out };
+  } catch (error) {
+    console.error("[whatsapp] listTemplates error:", error);
+    return { ok: false, error };
+  }
+}
+
+export {
+  sendRaw,
+  sendText,
+  sendTemplate,
+  sendImage,
+  uploadMedia,
+  fetchMediaBytes,
+  listTemplates,
+  config,
+};

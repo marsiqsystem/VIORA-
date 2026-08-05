@@ -152,6 +152,21 @@ function inboundText(msg) {
 }
 
 /**
+ * Pull the media handle off any media-bearing inbound message, so the inbox can
+ * render the photo inline (image/sticker) or offer a download (video/doc/audio)
+ * via the auth'd media proxy. Returns null for plain text/button messages.
+ */
+function inboundMedia(msg) {
+  const m = msg?.[msg?.type];
+  if (!m || !m.id) return null;
+  return {
+    mediaId: m.id,
+    mime: m.mime_type || "",
+    filename: m.filename || "",
+  };
+}
+
+/**
  * Ingest a raw Meta webhook body into the inbox store: saves every inbound
  * customer message and applies every outbound delivery/read status.
  *
@@ -183,6 +198,7 @@ async function ingestWebhook(body) {
           if (!phone) continue;
           const tsMs = msg.timestamp ? Number(msg.timestamp) * 1000 : Date.now();
           const text = inboundText(msg);
+          const media = inboundMedia(msg);
 
           await pushMessage(phone, {
             id: msg.id || `in_${tsMs}`,
@@ -190,6 +206,9 @@ async function ingestWebhook(body) {
             text,
             ts: tsMs,
             type: msg.type || "text",
+            ...(media
+              ? { mediaId: media.mediaId, mime: media.mime, filename: media.filename }
+              : {}),
           });
 
           const conv = await readConv(phone);
@@ -244,15 +263,25 @@ async function ingestWebhook(body) {
  *                           the conversation title — authoritative over the
  *                           WhatsApp profile name — so an operator sees
  *                           "Zeeshan Shamim", not a bare number.
+ * @param {string} [p.type]  message kind: 'text' (default) or 'image'.
+ * @param {string} [p.mediaId] Meta media id for an image message (renders inline
+ *                           via the media proxy).
  */
-async function recordOutbound({ to, text, wamid, ts, status = "sent", name } = {}) {
+async function recordOutbound({ to, text, wamid, ts, status = "sent", name, type = "text", mediaId } = {}) {
   if (!isConfigured()) return { ok: false };
   const phone = normPhone(to);
   if (!phone) return { ok: false };
   const tsMs = ts || Date.now();
   const id = wamid || `out_${tsMs}_${Math.random().toString(36).slice(2, 8)}`;
   try {
-    await pushMessage(phone, { id, dir: "out", text: String(text ?? ""), ts: tsMs, type: "text" });
+    await pushMessage(phone, {
+      id,
+      dir: "out",
+      text: String(text ?? ""),
+      ts: tsMs,
+      type,
+      ...(mediaId ? { mediaId } : {}),
+    });
     if (wamid) {
       try {
         await command(["HSET", statusKey(phone), wamid, status]);

@@ -33,7 +33,18 @@ type Message = {
   ts: number;
   type?: string;
   status?: string;
+  mediaId?: string;
+  mime?: string;
+  filename?: string;
 };
+
+// A small, dependency-free emoji tray for the composer (CSP blocks CDNs, so no
+// external picker library).
+const EMOJIS = [
+  "😊", "😍", "🥰", "😘", "👍", "🙏", "🎉", "💛", "💍", "✨",
+  "🔥", "😂", "😅", "🥳", "😇", "👌", "🙌", "💯", "✅", "🚚",
+  "📦", "⭐", "❤️", "😉", "🤗", "💐", "🛍️", "😎",
+];
 type Thread = {
   phone: string;
   name: string;
@@ -89,6 +100,24 @@ function listTime(ts: number) {
   const sameDay = d.toDateString() === today.toDateString();
   return sameDay ? clock(ts) : d.toLocaleDateString([], { day: "2-digit", month: "short" });
 }
+// "Today" / "Yesterday" / "12 Aug 2026" divider label for a message's day.
+function dayLabel(ts: number) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  const today = new Date();
+  const yest = new Date();
+  yest.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return "Today";
+  if (d.toDateString() === yest.toDateString()) return "Yesterday";
+  return d.toLocaleDateString([], { day: "2-digit", month: "short", year: "numeric" });
+}
+// Full timestamp shown on hover/tap of a bubble.
+function fullStamp(ts: number) {
+  if (!ts) return "";
+  return new Date(ts).toLocaleString([], {
+    day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+}
 function Ticks({ status }: { status?: string }) {
   if (!status) return null;
   if (status === "pending") return <span title="pending" style={{ color: C.sub }}>🕓</span>;
@@ -117,12 +146,16 @@ export default function InboxPage() {
   const [sendError, setSendError] = useState("");
   const [composing, setComposing] = useState(false);
   const [newPhone, setNewPhone] = useState("");
+  const [search, setSearch] = useState("");
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const keyRef = useRef(key);
   const activeRef = useRef(active);
   keyRef.current = key;
   activeRef.current = active;
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   const api = useCallback(async (path: string, init?: RequestInit) => {
     const res = await fetch(path, {
@@ -192,6 +225,48 @@ export default function InboxPage() {
       setSending(false);
     }
   }, [draft, sending, api, loadThread, loadConvs]);
+
+  // --- send a photo: upload to Meta, then send by media id ---
+  const sendPhoto = useCallback(async (file: File) => {
+    const phone = activeRef.current;
+    if (!file || !phone || uploading) return;
+    setUploading(true);
+    setSendError("");
+    const caption = draft.trim();
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const up = await fetch("/api/inbox/upload", {
+        method: "POST",
+        headers: { "x-inbox-key": keyRef.current },
+        body: form,
+      });
+      const upData = await up.json();
+      if (!upData.ok || !upData.mediaId) {
+        setSendError(typeof upData.error === "string" ? upData.error : "Photo upload failed.");
+        return;
+      }
+      // optimistic image bubble
+      const optimistic: Message = {
+        id: `tmp_${Date.now()}`, dir: "out", text: caption || "📷 Photo",
+        ts: Date.now(), status: "pending", type: "image", mediaId: upData.mediaId,
+      };
+      setThread((t) => (t ? { ...t, messages: [...t.messages, optimistic] } : t));
+      setDraft("");
+      const res = await api("/api/inbox/send", {
+        method: "POST",
+        body: JSON.stringify({ to: phone, mediaId: upData.mediaId, text: caption }),
+      });
+      const data = await res.json();
+      if (!data.ok) setSendError(typeof data.error === "string" ? data.error : "Send failed.");
+      await loadThread(phone);
+      loadConvs();
+    } catch {
+      setSendError("Network error while sending photo.");
+    } finally {
+      setUploading(false);
+    }
+  }, [draft, uploading, api, loadThread, loadConvs]);
 
   // --- initial auth: pull saved key, try loading ---
   useEffect(() => {
@@ -298,6 +373,16 @@ export default function InboxPage() {
           </div>
         </header>
 
+        <div style={{ padding: "10px 12px", borderBottom: `1px solid ${C.border}`, background: "#fff" }}>
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="🔍  Search name or number"
+            style={{ width: "100%", padding: "8px 12px", borderRadius: 18, border: `1px solid ${C.border}`, fontSize: 13, background: "#f4eef0", boxSizing: "border-box" }}
+          />
+        </div>
+
         {composing && (
           <div style={{ padding: 14, borderBottom: `1px solid ${C.border}`, background: "#faf3f5" }}>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: C.plum }}>New chat</div>
@@ -325,7 +410,24 @@ export default function InboxPage() {
               No conversations yet. Customer replies will appear here.
             </div>
           )}
-          {convs.map((c) => {
+          {(() => {
+            const q = search.trim().toLowerCase();
+            const digits = q.replace(/[^\d]/g, "");
+            const shown = q
+              ? convs.filter(
+                  (c) =>
+                    (c.name || "").toLowerCase().includes(q) ||
+                    (digits && c.phone.includes(digits))
+                )
+              : convs;
+            if (convs.length > 0 && shown.length === 0) {
+              return (
+                <div style={{ padding: 24, color: C.sub, fontSize: 14, textAlign: "center" }}>
+                  No chats match “{search}”.
+                </div>
+              );
+            }
+            return shown.map((c) => {
             const isActive = c.phone === active;
             return (
               <button
@@ -355,7 +457,8 @@ export default function InboxPage() {
                 </div>
               </button>
             );
-          })}
+            });
+          })()}
         </div>
       </aside>
 
@@ -379,15 +482,37 @@ export default function InboxPage() {
             </header>
 
             <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 8 }}>
-              {thread.messages.map((m) => {
+              {thread.messages.map((m, i) => {
                 const out = m.dir === "out";
+                const prev = thread.messages[i - 1];
+                const showDay = !prev || dayLabel(prev.ts) !== dayLabel(m.ts);
+                const isImage = m.type === "image" && !!m.mediaId;
+                const caption = m.text && m.text !== "📷 Photo" ? m.text : "";
+                const imgSrc = isImage
+                  ? `/api/inbox/media?id=${encodeURIComponent(m.mediaId!)}&key=${encodeURIComponent(key)}`
+                  : "";
                 return (
-                  <div key={m.id} style={{ alignSelf: out ? "flex-end" : "flex-start", maxWidth: "72%" }}>
-                    <div style={{ background: out ? C.outBubble : C.inBubble, border: `1px solid ${C.border}`, borderRadius: 12, padding: "8px 11px", fontSize: 14, lineHeight: 1.4, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                      {m.text}
-                      <span style={{ float: "right", marginLeft: 10, marginTop: 6, fontSize: 10, color: C.sub, display: "inline-flex", gap: 4, alignItems: "center" }}>
-                        {clock(m.ts)} {out && <Ticks status={m.status} />}
-                      </span>
+                  <div key={m.id} style={{ display: "contents" }}>
+                    {showDay && (
+                      <div style={{ alignSelf: "center", background: "#eadfe4", color: C.sub, fontSize: 11, padding: "3px 12px", borderRadius: 10, margin: "6px 0" }}>
+                        {dayLabel(m.ts)}
+                      </div>
+                    )}
+                    <div style={{ alignSelf: out ? "flex-end" : "flex-start", maxWidth: "72%" }}>
+                      <div title={fullStamp(m.ts)} style={{ background: out ? C.outBubble : C.inBubble, border: `1px solid ${C.border}`, borderRadius: 12, padding: isImage ? 4 : "8px 11px", fontSize: 14, lineHeight: 1.4, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                        {isImage && (
+                          <a href={imgSrc} target="_blank" rel="noreferrer" style={{ display: "block" }}>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={imgSrc} alt={caption || "Photo"} style={{ maxWidth: "100%", width: 240, maxHeight: 280, objectFit: "cover", borderRadius: 9, display: "block" }} />
+                          </a>
+                        )}
+                        <div style={{ padding: isImage ? "4px 7px 2px" : 0 }}>
+                          {caption || (isImage ? "" : m.text)}
+                          <span style={{ float: "right", marginLeft: 10, marginTop: 6, fontSize: 10, color: C.sub, display: "inline-flex", gap: 4, alignItems: "center" }}>
+                            {clock(m.ts)} {out && <Ticks status={m.status} />}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 );
@@ -403,18 +528,40 @@ export default function InboxPage() {
                   <b> template</b> now (e.g. order / delivery messages fire automatically).
                 </div>
               ) : (
-                <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
-                  <textarea
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-                    placeholder="Type a reply…  (Enter to send, Shift+Enter for newline)"
-                    rows={1}
-                    style={{ flex: 1, resize: "none", maxHeight: 120, padding: "10px 12px", borderRadius: 20, border: `1px solid ${C.border}`, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }}
-                  />
-                  <button onClick={send} disabled={sending || !draft.trim()} style={{ ...btn(C.plum), width: "auto", padding: "10px 20px", opacity: sending || !draft.trim() ? 0.5 : 1 }}>
-                    {sending ? "…" : "Send"}
-                  </button>
+                <div style={{ position: "relative" }}>
+                  {emojiOpen && (
+                    <div style={{ position: "absolute", bottom: "100%", left: 0, marginBottom: 8, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 12, boxShadow: "0 6px 24px rgba(0,0,0,.12)", padding: 8, display: "flex", flexWrap: "wrap", gap: 4, width: 268, maxHeight: 160, overflowY: "auto", zIndex: 5 }}>
+                      {EMOJIS.map((e) => (
+                        <button key={e} onClick={() => { setDraft((d) => d + e); setEmojiOpen(false); }} style={{ border: "none", background: "transparent", fontSize: 20, cursor: "pointer", width: 34, height: 34, borderRadius: 8 }}>
+                          {e}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                    <button onClick={() => setEmojiOpen((v) => !v)} title="Emoji" style={iconBtn}>😊</button>
+                    <input
+                      ref={fileRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      style={{ display: "none" }}
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) sendPhoto(f); e.target.value = ""; }}
+                    />
+                    <button onClick={() => fileRef.current?.click()} disabled={uploading} title="Attach photo" style={{ ...iconBtn, opacity: uploading ? 0.5 : 1 }}>
+                      {uploading ? "…" : "📎"}
+                    </button>
+                    <textarea
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+                      placeholder="Type a reply…  (Enter to send, Shift+Enter for newline)"
+                      rows={1}
+                      style={{ flex: 1, resize: "none", maxHeight: 120, padding: "10px 12px", borderRadius: 20, border: `1px solid ${C.border}`, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }}
+                    />
+                    <button onClick={send} disabled={sending || !draft.trim()} style={{ ...btn(C.plum), width: "auto", padding: "10px 20px", opacity: sending || !draft.trim() ? 0.5 : 1 }}>
+                      {sending ? "…" : "Send"}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -436,3 +583,13 @@ function Centered({ children }: { children: React.ReactNode }) {
 function btn(bg: string): React.CSSProperties {
   return { width: "100%", background: bg, color: "#fff", border: "none", borderRadius: 10, padding: "11px 0", fontSize: 15, fontWeight: 600, cursor: "pointer" };
 }
+
+const iconBtn: React.CSSProperties = {
+  background: "transparent",
+  border: "none",
+  fontSize: 22,
+  lineHeight: 1,
+  cursor: "pointer",
+  padding: "6px 4px",
+  flexShrink: 0,
+};
