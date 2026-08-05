@@ -149,6 +149,7 @@ export default function InboxPage() {
   const [search, setSearch] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   const keyRef = useRef(key);
   const activeRef = useRef(active);
@@ -268,6 +269,23 @@ export default function InboxPage() {
     }
   }, [draft, uploading, api, loadThread, loadConvs]);
 
+  // --- track viewport so we can switch to a WhatsApp-style single-pane on phones ---
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 760px)");
+    const on = () => setIsMobile(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+
+  // Go back to the chat list (mobile back arrow).
+  const backToList = useCallback(() => {
+    setActive(null);
+    activeRef.current = null;
+    setThread(null);
+    setEmojiOpen(false);
+  }, []);
+
   // --- initial auth: pull saved key, try loading ---
   useEffect(() => {
     if (MOCK) return;
@@ -355,10 +373,17 @@ export default function InboxPage() {
 
   const canType = thread?.withinWindow !== false;
 
+  // WhatsApp-style single-pane on phones: show the LIST, or the open THREAD, not
+  // both. On desktop both panes show side by side as before.
+  const viewingThread = !!active;
+  const showList = !isMobile || !viewingThread;
+  const showThread = !isMobile || viewingThread;
+
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", height: "100dvh", background: C.bgChat, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif", color: C.text }}>
       {/* LEFT: conversation list */}
-      <aside style={{ width: 340, minWidth: 300, borderRight: `1px solid ${C.border}`, background: C.bgList, display: "flex", flexDirection: "column", }}>
+      {showList && (
+      <aside style={{ width: isMobile ? "100%" : 340, minWidth: isMobile ? 0 : 300, borderRight: isMobile ? "none" : `1px solid ${C.border}`, background: C.bgList, display: "flex", flexDirection: "column", }}>
         <header style={{ background: C.plum, color: "#fff", padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <strong style={{ fontSize: 17, letterSpacing: 0.3 }}>Viora Inbox</strong>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -461,8 +486,10 @@ export default function InboxPage() {
           })()}
         </div>
       </aside>
+      )}
 
       {/* RIGHT: thread */}
+      {showThread && (
       <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         {!thread ? (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: C.sub, flexDirection: "column", gap: 8 }}>
@@ -472,7 +499,12 @@ export default function InboxPage() {
         ) : (
           <>
             <header style={{ background: C.plum, color: "#fff", padding: "14px 18px", display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ width: 38, height: 38, borderRadius: "50%", background: C.plumDark, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600 }}>
+              {isMobile && (
+                <button onClick={backToList} title="Back" aria-label="Back to chats" style={{ background: "transparent", border: "none", color: "#fff", fontSize: 24, lineHeight: 1, cursor: "pointer", padding: "0 4px 0 0", marginLeft: -4 }}>
+                  ‹
+                </button>
+              )}
+              <div style={{ width: 38, height: 38, borderRadius: "50%", background: C.plumDark, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600, flexShrink: 0 }}>
                 {(thread.name || thread.phone).slice(0, 1).toUpperCase()}
               </div>
               <div>
@@ -568,6 +600,7 @@ export default function InboxPage() {
           </>
         )}
       </main>
+      )}
     </div>
   );
 }

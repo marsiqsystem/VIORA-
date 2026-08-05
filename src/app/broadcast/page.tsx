@@ -293,8 +293,8 @@ export default function BroadcastPage() {
   const pct = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
 
   return (
-    <div style={{ minHeight: "100dvh", background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" } as React.CSSProperties}>
-      <header style={{ background: C.plum, color: "#fff", padding: "16px 22px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 9999, overflowY: "auto", background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
+      <header style={{ position: "sticky", top: 0, zIndex: 2, background: C.plum, color: "#fff", padding: "16px 22px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <strong style={{ fontSize: 18 }}>Viora Broadcast</strong>
         <a href="/inbox" style={{ color: "#fff", fontSize: 13, opacity: 0.9 }}>Go to Inbox →</a>
       </header>
@@ -481,7 +481,7 @@ function Badge({ color, children }: { color: string; children: React.ReactNode }
 }
 function Centered({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, background: C.bg, fontFamily: "system-ui, sans-serif", padding: 20 }}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 9999, minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, background: C.bg, fontFamily: "system-ui, sans-serif", padding: 20 }}>
       {children}
     </div>
   );
