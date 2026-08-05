@@ -388,6 +388,56 @@ async function getMessages(phone) {
   }
 }
 
+/**
+ * Delete ONE message from a conversation (WhatsApp "delete for me"). Rewrites the
+ * capped list without that message id and refreshes the conversation preview.
+ * This only removes it from OUR inbox — it cannot unsend it on the customer's
+ * WhatsApp. Never throws.
+ */
+async function deleteMessage(phone, id) {
+  if (!isConfigured()) return { ok: false };
+  const p = normPhone(phone);
+  if (!p || !id) return { ok: false };
+  try {
+    const raw = await command(["LRANGE", msgsKey(p), 0, -1]).catch(() => []);
+    const msgs = (raw || []).map((m) => safeParse(m, null)).filter(Boolean);
+    const kept = msgs.filter((m) => m.id !== id);
+    if (kept.length === msgs.length) return { ok: true }; // nothing matched
+    await command(["DEL", msgsKey(p)]);
+    if (kept.length) await command(["RPUSH", msgsKey(p), ...kept.map((m) => JSON.stringify(m))]);
+    const conv = await readConv(p);
+    const last = kept[kept.length - 1];
+    conv.lastText = last ? String(last.text || "") : "";
+    if (last) conv.lastTs = Number(last.ts) || conv.lastTs;
+    await command(["SET", convKey(p), JSON.stringify(conv)]);
+    return { ok: true };
+  } catch (e) {
+    console.warn("[inbox] deleteMessage error:", e?.message || e);
+    return { ok: false };
+  }
+}
+
+/**
+ * Delete an ENTIRE conversation (WhatsApp "delete chat") — removes its meta,
+ * messages, delivery ticks and its place in the index. Only clears OUR inbox,
+ * not the customer's WhatsApp. Never throws.
+ */
+async function deleteConversation(phone) {
+  if (!isConfigured()) return { ok: false };
+  const p = normPhone(phone);
+  if (!p) return { ok: false };
+  try {
+    await command(["DEL", convKey(p)]);
+    await command(["DEL", msgsKey(p)]);
+    await command(["DEL", statusKey(p)]);
+    await command(["ZREM", INDEX_KEY, p]);
+    return { ok: true };
+  } catch (e) {
+    console.warn("[inbox] deleteConversation error:", e?.message || e);
+    return { ok: false };
+  }
+}
+
 /** Clear the unread badge for a conversation (operator opened it). */
 async function markRead(phone) {
   if (!isConfigured()) return { ok: false };
@@ -443,6 +493,8 @@ export {
   getConversations,
   getMessages,
   markRead,
+  deleteMessage,
+  deleteConversation,
   authOk,
   authConfigured,
   keyFromRequest,

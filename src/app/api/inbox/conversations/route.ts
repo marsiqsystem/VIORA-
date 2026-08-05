@@ -13,6 +13,8 @@ import {
   getConversations,
   getMessages,
   markRead,
+  deleteMessage,
+  deleteConversation,
   authOk,
   authConfigured,
   keyFromRequest,
@@ -62,6 +64,14 @@ export async function POST(req: NextRequest) {
 
   if (body?.markRead && body?.phone) {
     const res = await markRead(body.phone);
+    return NextResponse.json({ ok: !!res?.ok });
+  }
+  if (body?.deleteChat && body?.phone) {
+    const res = await deleteConversation(body.phone);
+    return NextResponse.json({ ok: !!res?.ok });
+  }
+  if (body?.deleteMessage && body?.phone && body?.id) {
+    const res = await deleteMessage(body.phone, body.id);
     return NextResponse.json({ ok: !!res?.ok });
   }
   return NextResponse.json({ ok: false, error: "Nothing to do" }, { status: 400 });

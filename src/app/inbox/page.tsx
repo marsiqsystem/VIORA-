@@ -168,6 +168,8 @@ export default function InboxPage() {
   const [tplLoading, setTplLoading] = useState(false);
   const [tplError, setTplError] = useState("");
   const [tplSending, setTplSending] = useState("");
+  const [headerMenu, setHeaderMenu] = useState(false);
+  const [msgMenuId, setMsgMenuId] = useState<string | null>(null);
 
   const keyRef = useRef(key);
   const activeRef = useRef(active);
@@ -356,7 +358,35 @@ export default function InboxPage() {
     activeRef.current = null;
     setThread(null);
     setEmojiOpen(false);
+    setHeaderMenu(false);
+    setMsgMenuId(null);
+    setAttachOpen(false);
   }, []);
+
+  // --- delete a single message ("delete for me") ---
+  const deleteMsg = useCallback(async (id: string) => {
+    const phone = activeRef.current;
+    setMsgMenuId(null);
+    if (!phone || !id) return;
+    setThread((t) => (t ? { ...t, messages: t.messages.filter((m) => m.id !== id) } : t));
+    try {
+      await api("/api/inbox/conversations", { method: "POST", body: JSON.stringify({ deleteMessage: true, phone, id }) });
+      loadConvs();
+    } catch { /* optimistic already applied */ }
+  }, [api, loadConvs]);
+
+  // --- delete an entire chat ("delete chat") ---
+  const deleteChat = useCallback(async () => {
+    const phone = activeRef.current;
+    if (!phone) return;
+    setHeaderMenu(false);
+    if (!window.confirm("Delete this whole chat from your inbox?\n\n(It only clears it here — it does NOT delete anything on the customer's WhatsApp.)")) return;
+    setConvs((prev) => prev.filter((c) => c.phone !== phone));
+    backToList();
+    try {
+      await api("/api/inbox/conversations", { method: "POST", body: JSON.stringify({ deleteChat: true, phone }) });
+    } catch { /* list already updated optimistically */ }
+  }, [api, backToList]);
 
   // --- initial auth: pull saved key, try loading ---
   useEffect(() => {
@@ -598,9 +628,17 @@ export default function InboxPage() {
               <div style={{ width: 38, height: 38, borderRadius: "50%", background: C.plumDark, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600, flexShrink: 0 }}>
                 {(thread.name || thread.phone).slice(0, 1).toUpperCase()}
               </div>
-              <div>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600, fontSize: 15 }}>{thread.name || `+${thread.phone}`}</div>
                 <div style={{ fontSize: 11, opacity: 0.85 }}>+{thread.phone}</div>
+              </div>
+              <div style={{ position: "relative" }}>
+                <button onClick={() => setHeaderMenu((v) => !v)} title="Chat options" style={{ background: "transparent", border: "none", color: "#fff", fontSize: 22, cursor: "pointer", lineHeight: 1, padding: "2px 6px" }}>⋮</button>
+                {headerMenu && (
+                  <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 6, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 10, boxShadow: "0 6px 20px rgba(0,0,0,.16)", overflow: "hidden", zIndex: 8, minWidth: 160 }}>
+                    <button onClick={deleteChat} style={{ ...menuItem, color: "#c0392b", whiteSpace: "nowrap" }}>🗑 Delete chat</button>
+                  </div>
+                )}
               </div>
             </header>
 
@@ -626,7 +664,12 @@ export default function InboxPage() {
                         {dayLabel(m.ts)}
                       </div>
                     )}
-                    <div style={{ alignSelf: out ? "flex-end" : "flex-start", maxWidth: "72%" }}>
+                    <div style={{ alignSelf: out ? "flex-end" : "flex-start", maxWidth: "72%", position: "relative" }}>
+                      {msgMenuId === m.id && (
+                        <div style={{ position: "absolute", top: 0, [out ? "right" : "left"]: 0, transform: "translateY(-108%)", zIndex: 7, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 10, boxShadow: "0 6px 20px rgba(0,0,0,.16)", overflow: "hidden" }}>
+                          <button onClick={() => deleteMsg(m.id)} style={{ ...menuItem, color: "#c0392b", whiteSpace: "nowrap", fontSize: 13 }}>🗑 Delete for me</button>
+                        </div>
+                      )}
                       <div title={fullStamp(m.ts)} style={{ background: out ? C.outBubble : C.inBubble, border: `1px solid ${C.border}`, borderRadius: 12, padding: isImage ? 4 : "8px 11px", fontSize: 14, lineHeight: 1.4, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
                         {isImage && imgSrc && (
                           <a href={imgSrc} target="_blank" rel="noreferrer" style={{ display: "block" }}>
@@ -643,6 +686,7 @@ export default function InboxPage() {
                         <div style={{ padding: isImage ? "4px 7px 2px" : 0 }}>
                           {caption || (isImage || isDoc ? "" : m.text)}
                           <span style={{ float: "right", marginLeft: 10, marginTop: 6, fontSize: 10, color: C.sub, display: "inline-flex", gap: 4, alignItems: "center" }}>
+                            <button onClick={(e) => { e.stopPropagation(); setMsgMenuId((cur) => (cur === m.id ? null : m.id)); }} title="Message options" style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 13, color: C.sub, padding: 0, lineHeight: 1 }}>⋮</button>
                             {clock(m.ts)} {out && <Ticks status={m.status} />}
                           </span>
                         </div>
@@ -710,6 +754,11 @@ export default function InboxPage() {
           </>
         )}
       </main>
+      )}
+
+      {/* click-away layer to dismiss the header / message option menus */}
+      {(headerMenu || msgMenuId) && (
+        <div onClick={() => { setHeaderMenu(false); setMsgMenuId(null); }} style={{ position: "fixed", inset: 0, zIndex: 6 }} />
       )}
 
       {/* Send-approved-template modal */}

@@ -113,16 +113,24 @@ export async function POST(req: NextRequest) {
       sent++;
       results.push({ phone, ok: true });
       // Mirror into the inbox so the broadcast appears in the customer's thread.
+      // MUST await — a fire-and-forget write is killed when the serverless
+      // response returns, which is why broadcasts weren't showing in the inbox.
       const wamid = res?.data?.messages?.[0]?.id;
       const text = String(c.text || `📢 ${templateName}`);
       const nm = String(c.name || "").trim();
-      recordOutbound({
-        to: phone,
-        text,
-        wamid,
-        name: nm && nm.toLowerCase() !== "customer" ? nm : undefined,
-        status: res?.dryRun ? "pending" : "sent",
-      }).catch(() => {});
+      const imageUrl = c.headerImageUrl ? String(c.headerImageUrl) : headerImageUrl;
+      try {
+        await recordOutbound({
+          to: phone,
+          text,
+          wamid,
+          name: nm && nm.toLowerCase() !== "customer" ? nm : undefined,
+          status: res?.dryRun ? "pending" : "sent",
+          ...(imageUrl ? { type: "image", imageUrl } : {}),
+        });
+      } catch {
+        /* inbox mirror is best-effort */
+      }
     } else {
       failed++;
       const error =
