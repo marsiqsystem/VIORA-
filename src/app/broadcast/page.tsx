@@ -171,6 +171,28 @@ export default function BroadcastPage() {
     setKey(k); keyRef.current = k; setAuthError("");
   };
 
+  // Clear the saved passcode from this device (use before handing the phone/
+  // laptop to anyone). Also locks the inbox — they share the same stored key.
+  const lock = () => {
+    window.localStorage.removeItem(KEY_STORE);
+    setKey(""); keyRef.current = "";
+    setAuthed(false); setTemplates([]); setSelectedName(""); setKeyInput("");
+  };
+
+  // Download a ready-to-fill CSV so the user just replaces the sample rows.
+  const downloadSample = () => {
+    const csv = "name,phone\nZeeshan Shamim,9812345678\nAisha Khan,9123456780\n";
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "viora-broadcast-sample.csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   const onFile = async (file: File) => {
     setFileName(file.name);
     const text = await file.text();
@@ -296,7 +318,10 @@ export default function BroadcastPage() {
     <div style={{ position: "fixed", inset: 0, zIndex: 9999, overflowY: "auto", background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
       <header style={{ position: "sticky", top: 0, zIndex: 2, background: C.plum, color: "#fff", padding: "16px 22px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <strong style={{ fontSize: 18 }}>Viora Broadcast</strong>
-        <a href="/inbox" style={{ color: "#fff", fontSize: 13, opacity: 0.9 }}>Go to Inbox →</a>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <a href="/inbox" style={{ color: "#fff", fontSize: 13, opacity: 0.9 }}>Go to Inbox →</a>
+          <button onClick={lock} title="Lock — clears the saved passcode on this device" style={{ background: "rgba(255,255,255,.16)", color: "#fff", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, cursor: "pointer" }}>🔒 Lock</button>
+        </div>
       </header>
 
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "22px 18px 60px", display: "flex", flexDirection: "column", gap: 18 }}>
@@ -310,6 +335,9 @@ export default function BroadcastPage() {
               Choose CSV
               <input type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
             </label>
+            <button onClick={downloadSample} style={{ background: "transparent", border: `1px solid ${C.border}`, color: C.plum, borderRadius: 10, padding: "9px 14px", fontSize: 14, cursor: "pointer", fontWeight: 600 }}>
+              ⬇ Download sample CSV
+            </button>
             {fileName && <span style={{ fontSize: 13, color: C.sub }}>{fileName}</span>}
             <span style={{ marginLeft: "auto", fontSize: 13, color: C.sub, display: "flex", alignItems: "center", gap: 6 }}>
               Default country code +

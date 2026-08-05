@@ -322,6 +322,16 @@ export default function InboxPage() {
     setAuthError("");
   };
 
+  // Clear the saved passcode from this device (use before handing the phone/
+  // laptop to anyone). Also locks the broadcast page — they share the key.
+  const lock = () => {
+    window.localStorage.removeItem(KEY_STORE);
+    setKey(""); keyRef.current = "";
+    setAuthed(false);
+    setConvs([]); setThread(null); setActive(null); activeRef.current = null;
+    setKeyInput("");
+  };
+
   // Start a chat with a manually-entered number (WhatsApp-style "new chat").
   // A bare 10-digit number is assumed to be Indian (+91). NOTE: WhatsApp only
   // allows a free-form text to a NEW number if they messaged you in the last
@@ -386,8 +396,17 @@ export default function InboxPage() {
       <aside style={{ width: isMobile ? "100%" : 340, minWidth: isMobile ? 0 : 300, borderRight: isMobile ? "none" : `1px solid ${C.border}`, background: C.bgList, display: "flex", flexDirection: "column", }}>
         <header style={{ background: C.plum, color: "#fff", padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <strong style={{ fontSize: 17, letterSpacing: 0.3 }}>Viora Inbox</strong>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 11, opacity: 0.85 }}>{MOCK ? "MOCK" : "live"}</span>
+            {!MOCK && (
+              <button
+                onClick={lock}
+                title="Lock — clears the saved passcode on this device"
+                style={{ background: "rgba(255,255,255,.16)", color: "#fff", border: "none", borderRadius: 8, padding: "5px 9px", fontSize: 12, lineHeight: 1, cursor: "pointer" }}
+              >
+                🔒
+              </button>
+            )}
             <button
               onClick={() => setComposing((v) => !v)}
               title="New chat"
