@@ -193,7 +193,10 @@ async function ingestWebhook(body) {
           });
 
           const conv = await readConv(phone);
-          conv.name = nameByWaId[phone] || conv.name || "";
+          // Keep an already-known name (the authoritative order/consignee name set
+          // by recordOutbound) — only fall back to the WhatsApp profile name when
+          // we don't yet have one, so a real reply never downgrades the title.
+          conv.name = conv.name || nameByWaId[phone] || "";
           conv.lastText = text;
           conv.lastTs = tsMs;
           conv.lastInboundTs = tsMs;
@@ -236,8 +239,13 @@ async function ingestWebhook(body) {
  * @param {string} [p.wamid] the Meta message id (enables delivery ticks)
  * @param {number} [p.ts]   epoch ms (defaults now)
  * @param {string} [p.status] initial status (default 'sent'; 'pending' for dry-run)
+ * @param {string} [p.name]  the customer's REAL name from the order (e.g. the
+ *                           Velocity/Wix consignee name). When given it becomes
+ *                           the conversation title — authoritative over the
+ *                           WhatsApp profile name — so an operator sees
+ *                           "Zeeshan Shamim", not a bare number.
  */
-async function recordOutbound({ to, text, wamid, ts, status = "sent" } = {}) {
+async function recordOutbound({ to, text, wamid, ts, status = "sent", name } = {}) {
   if (!isConfigured()) return { ok: false };
   const phone = normPhone(to);
   if (!phone) return { ok: false };
@@ -253,6 +261,10 @@ async function recordOutbound({ to, text, wamid, ts, status = "sent" } = {}) {
       }
     }
     const conv = await readConv(phone);
+    // A real order name is authoritative — it labels the chat so the operator can
+    // tell at a glance who was messaged (no digging by number / order id).
+    const nm = String(name ?? "").trim();
+    if (nm) conv.name = nm;
     conv.lastText = String(text ?? "");
     conv.lastTs = tsMs;
     conv.lastOutboundTs = tsMs;

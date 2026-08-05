@@ -71,11 +71,15 @@ const render = {
  * inbox stays truthful — it shows what WhatsApp actually shows, no dry-run or
  * failed sends. The Meta message id enables delivery ticks (sent/delivered/read).
  */
-async function logOutbound(phone, text, res) {
+async function logOutbound(phone, text, res, name) {
   try {
     if (!res || res.ok !== true || res.dryRun === true) return;
     const wamid = res?.data?.messages?.[0]?.id;
-    await recordOutbound({ to: phone, text, wamid });
+    // Tag the chat with the real order name — but never with the "Customer"
+    // placeholder fromRow() falls back to, which would overwrite a good name.
+    const nm = String(name ?? "").trim();
+    const cleanName = nm && nm.toLowerCase() !== "customer" ? nm : undefined;
+    await recordOutbound({ to: phone, text, wamid, name: cleanName });
   } catch {
     /* inbox mirror is best-effort; never surface here */
   }
@@ -103,7 +107,7 @@ async function sendOrderConfirmation(o) {
     headerImageUrl: o.productImage || T.orderConfirmation.headerImageUrl,
     bodyParams: [o.name, o.orderId, o.amount, o.paymentMode],
   });
-  await logOutbound(o.phone, render.orderConfirmation(o), res);
+  await logOutbound(o.phone, render.orderConfirmation(o), res, o.name);
   return res;
 }
 
@@ -118,7 +122,7 @@ async function sendOutForDelivery(o) {
     // The AWB is the suffix that fills the template button's tracking URL {{1}}.
     urlButtons: [{ index: "0", param: o.awb }],
   });
-  await logOutbound(o.phone, render.outForDelivery(o), res);
+  await logOutbound(o.phone, render.outForDelivery(o), res, o.name);
   return res;
 }
 
@@ -131,7 +135,7 @@ async function sendDelivered(o) {
     languageCode: T.delivered.lang,
     bodyParams: [o.name, o.orderId],
   });
-  await logOutbound(o.phone, render.delivered(o), res);
+  await logOutbound(o.phone, render.delivered(o), res, o.name);
   return res;
 }
 
@@ -146,7 +150,7 @@ async function sendReviewRequest(o) {
     // TODO: pass the real Wix product slug through the store instead of slugifying the name.
     urlButtons: [{ index: "0", param: slugify(o.product) }],
   });
-  await logOutbound(o.phone, render.reviewRequest(o), res);
+  await logOutbound(o.phone, render.reviewRequest(o), res, o.name);
   return res;
 }
 
@@ -160,7 +164,7 @@ async function sendAbandonedCart(o) {
     bodyParams: [o.name, o.product, o.amount],
     urlButtons: [{ index: "0", param: o.cartToken }],
   });
-  await logOutbound(o.phone, render.abandonedCart(o), res);
+  await logOutbound(o.phone, render.abandonedCart(o), res, o.name);
   return res;
 }
 
@@ -183,7 +187,7 @@ async function sendOrderCancelled(o) {
       prettyPayment(o.paymentMode),
     ],
   });
-  await logOutbound(o.phone, render.orderCancelled(o), res);
+  await logOutbound(o.phone, render.orderCancelled(o), res, o.name);
   return res;
 }
 
