@@ -38,25 +38,27 @@ export type MetaUserData = {
   country?: string;
 };
 
-// Cookie-consent gate. Meta Pixel + Conversions API are ADVERTISING tools, so
-// they may only fire once the visitor has granted marketing consent in the
-// banner. Mirrors the storage ConsentManager writes ("viora_consent_v1").
+// Cookie-consent gate. Meta Pixel + Conversions API are ADVERTISING tools.
+// Mirrors the storage ConsentManager writes ("viora_consent_v1").
 const CONSENT_STORAGE_KEY = "viora_consent_v1";
 
 /**
- * True only when the visitor has explicitly opted into marketing cookies.
- * Returns false when no choice has been made yet (banner still open) — we never
- * track before an explicit opt-in, and never for someone who declined.
+ * OPT-OUT model (default ON): marketing tracking is allowed unless the visitor
+ * has EXPLICITLY declined it (clicked "Reject all", or unticked Marketing in
+ * Customize). A visitor who hasn't chosen yet is tracked — the banner is still
+ * shown and they can opt out anytime. This maximises conversion coverage for
+ * ad optimisation (common practice for India / DPDP); flip back to opt-in by
+ * returning false when no choice has been made.
  */
 export function hasMarketingConsent(): boolean {
-  if (typeof window === "undefined") return false;
+  if (typeof window === "undefined") return false; // SSR — client re-checks
   try {
     const raw = window.localStorage.getItem(CONSENT_STORAGE_KEY);
-    if (!raw) return false;
+    if (!raw) return true; // no choice yet -> default ON
     const c = JSON.parse(raw) as { marketing?: boolean };
-    return c?.marketing === true;
+    return c?.marketing !== false; // only OFF when explicitly declined
   } catch {
-    return false;
+    return true; // storage unreadable -> default ON
   }
 }
 

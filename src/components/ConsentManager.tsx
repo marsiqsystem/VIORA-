@@ -59,11 +59,17 @@ const ConsentManager = () => {
 
   const gaId = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
 
+  // OPT-OUT model (default ON): load trackers unless the visitor EXPLICITLY
+  // declined. `consent === null` = no choice made yet -> still load (the banner
+  // is shown so they can opt out). Only a saved `false` turns a tracker off.
+  const marketingOn = consent ? consent.marketing !== false : true;
+  const analyticsOn = consent ? consent.analytics !== false : true;
+
   return (
     <>
-      {consent?.marketing && <MetaPixel />}
-      {consent?.analytics && <Clarity />}
-      {consent?.analytics && gaId && <GoogleAnalytics gaId={gaId} />}
+      {marketingOn && <MetaPixel />}
+      {analyticsOn && <Clarity />}
+      {analyticsOn && gaId && <GoogleAnalytics gaId={gaId} />}
 
       {showBanner && (
         <div
