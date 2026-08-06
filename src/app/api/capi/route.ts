@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cookies, headers } from "next/headers";
+import { headers } from "next/headers";
 import crypto from "crypto";
-import { buildFbcFromUrl } from "@/lib/metaFbc";
+import { buildFbcFromUrl, readCookieRaw } from "@/lib/metaFbc";
 
 export const runtime = "nodejs";
 
@@ -90,15 +90,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const cookieStore = cookies();
-  const fbp = cookieStore.get("_fbp")?.value;
+  const h = headers();
+  // Read _fbc / _fbp RAW from the Cookie header — NOT via cookies().get(), which
+  // URL-DECODES the value. Decoding rewrites the fbclid embedded in _fbc, which
+  // is exactly what Meta flags as "modified fbclid value in fbc" and which
+  // craters match quality. This must match the byte-for-byte read the Purchase
+  // route already does (src/lib/metaFbc.ts).
+  const cookieHeader = h.get("cookie") || "";
+  const fbp = readCookieRaw(cookieHeader, "_fbp");
   // Attribution fallback: if the _fbc cookie isn't set yet but the visitor
   // arrived from a Meta ad (fbclid in the URL), synthesise the click id in
   // Meta's fbc format so ad-click attribution / match quality isn't lost.
   // Both branches keep the fbclid byte-for-byte (see src/lib/metaFbc.ts).
-  const fbc = cookieStore.get("_fbc")?.value || buildFbcFromUrl(eventSourceUrl);
+  const fbc = readCookieRaw(cookieHeader, "_fbc") || buildFbcFromUrl(eventSourceUrl);
 
-  const h = headers();
   const userAgent = h.get("user-agent") || undefined;
   const forwardedFor = h.get("x-forwarded-for") || "";
   const clientIp =
