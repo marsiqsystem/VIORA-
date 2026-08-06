@@ -138,31 +138,15 @@ let clientUserData: MetaUserData | null = null;
 
 export function setMetaUserData(userData: MetaUserData) {
   clientUserData = userData;
+  // Store for the Conversions API to pick up (trackMetaEvent reads this and sends
+  // it hashed, server-side, on conversion events). We deliberately do NOT re-init
+  // the browser pixel with advanced matching — that would attach the email to
+  // every browser event (incl. PageView) and trigger Meta's "duplicate emails"
+  // warning. Server-side (CAPI) matching is Meta's recommended path anyway.
   if (typeof window !== "undefined") {
     try {
       window.sessionStorage.setItem("viora_meta_user_data", JSON.stringify(userData));
     } catch (e) {}
-
-    const pixelId = process.env.NEXT_PUBLIC_META_PIXEL_ID;
-    if (pixelId && typeof window.fbq === "function") {
-      const metaData: Record<string, string> = {};
-      if (userData.email) metaData.em = userData.email.trim().toLowerCase();
-      if (userData.phone) {
-        let phoneDigits = userData.phone.replace(/[^0-9]/g, "");
-        if (phoneDigits.length === 10) {
-          phoneDigits = "91" + phoneDigits;
-        }
-        metaData.ph = phoneDigits;
-      }
-      if (userData.firstName) metaData.fn = userData.firstName.trim().toLowerCase();
-      if (userData.lastName) metaData.ln = userData.lastName.trim().toLowerCase();
-      if (userData.city) metaData.ct = userData.city.trim().toLowerCase();
-      if (userData.state) metaData.st = userData.state.trim().toLowerCase();
-      if (userData.zip) metaData.zp = userData.zip.trim().toLowerCase();
-      if (userData.country) metaData.country = userData.country.trim().toLowerCase();
-
-      window.fbq("init", pixelId, metaData);
-    }
   }
 }
 

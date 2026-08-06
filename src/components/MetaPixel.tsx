@@ -48,33 +48,14 @@ const MetaPixel = () => {
             t.src=v;s=b.getElementsByTagName(e)[0];
             s.parentNode.insertBefore(t,s)}(window, document,'script',
             'https://connect.facebook.net/en_US/fbevents.js');
-            
-            var userData = null;
-            try {
-              var stored = window.sessionStorage.getItem("viora_meta_user_data");
-              if (stored) {
-                var raw = JSON.parse(stored);
-                userData = {};
-                if (raw.email) userData.em = raw.email.trim().toLowerCase();
-                if (raw.phone) {
-                  var ph = raw.phone.replace(/[^0-9]/g, "");
-                  if (ph.length === 10) ph = "91" + ph;
-                  userData.ph = ph;
-                }
-                if (raw.firstName) userData.fn = raw.firstName.trim().toLowerCase();
-                if (raw.lastName) userData.ln = raw.lastName.trim().toLowerCase();
-                if (raw.city) userData.ct = raw.city.trim().toLowerCase();
-                if (raw.state) userData.st = raw.state.trim().toLowerCase();
-                if (raw.zip) userData.zp = raw.zip.trim().toLowerCase();
-                if (raw.country) userData.country = raw.country.trim().toLowerCase();
-              }
-            } catch (e) {}
 
-            if (userData) {
-              fbq('init', '${pixelId}', userData);
-            } else {
-              fbq('init', '${pixelId}');
-            }
+            // No browser-side advanced matching: initialise WITHOUT user data so
+            // PageView (and other browser events) never carry the customer email.
+            // That silences Meta's "duplicate client Emails on PageView" warning.
+            // Email/phone matching still reaches Meta — hashed, server-side, on
+            // the CONVERSION events via the Conversions API (/api/capi), which is
+            // Meta's recommended, more-reliable path.
+            fbq('init', '${pixelId}');
             fbq('track', 'PageView');
           `,
         }}
