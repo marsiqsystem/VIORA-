@@ -35,10 +35,11 @@ function cfg() {
     password: (process.env.VELOCITY_PASSWORD || "").trim(),
     warehouseId: (process.env.VELOCITY_WAREHOUSE_ID || "").trim(), // pre-registered pickup warehouse
     pickupLocation: (process.env.VELOCITY_PICKUP_LOCATION || "").trim(), // warehouse display name (API requires it)
-    trackBase: (process.env.VELOCITY_TRACK_URL_BASE || "https://shipfast.in/track").replace(
-      /\/$/,
-      ""
-    ),
+    trackBase: (process.env.VELOCITY_TRACK_URL_BASE || "https://shipfast.in/track")
+      // Guard the double-t typo even if it's set in the env (shipfastt.in is a
+      // dead domain; the real tracking host is shipfast.in).
+      .replace(/shipfastt\.in/gi, "shipfast.in")
+      .replace(/\/$/, ""),
     // Viora's standard jewellery package — FIXED. Hardcoded (not env) so a wrong
     // VELOCITY_DEFAULT_* value in a dashboard can't silently change it (a stale
     // env was sending breadth 10 instead of 12). Height & weight scale with

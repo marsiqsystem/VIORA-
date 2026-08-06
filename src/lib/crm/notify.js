@@ -51,7 +51,11 @@ const money = (v) => {
 // FALLBACK used if Meta can't be reached — never the primary text.
 // Build the customer-facing tracking link from the AWB, matching Velocity's
 // track base (same default as lib/crm/velocity.js). Falls back to the site.
-const TRACK_BASE = (process.env.VELOCITY_TRACK_URL_BASE || "https://shipfast.in/track").replace(/\/$/, "");
+const TRACK_BASE = (process.env.VELOCITY_TRACK_URL_BASE || "https://shipfast.in/track")
+  // Guard the double-t typo even when it's baked into the Vercel env var:
+  // shipfastt.in is a non-existent domain; the real tracking host is shipfast.in.
+  .replace(/shipfastt\.in/gi, "shipfast.in")
+  .replace(/\/$/, "");
 const trackingLink = (o) =>
   String(o.trackingUrl || "").trim() ||
   (o.awb ? `${TRACK_BASE}/${o.awb}` : "https://viorajewel.in/orders");
