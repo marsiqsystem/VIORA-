@@ -18,6 +18,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as velocity from "@/lib/crm/velocity";
 import * as wix from "@/lib/crm/wix";
 import * as notify from "@/lib/crm/notify";
+import * as idempotency from "@/lib/crm/idempotency";
 import { dispatchCancellationOnce } from "@/lib/crm/cancel";
 
 export const runtime = "nodejs";
@@ -36,21 +37,34 @@ export async function GET() {
   });
 }
 
-// Send a template once per (order, flag), marking the Wix flag only on a REAL
-// send (dry-run leaves it unset so the pipeline can be re-run before go-live).
+// Send a template AT MOST ONCE per (order, flag). Dedupe on an atomic Vercel KV
+// claim — NOT a Wix extendedFields flag: Wix rejects our API-key writes to the
+// @viora/whatsapp namespace (INVALID_PATCH), so setFlag silently fails and never
+// deduped. This matters because Velocity fires BOTH "Status Change" and
+// "Tracking Addition" for the same milestone, so without an atomic claim every
+// customer would get two dispatched (and two out-for-delivery/delivered)
+// messages. Claim-before-send; release on dry-run/failure so a real retry can
+// still deliver. FAIL-OPEN: a KV outage lets the message through (a rare dup
+// beats a missed shipping update).
 async function dispatchOnce(order: any, flagKey: string, sendFn: (o: any) => Promise<any>) {
-  if (wix.getFlag(order, flagKey)) {
-    console.log(`[velocity-webhook] ${flagKey} already set for ${order.orderId} — skip.`);
+  const orderId = order.orderId || order.orderGuid;
+  const key = `${flagKey}:${orderId}`;
+  const claim = await idempotency.claimOnce(key);
+  if (!claim.claimed) {
+    console.log(`[velocity-webhook] ${flagKey} already sent for ${orderId} — skip (idempotent).`);
     return;
   }
   const result = await sendFn(order);
   if (result.ok && !result.dryRun) {
-    await wix.setFlag(order.orderGuid || order.orderId, flagKey);
-    console.log(`[velocity-webhook] ${flagKey} sent for ${order.orderId}.`);
-  } else if (!result.ok) {
+    console.log(`[velocity-webhook] ${flagKey} sent for ${orderId}.`);
+    return;
+  }
+  // Did not actually deliver — release the claim so a later event can retry.
+  await idempotency.release(key);
+  if (!result.ok) {
     console.error(`[velocity-webhook] ${flagKey} FAILED:`, result.error);
   } else {
-    console.log(`[velocity-webhook] ${flagKey} DRY RUN for ${order.orderId} (flag not set).`);
+    console.log(`[velocity-webhook] ${flagKey} DRY RUN for ${orderId} (claim released).`);
   }
 }
 
