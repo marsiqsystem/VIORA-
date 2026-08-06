@@ -11,19 +11,33 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const KEY_STORE = "viora_inbox_key"; // shared with /inbox
-const BATCH_SIZE = 40;
 
+// Sending speed → client batch size (server caps at 60/req + throttles internally).
+const SPEEDS = {
+  slow: { label: "Slow", batch: 15, note: "gentle — safest for a fresh number" },
+  normal: { label: "Normal", batch: 40, note: "recommended" },
+  fast: { label: "Fast", batch: 60, note: "quickest for large, warm lists" },
+} as const;
+type Speed = keyof typeof SPEEDS;
+
+// Viora brand palette (ruby / champagne gold / cream) — see globals.css.
 const C = {
-  plum: "#7b1e3b",
-  plumDark: "#5c132b",
-  bg: "#f4eef0",
-  card: "#ffffff",
-  border: "#e7dce0",
-  sub: "#8a7c81",
-  text: "#2a2126",
-  ok: "#1e874b",
-  bad: "#c0392b",
+  plum: "#9B1B30", // ruby (primary)
+  plumDark: "#5A0A18", // deep ruby
+  gold: "#C9A66B", // champagne gold
+  goldDark: "#A9844C",
+  bg: "#F5F1EA", // cream canvas
+  card: "#FFFDF8", // warm card white
+  cream2: "#EFE4CE", // secondary cream
+  border: "#D8C8B3", // champagne border
+  sub: "#7A716C", // muted text
+  text: "#1A1410", // ink
+  ok: "#1E874B",
+  bad: "#C0392B",
 };
+const HEADER_BG = "linear-gradient(135deg, #1A1410 0%, #5A0A18 100%)";
+const GOLD_BG = "linear-gradient(135deg, #C9A66B 0%, #A9844C 100%)";
+const SERIF = "var(--font-cormorant), Georgia, 'Times New Roman', serif";
 
 type Template = {
   name: string;
@@ -102,6 +116,8 @@ export default function BroadcastPage() {
   const [fileName, setFileName] = useState("");
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
+  const [dragOver, setDragOver] = useState(false);
+  const [speed, setSpeed] = useState<Speed>("normal");
 
   const [templates, setTemplates] = useState<Template[]>([]);
   const [tplError, setTplError] = useState("");
@@ -117,6 +133,7 @@ export default function BroadcastPage() {
 
   const keyRef = useRef(key);
   keyRef.current = key;
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const selected = templates.find((t) => t.name === selectedName) || null;
 
@@ -229,6 +246,7 @@ export default function BroadcastPage() {
 
   const startBroadcast = async () => {
     if (!selected || !readyToSend) return;
+    const BATCH_SIZE = SPEEDS[speed].batch; // sending-speed → per-request batch size
     const id = (crypto as any).randomUUID ? crypto.randomUUID() : `bc_${Date.now()}`;
     const total = sendable.length;
     setProgress({ running: true, done: 0, total, sent: 0, failed: 0 });
@@ -300,8 +318,9 @@ export default function BroadcastPage() {
   if (!authed) {
     return (
       <Centered>
-        <div style={{ width: 320, background: "#fff", padding: 28, borderRadius: 16, boxShadow: "0 8px 30px rgba(0,0,0,.08)", border: `1px solid ${C.border}` }}>
-          <h2 style={{ color: C.plum, margin: "0 0 4px", fontSize: 22 }}>Viora Broadcast</h2>
+        <div style={{ width: 330, background: C.card, padding: 30, borderRadius: 18, boxShadow: "0 12px 40px rgba(90,10,24,.14)", border: `1px solid ${C.border}`, borderTop: `3px solid ${C.gold}` }}>
+          <h2 style={{ color: C.plum, margin: "0 0 2px", fontSize: 30, fontFamily: SERIF, fontWeight: 600 }}>Viora Broadcast</h2>
+          <div style={{ width: 40, height: 2, background: C.gold, margin: "0 0 12px" }} />
           <p style={{ color: C.sub, margin: "0 0 18px", fontSize: 13 }}>Enter the passcode.</p>
           <input type="password" value={keyInput} onChange={(e) => setKeyInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && unlock()} placeholder="Passcode"
             style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 15, marginBottom: 12, boxSizing: "border-box" }} />
@@ -316,32 +335,66 @@ export default function BroadcastPage() {
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 9999, overflowY: "auto", background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
-      <header style={{ position: "sticky", top: 0, zIndex: 2, background: C.plum, color: "#fff", padding: "16px 22px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <strong style={{ fontSize: 18 }}>Viora Broadcast</strong>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <a href="/inbox" style={{ color: "#fff", fontSize: 13, opacity: 0.9 }}>Go to Inbox →</a>
-          <button onClick={lock} title="Log out — you'll need the passcode again next time" style={{ background: "rgba(255,255,255,.16)", color: "#fff", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 13, cursor: "pointer" }}>🔓 Log out</button>
+      <header style={{ position: "sticky", top: 0, zIndex: 2, background: HEADER_BG, color: "#fff", padding: "14px 22px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `2px solid ${C.gold}`, gap: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.05, minWidth: 0 }}>
+          <span style={{ fontFamily: SERIF, fontSize: 26, fontWeight: 600, letterSpacing: 0.3 }}>Viora Broadcast</span>
+          <span style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: C.gold, marginTop: 3 }}>Bulk WhatsApp Marketing</span>
         </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
+          <span style={{ display: "none", fontSize: 11, fontWeight: 600, color: C.gold, letterSpacing: 0.5, alignItems: "center", gap: 6 }} className="bc-livepill">
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: templates.length ? "#3ecf6a" : C.sub, display: "inline-block" }} />
+            {templates.length ? `${templates.length} template${templates.length === 1 ? "" : "s"} ready` : "Loading…"}
+          </span>
+          <a href="/inbox" style={{ color: C.gold, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>Inbox →</a>
+          <button onClick={lock} title="Log out — you'll need the passcode again next time" style={{ background: "rgba(201,166,107,.16)", color: "#fff", border: `1px solid rgba(201,166,107,.4)`, borderRadius: 8, padding: "6px 12px", fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>🔓 Log out</button>
+        </div>
+        <style>{`@media(min-width:640px){.bc-livepill{display:inline-flex !important}}`}</style>
       </header>
 
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "22px 18px 60px", display: "flex", flexDirection: "column", gap: 18 }}>
         {/* STEP 1: CSV */}
-        <Card title="1 · Upload customer CSV">
-          <p style={{ color: C.sub, fontSize: 13, margin: "0 0 12px" }}>
+        <Card step={1} title="Upload customer CSV">
+          <p style={{ color: C.sub, fontSize: 13, margin: "0 0 14px" }}>
             CSV with a <b>name</b> and <b>phone</b> column (extra columns can fill template variables).
           </p>
-          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-            <label style={{ ...primaryBtn, width: "auto", padding: "9px 16px", cursor: "pointer", display: "inline-block" }}>
-              Choose CSV
-              <input type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
-            </label>
-            <button onClick={downloadSample} style={{ background: "transparent", border: `1px solid ${C.border}`, color: C.plum, borderRadius: 10, padding: "9px 14px", fontSize: 14, cursor: "pointer", fontWeight: 600 }}>
+
+          {/* hidden native picker, driven by the drop zone */}
+          <input ref={fileInputRef} type="file" accept=".csv,text/csv" style={{ display: "none" }}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ""; }} />
+
+          {/* drag-&-drop upload zone */}
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => fileInputRef.current?.click()}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInputRef.current?.click(); } }}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) onFile(f); }}
+            style={{
+              border: `2px dashed ${dragOver ? C.plum : C.gold}`,
+              background: dragOver ? "rgba(155,27,48,.05)" : "rgba(201,166,107,.07)",
+              borderRadius: 14, padding: "28px 20px", textAlign: "center", cursor: "pointer",
+              transition: "border-color .15s, background .15s", outline: "none",
+            }}
+          >
+            <div style={{ fontSize: 34, lineHeight: 1, marginBottom: 8, color: C.goldDark }}>⬆</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: C.text }}>
+              {fileName ? "Replace CSV" : "Click to upload or drag & drop"}
+            </div>
+            <div style={{ fontSize: 12.5, color: C.sub, marginTop: 4 }}>
+              {fileName ? `✓ ${fileName}${rows.length ? ` — ${rows.length} rows` : ""}` : "CSV file · name, phone columns"}
+            </div>
+          </div>
+
+          {/* controls row: sample + default country code */}
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
+            <button onClick={downloadSample} style={{ background: "transparent", border: `1px solid ${C.border}`, color: C.plum, borderRadius: 10, padding: "8px 14px", fontSize: 13.5, cursor: "pointer", fontWeight: 600 }}>
               ⬇ Download sample CSV
             </button>
-            {fileName && <span style={{ fontSize: 13, color: C.sub }}>{fileName}</span>}
             <span style={{ marginLeft: "auto", fontSize: 13, color: C.sub, display: "flex", alignItems: "center", gap: 6 }}>
               Default country code +
-              <input value={cc} onChange={(e) => setCc(e.target.value.replace(/[^\d]/g, ""))} style={{ width: 46, padding: "5px 7px", borderRadius: 7, border: `1px solid ${C.border}`, fontSize: 13 }} />
+              <input value={cc} onChange={(e) => setCc(e.target.value.replace(/[^\d]/g, ""))} style={{ width: 46, padding: "5px 7px", borderRadius: 7, border: `1px solid ${C.border}`, fontSize: 13, background: "#fff" }} />
             </span>
           </div>
 
@@ -363,7 +416,7 @@ export default function BroadcastPage() {
                   </thead>
                   <tbody>
                     {contacts.slice(0, 100).map((c, i) => (
-                      <tr key={i} style={{ background: !c.valid ? "#fdecea" : c.dup ? "#f6f2f3" : "transparent" }}>
+                      <tr key={i} style={{ background: !c.valid ? "#FBEBE8" : c.dup ? "#F3EEE3" : "transparent" }}>
                         <td style={td}>{i + 1}</td>
                         {headers.map((h) => <td key={h} style={td}>{c.row[h]}</td>)}
                         <td style={{ ...td, color: !c.valid ? C.bad : c.dup ? C.sub : C.ok, whiteSpace: "nowrap" }}>
@@ -380,15 +433,48 @@ export default function BroadcastPage() {
         </Card>
 
         {/* STEP 2: template */}
-        <Card title="2 · Pick an approved template">
+        <Card step={2} title="Pick an approved template">
           {tplError && <div style={{ color: C.bad, fontSize: 13, marginBottom: 10 }}>{tplError}</div>}
-          <select value={selectedName} onChange={(e) => setSelectedName(e.target.value)}
-            style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 14, background: "#fff" }}>
-            <option value="">— Select a template —</option>
-            {templates.map((t) => (
-              <option key={`${t.name}:${t.language}`} value={t.name}>{t.name} ({t.language}) · {t.category}</option>
-            ))}
-          </select>
+          {templates.length === 0 && !tplError && (
+            <div style={{ color: C.sub, fontSize: 13, padding: "8px 0" }}>Loading approved templates…</div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 12 }}>
+            {templates.map((t) => {
+              const on = t.name === selectedName;
+              return (
+                <button
+                  key={`${t.name}:${t.language}`}
+                  onClick={() => setSelectedName(on ? "" : t.name)}
+                  style={{
+                    textAlign: "left", cursor: "pointer",
+                    border: `1.5px solid ${on ? C.plum : C.border}`,
+                    background: on ? "rgba(155,27,48,.04)" : C.card,
+                    borderRadius: 12, padding: "12px 13px",
+                    boxShadow: on ? `0 4px 14px rgba(90,10,24,.1)` : "none",
+                    position: "relative", transition: "border-color .12s, box-shadow .12s",
+                  }}
+                >
+                  {on && (
+                    <span style={{ position: "absolute", top: 10, right: 10, width: 18, height: 18, borderRadius: "50%", background: C.plum, color: "#fff", fontSize: 11, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>✓</span>
+                  )}
+                  <div style={{ fontWeight: 700, fontSize: 13.5, color: C.text, paddingRight: 22, wordBreak: "break-word" }}>{t.name}</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "6px 0 8px" }}>
+                    <span style={pill(C.gold)}>{t.language}</span>
+                    {t.category && <span style={pill(C.sub)}>{t.category}</span>}
+                    {t.headerFormat === "IMAGE" && <span style={pill(C.sub)}>🖼 image</span>}
+                  </div>
+                  <div style={{ fontSize: 12, color: C.sub, lineHeight: 1.45, maxHeight: 54, overflow: "hidden", whiteSpace: "pre-wrap" }}>
+                    {t.bodyText || "(no body text)"}
+                  </div>
+                  {t.bodyVars > 0 && (
+                    <div style={{ fontSize: 11, color: C.goldDark, marginTop: 8, fontWeight: 600 }}>
+                      {t.bodyVars} variable{t.bodyVars === 1 ? "" : "s"} to fill
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
 
           {selected && (
             <div style={{ marginTop: 14 }}>
@@ -454,7 +540,33 @@ export default function BroadcastPage() {
         </Card>
 
         {/* STEP 3: send */}
-        <Card title="3 · Send">
+        <Card step={3} title="Review & send">
+          {/* sending speed */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={label}>Sending speed</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {(Object.keys(SPEEDS) as Speed[]).map((s) => {
+                const on = speed === s;
+                const cfg = SPEEDS[s];
+                return (
+                  <button key={s} onClick={() => setSpeed(s)}
+                    style={{
+                      flex: "1 1 150px", textAlign: "left", cursor: "pointer",
+                      border: `1.5px solid ${on ? C.plum : C.border}`,
+                      background: on ? "rgba(155,27,48,.04)" : C.card,
+                      borderRadius: 10, padding: "10px 12px",
+                    }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontWeight: 700, fontSize: 13.5, color: on ? C.plum : C.text }}>{cfg.label}</span>
+                      <span style={{ fontSize: 10.5, color: C.sub }}>{cfg.batch}/batch</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: C.sub, marginTop: 3 }}>{cfg.note}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
             <button onClick={startBroadcast} disabled={!readyToSend}
               style={{ ...primaryBtn, width: "auto", padding: "12px 26px", opacity: readyToSend ? 1 : 0.5, cursor: readyToSend ? "pointer" : "not-allowed" }}>
@@ -466,8 +578,8 @@ export default function BroadcastPage() {
 
           {(progress.running || progress.done > 0) && (
             <div style={{ marginTop: 16 }}>
-              <div style={{ height: 12, background: "#eadfe4", borderRadius: 8, overflow: "hidden" }}>
-                <div style={{ width: `${pct}%`, height: "100%", background: C.plum, transition: "width .3s" }} />
+              <div style={{ height: 12, background: C.cream2, borderRadius: 8, overflow: "hidden" }}>
+                <div style={{ width: `${pct}%`, height: "100%", background: GOLD_BG, transition: "width .3s" }} />
               </div>
               <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 13 }}>
                 <span>{progress.done}/{progress.total} processed</span>
@@ -496,10 +608,13 @@ export default function BroadcastPage() {
 }
 
 // --- small presentational helpers -------------------------------------------
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function Card({ step, title, children }: { step: number; title: string; children: React.ReactNode }) {
   return (
-    <section style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 18, boxShadow: "0 2px 10px rgba(0,0,0,.03)" }}>
-      <h3 style={{ margin: "0 0 12px", color: C.plum, fontSize: 15 }}>{title}</h3>
+    <section style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 20, boxShadow: "0 4px 20px rgba(90,10,24,.05)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <span style={{ width: 30, height: 30, borderRadius: "50%", background: GOLD_BG, color: C.plumDark, fontWeight: 700, fontSize: 15, fontFamily: SERIF, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 2px 6px rgba(169,132,76,.35)" }}>{step}</span>
+        <h3 style={{ margin: 0, color: C.text, fontSize: 21, fontFamily: SERIF, fontWeight: 600, letterSpacing: 0.2 }}>{title}</h3>
+      </div>
       {children}
     </section>
   );
@@ -515,7 +630,12 @@ function Centered({ children }: { children: React.ReactNode }) {
   );
 }
 const primaryBtn: React.CSSProperties = { width: "100%", background: C.plum, color: "#fff", border: "none", borderRadius: 10, padding: "11px 0", fontSize: 15, fontWeight: 600, cursor: "pointer" };
+const pill = (color: string): React.CSSProperties => ({
+  fontSize: 10, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase",
+  color, border: `1px solid ${color}`, background: "transparent",
+  borderRadius: 5, padding: "1px 6px", lineHeight: 1.6,
+});
 const inputStyle: React.CSSProperties = { padding: "9px 11px", borderRadius: 9, border: `1px solid ${C.border}`, fontSize: 14, boxSizing: "border-box", background: "#fff" };
 const label: React.CSSProperties = { display: "block", fontSize: 12, fontWeight: 600, color: C.sub, marginBottom: 5 };
-const th: React.CSSProperties = { position: "sticky", top: 0, background: "#f6f2f3", textAlign: "left", padding: "8px 10px", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap", fontWeight: 600 };
+const th: React.CSSProperties = { position: "sticky", top: 0, background: "#F3EEE3", textAlign: "left", padding: "8px 10px", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap", fontWeight: 600, color: "#1A1410" };
 const td: React.CSSProperties = { padding: "7px 10px", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" };

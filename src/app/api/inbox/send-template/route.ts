@@ -58,6 +58,7 @@ export async function POST(req: NextRequest) {
     wamid,
     status: sent?.dryRun ? "pending" : "sent",
     name: thread?.name || undefined,
+    template: true,
     ...(headerImageUrl ? { type: "image", imageUrl: headerImageUrl } : {}),
   });
 

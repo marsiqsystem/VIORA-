@@ -37,6 +37,7 @@ type Message = {
   mime?: string;
   filename?: string;
   imageUrl?: string;
+  template?: boolean;
 };
 type Template = {
   name: string;
@@ -61,21 +62,34 @@ type Thread = {
   phone: string;
   name: string;
   withinWindow: boolean;
+  lastInboundTs?: number;
   messages: Message[];
 };
 
-// --- colours (single, light dashboard look) ---------------------------------
+// --- colours — Viora brand: ruby / champagne gold / cream --------------------
+// Key names kept as `plum`/`plumDark` for minimal churn, but the VALUES are now
+// the real storefront palette (globals.css / tailwind.config.ts): ruby #9B1B30,
+// deep ruby #5A0A18, champagne gold #C9A66B, cream #F5F1EA, card #FFFDF8.
 const C = {
-  plum: "#7b1e3b",
-  plumDark: "#5c132b",
-  bgList: "#ffffff",
-  bgChat: "#f4eef0",
-  inBubble: "#ffffff",
-  outBubble: "#f3dfe6",
-  border: "#e7dce0",
-  sub: "#8a7c81",
-  text: "#2a2126",
+  plum: "#9B1B30", // ruby (primary)
+  plumDark: "#5A0A18", // deep ruby
+  gold: "#C9A66B", // champagne gold
+  goldDark: "#A9844C",
+  bgList: "#FFFDF8", // warm card white (chat list)
+  bgChat: "#F5F1EA", // cream chat canvas
+  cream2: "#EFE4CE", // secondary cream (day dividers, tabs)
+  inBubble: "#FFFDF8",
+  outBubble: "#F5E8E2", // warm blush outbound bubble
+  border: "#D8C8B3", // champagne border
+  sub: "#7A716C", // muted text
+  text: "#1A1410", // ink
 };
+// Rich dark ruby gradient for headers (mirrors the site's dark hero gradient).
+const HEADER_BG = "linear-gradient(135deg, #1A1410 0%, #5A0A18 100%)";
+// Champagne-gold gradient for avatars / accents.
+const GOLD_BG = "linear-gradient(135deg, #C9A66B 0%, #A9844C 100%)";
+// Serif display face (Cormorant) supplied by the root layout.
+const SERIF = "var(--font-cormorant), Georgia, 'Times New Roman', serif";
 
 // --- mock seed data ----------------------------------------------------------
 const now = Date.now();
@@ -130,6 +144,19 @@ function fullStamp(ts: number) {
     day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
   });
 }
+// 24-hour service-window state for the thread header. WhatsApp only lets us send
+// free-form text within 24h of the customer's last inbound message; after that
+// an approved template is required. Returns a pill label + colour.
+function windowRemaining(lastInboundTs?: number, now = Date.now()) {
+  const WIN = 24 * 60 * 60 * 1000;
+  if (!lastInboundTs) return { open: false, label: "Template only", urgent: false };
+  const left = lastInboundTs + WIN - now;
+  if (left <= 0) return { open: false, label: "Window closed", urgent: false };
+  const h = Math.floor(left / 3_600_000);
+  const m = Math.floor((left % 3_600_000) / 60_000);
+  const label = h > 0 ? `${h}h ${m}m left` : `${m}m left`;
+  return { open: true, label, urgent: left < 3_600_000 }; // < 1h → amber
+}
 function Ticks({ status }: { status?: string }) {
   if (!status) return null;
   if (status === "pending") return <span title="pending" style={{ color: C.sub }}>🕓</span>;
@@ -153,6 +180,8 @@ export default function InboxPage() {
   const [convs, setConvs] = useState<Conversation[]>(MOCK ? MOCK_CONVS : []);
   const [active, setActive] = useState<string | null>(null);
   const [thread, setThread] = useState<Thread | null>(null);
+  const [tab, setTab] = useState<"all" | "unread">("all"); // chat-list filter
+  const [nowTick, setNowTick] = useState(Date.now()); // drives the 24h countdown
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
@@ -203,14 +232,14 @@ export default function InboxPage() {
   const loadThread = useCallback(async (phone: string) => {
     if (MOCK) {
       const conv = MOCK_CONVS.find((c) => c.phone === phone);
-      setThread({ phone, name: conv?.name || phone, withinWindow: conv?.withinWindow ?? true, messages: MOCK_THREADS[phone] || [] });
+      setThread({ phone, name: conv?.name || phone, withinWindow: conv?.withinWindow ?? true, lastInboundTs: now - 120000, messages: MOCK_THREADS[phone] || [] });
       return;
     }
     try {
       const res = await api(`/api/inbox/conversations?phone=${encodeURIComponent(phone)}`);
       if (!res.ok) return;
       const data = await res.json();
-      if (data.ok) setThread({ phone: data.phone, name: data.name, withinWindow: data.withinWindow, messages: data.messages || [] });
+      if (data.ok) setThread({ phone: data.phone, name: data.name, withinWindow: data.withinWindow, lastInboundTs: data.lastInboundTs, messages: data.messages || [] });
     } catch { /* ignore */ }
   }, [api]);
 
@@ -411,6 +440,12 @@ export default function InboxPage() {
     return () => clearInterval(id);
   }, [authed, loadConvs, loadThread]);
 
+  // --- keep the 24h countdown fresh (1-min tick; poll already refreshes data) ---
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 60000);
+    return () => clearInterval(id);
+  }, []);
+
   // --- autoscroll to newest ---
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -465,8 +500,9 @@ export default function InboxPage() {
   if (!authed && !MOCK) {
     return (
       <Centered>
-        <div style={{ width: 320, background: "#fff", padding: 28, borderRadius: 16, boxShadow: "0 8px 30px rgba(0,0,0,.08)", border: `1px solid ${C.border}` }}>
-          <h2 style={{ color: C.plum, margin: "0 0 4px", fontSize: 22 }}>Viora Inbox</h2>
+        <div style={{ width: 330, background: C.bgList, padding: 30, borderRadius: 18, boxShadow: "0 12px 40px rgba(90,10,24,.14)", border: `1px solid ${C.border}`, borderTop: `3px solid ${C.gold}` }}>
+          <h2 style={{ color: C.plum, margin: "0 0 2px", fontSize: 30, fontFamily: SERIF, fontWeight: 600 }}>Viora Inbox</h2>
+          <div style={{ width: 40, height: 2, background: C.gold, margin: "0 0 12px" }} />
           <p style={{ color: C.sub, margin: "0 0 18px", fontSize: 13 }}>Enter the inbox passcode.</p>
           <input
             type="password"
@@ -496,10 +532,16 @@ export default function InboxPage() {
       {/* LEFT: conversation list */}
       {showList && (
       <aside style={{ width: isMobile ? "100%" : 340, minWidth: isMobile ? 0 : 300, borderRight: isMobile ? "none" : `1px solid ${C.border}`, background: C.bgList, display: "flex", flexDirection: "column", }}>
-        <header style={{ background: C.plum, color: "#fff", padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <strong style={{ fontSize: 17, letterSpacing: 0.3 }}>Viora Inbox</strong>
+        <header style={{ background: HEADER_BG, color: "#fff", padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `2px solid ${C.gold}` }}>
+          <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.1 }}>
+            <span style={{ fontFamily: SERIF, fontSize: 25, fontWeight: 600, letterSpacing: 0.3 }}>Viora</span>
+            <span style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: C.gold, marginTop: 2 }}>Inbox</span>
+          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 11, opacity: 0.85 }}>{MOCK ? "MOCK" : "live"}</span>
+            <span style={{ fontSize: 10, letterSpacing: 1, textTransform: "uppercase", color: C.gold, display: "inline-flex", alignItems: "center", gap: 5 }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: MOCK ? C.sub : "#3ecf6a", display: "inline-block", boxShadow: MOCK ? "none" : "0 0 0 2px rgba(62,207,106,.25)" }} />
+              {MOCK ? "MOCK" : "Live"}
+            </span>
             {!MOCK && (
               <button
                 onClick={lock}
@@ -525,13 +567,39 @@ export default function InboxPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="🔍  Search name or number"
-            style={{ width: "100%", padding: "8px 12px", borderRadius: 18, border: `1px solid ${C.border}`, fontSize: 13, background: "#f4eef0", boxSizing: "border-box" }}
+            style={{ width: "100%", padding: "8px 12px", borderRadius: 18, border: `1px solid ${C.border}`, fontSize: 13, background: C.bgChat, boxSizing: "border-box" }}
           />
         </div>
 
+        {/* All / Unread filter tabs */}
+        <div style={{ display: "flex", gap: 8, padding: "8px 12px", borderBottom: `1px solid ${C.border}`, background: C.bgList }}>
+          {([["all", "All"], ["unread", "Unread"]] as const).map(([id, lbl]) => {
+            const on = tab === id;
+            const count = id === "unread" ? convs.filter((c) => c.unread > 0).length : 0;
+            return (
+              <button
+                key={id}
+                onClick={() => setTab(id)}
+                style={{
+                  border: `1px solid ${on ? C.plum : C.border}`,
+                  background: on ? C.plum : "transparent",
+                  color: on ? "#fff" : C.sub,
+                  borderRadius: 16, padding: "5px 16px", fontSize: 12.5, fontWeight: 600,
+                  cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6,
+                }}
+              >
+                {lbl}
+                {id === "unread" && count > 0 && (
+                  <span style={{ background: on ? C.gold : C.plum, color: on ? C.plumDark : "#fff", borderRadius: 9, fontSize: 10, minWidth: 16, height: 16, padding: "0 4px", display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>{count}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
         {composing && (
-          <div style={{ padding: 14, borderBottom: `1px solid ${C.border}`, background: "#faf3f5" }}>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: C.plum }}>New chat</div>
+          <div style={{ padding: 14, borderBottom: `1px solid ${C.border}`, background: C.bgChat }}>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8, color: C.plum, fontFamily: SERIF }}>New chat</div>
             <input
               type="tel"
               value={newPhone}
@@ -559,17 +627,18 @@ export default function InboxPage() {
           {(() => {
             const q = search.trim().toLowerCase();
             const digits = q.replace(/[^\d]/g, "");
+            const base = tab === "unread" ? convs.filter((c) => c.unread > 0) : convs;
             const shown = q
-              ? convs.filter(
+              ? base.filter(
                   (c) =>
                     (c.name || "").toLowerCase().includes(q) ||
                     (digits && c.phone.includes(digits))
                 )
-              : convs;
+              : base;
             if (convs.length > 0 && shown.length === 0) {
               return (
                 <div style={{ padding: 24, color: C.sub, fontSize: 14, textAlign: "center" }}>
-                  No chats match “{search}”.
+                  {tab === "unread" && !q ? "No unread chats — you're all caught up. ✨" : `No chats match “${search}”.`}
                 </div>
               );
             }
@@ -581,12 +650,12 @@ export default function InboxPage() {
                 onClick={() => openConv(c.phone)}
                 style={{
                   width: "100%", textAlign: "left", border: "none", cursor: "pointer",
-                  background: isActive ? "#faf3f5" : "transparent",
+                  background: isActive ? C.outBubble : "transparent",
                   padding: "12px 16px", borderBottom: `1px solid ${C.border}`,
                   display: "flex", gap: 12, alignItems: "center",
                 }}
               >
-                <div style={{ width: 42, height: 42, borderRadius: "50%", background: C.plum, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600, flexShrink: 0 }}>
+                <div style={{ width: 42, height: 42, borderRadius: "50%", background: GOLD_BG, color: C.plumDark, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontFamily: SERIF, fontSize: 19, flexShrink: 0, boxShadow: "0 1px 4px rgba(90,10,24,.12)" }}>
                   {(c.name || c.phone).slice(0, 1).toUpperCase()}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -619,19 +688,31 @@ export default function InboxPage() {
           </div>
         ) : (
           <>
-            <header style={{ background: C.plum, color: "#fff", padding: "14px 18px", display: "flex", alignItems: "center", gap: 12 }}>
+            <header style={{ background: HEADER_BG, color: "#fff", padding: "12px 18px", display: "flex", alignItems: "center", gap: 12, borderBottom: `2px solid ${C.gold}` }}>
               {isMobile && (
-                <button onClick={backToList} title="Back" aria-label="Back to chats" style={{ background: "transparent", border: "none", color: "#fff", fontSize: 24, lineHeight: 1, cursor: "pointer", padding: "0 4px 0 0", marginLeft: -4 }}>
+                <button onClick={backToList} title="Back" aria-label="Back to chats" style={{ background: "transparent", border: "none", color: C.gold, fontSize: 26, lineHeight: 1, cursor: "pointer", padding: "0 4px 0 0", marginLeft: -4 }}>
                   ‹
                 </button>
               )}
-              <div style={{ width: 38, height: 38, borderRadius: "50%", background: C.plumDark, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600, flexShrink: 0 }}>
+              <div style={{ width: 40, height: 40, borderRadius: "50%", background: GOLD_BG, color: C.plumDark, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontFamily: SERIF, fontSize: 19, flexShrink: 0 }}>
                 {(thread.name || thread.phone).slice(0, 1).toUpperCase()}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 15 }}>{thread.name || `+${thread.phone}`}</div>
-                <div style={{ fontSize: 11, opacity: 0.85 }}>+{thread.phone}</div>
+                <div style={{ fontWeight: 600, fontSize: 16, fontFamily: SERIF, letterSpacing: 0.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{thread.name || `+${thread.phone}`}</div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,.7)" }}>+{thread.phone}</div>
               </div>
+              {(() => {
+                const win = windowRemaining(thread.lastInboundTs, nowTick);
+                const bg = win.open ? (win.urgent ? "rgba(201,166,107,.22)" : "rgba(62,207,106,.18)") : "rgba(255,255,255,.1)";
+                const fg = win.open ? (win.urgent ? C.gold : "#7be6a0") : "rgba(255,255,255,.72)";
+                const border = win.open ? (win.urgent ? C.gold : "rgba(62,207,106,.5)") : "rgba(255,255,255,.25)";
+                return (
+                  <span title={win.open ? "Free-form reply window (24h since their last message)" : "24h window closed — only an approved template can be sent"}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", padding: "4px 10px", borderRadius: 20, background: bg, color: fg, border: `1px solid ${border}` }}>
+                    {win.open ? "⏱" : "🔒"} {win.label}
+                  </span>
+                );
+              })()}
               <div style={{ position: "relative" }}>
                 <button onClick={() => setHeaderMenu((v) => !v)} title="Chat options" style={{ background: "transparent", border: "none", color: "#fff", fontSize: 22, cursor: "pointer", lineHeight: 1, padding: "2px 6px" }}>⋮</button>
                 {headerMenu && (
@@ -660,7 +741,7 @@ export default function InboxPage() {
                 return (
                   <div key={m.id} style={{ display: "contents" }}>
                     {showDay && (
-                      <div style={{ alignSelf: "center", background: "#eadfe4", color: C.sub, fontSize: 11, padding: "3px 12px", borderRadius: 10, margin: "6px 0" }}>
+                      <div style={{ alignSelf: "center", background: C.cream2, color: C.sub, fontSize: 11, padding: "3px 12px", borderRadius: 10, margin: "6px 0" }}>
                         {dayLabel(m.ts)}
                       </div>
                     )}
@@ -670,7 +751,12 @@ export default function InboxPage() {
                           <button onClick={() => deleteMsg(m.id)} style={{ ...menuItem, color: "#c0392b", whiteSpace: "nowrap", fontSize: 13 }}>🗑 Delete for me</button>
                         </div>
                       )}
-                      <div title={fullStamp(m.ts)} style={{ background: out ? C.outBubble : C.inBubble, border: `1px solid ${C.border}`, borderRadius: 12, padding: isImage ? 4 : "8px 11px", fontSize: 14, lineHeight: 1.4, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                      <div title={fullStamp(m.ts)} style={{ background: out ? C.outBubble : C.inBubble, border: `1px solid ${C.border}`, borderLeft: m.template ? `3px solid ${C.gold}` : `1px solid ${C.border}`, borderRadius: 12, padding: isImage ? 4 : "8px 11px", fontSize: 14, lineHeight: 1.4, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                        {m.template && (
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 9, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: C.goldDark, background: "rgba(201,166,107,.16)", border: `1px solid ${C.gold}`, borderRadius: 5, padding: "1px 6px", marginBottom: 5 }}>
+                            ✦ Template
+                          </div>
+                        )}
                         {isImage && imgSrc && (
                           <a href={imgSrc} target="_blank" rel="noreferrer" style={{ display: "block" }}>
                             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -766,7 +852,7 @@ export default function InboxPage() {
         <div onClick={() => setTplOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 460, maxHeight: "82vh", overflowY: "auto", padding: 20 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-              <h3 style={{ margin: 0, color: C.plum, fontSize: 17 }}>Send a template</h3>
+              <h3 style={{ margin: 0, color: C.plum, fontSize: 22, fontFamily: SERIF, fontWeight: 600 }}>Send a template</h3>
               <button onClick={() => setTplOpen(false)} style={{ background: "transparent", border: "none", fontSize: 24, lineHeight: 1, cursor: "pointer", color: C.sub }}>×</button>
             </div>
             <p style={{ color: C.sub, fontSize: 12.5, margin: "0 0 10px" }}>
@@ -808,7 +894,7 @@ export default function InboxPage() {
 
 function Centered({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 9999, minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, background: "#f4eef0", fontFamily: "system-ui, sans-serif", padding: 20 }}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 9999, minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, background: C.bgChat, fontFamily: "system-ui, sans-serif", padding: 20 }}>
       {children}
     </div>
   );
@@ -838,5 +924,5 @@ const menuItem: React.CSSProperties = {
   fontSize: 14,
   cursor: "pointer",
   borderRadius: 8,
-  color: "#2a2126",
+  color: "#1A1410",
 };

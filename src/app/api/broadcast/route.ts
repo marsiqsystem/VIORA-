@@ -126,6 +126,7 @@ export async function POST(req: NextRequest) {
           wamid,
           name: nm && nm.toLowerCase() !== "customer" ? nm : undefined,
           status: res?.dryRun ? "pending" : "sent",
+          template: true,
           ...(imageUrl ? { type: "image", imageUrl } : {}),
         });
       } catch {

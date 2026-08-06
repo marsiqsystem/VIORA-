@@ -267,8 +267,9 @@ async function ingestWebhook(body) {
  * @param {string} [p.mediaId] Meta media id (uploaded photo/doc) — renders via the media proxy.
  * @param {string} [p.imageUrl] public image URL (e.g. a template's header image) — rendered directly.
  * @param {string} [p.filename] document file name (for a 'document' message).
+ * @param {boolean} [p.template] true if this was an approved-template send (shows a TEMPLATE tag).
  */
-async function recordOutbound({ to, text, wamid, ts, status = "sent", name, type = "text", mediaId, imageUrl, filename } = {}) {
+async function recordOutbound({ to, text, wamid, ts, status = "sent", name, type = "text", mediaId, imageUrl, filename, template } = {}) {
   if (!isConfigured()) return { ok: false };
   const phone = normPhone(to);
   if (!phone) return { ok: false };
@@ -284,6 +285,7 @@ async function recordOutbound({ to, text, wamid, ts, status = "sent", name, type
       ...(mediaId ? { mediaId } : {}),
       ...(imageUrl ? { imageUrl } : {}),
       ...(filename ? { filename } : {}),
+      ...(template ? { template: true } : {}),
     });
     if (wamid) {
       try {

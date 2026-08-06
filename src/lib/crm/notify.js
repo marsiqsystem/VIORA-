@@ -89,6 +89,7 @@ async function logOutbound(phone, text, res, name, imageUrl) {
       text,
       wamid,
       name: cleanName,
+      template: true, // every automated notify.js send is an approved template
       ...(url ? { type: "image", imageUrl: url } : {}),
     });
   } catch {
