@@ -135,6 +135,23 @@ export default function BroadcastPage() {
   keyRef.current = key;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // This page is a position:fixed full-screen overlay ON TOP of the storefront
+  // layout (Navbar/Footer + Lenis smooth-scroll on the window). Left alone, the
+  // page behind still scrolls, so the browser shows a SECOND, dead scrollbar
+  // beside the overlay's own. Lock the background scroll while we're mounted.
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtml = html.style.overflow;
+    const prevBody = body.style.overflow;
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    return () => {
+      html.style.overflow = prevHtml;
+      body.style.overflow = prevBody;
+    };
+  }, []);
+
   const selected = templates.find((t) => t.name === selectedName) || null;
 
   // --- auth + templates load ---

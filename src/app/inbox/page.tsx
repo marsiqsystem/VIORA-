@@ -208,6 +208,22 @@ export default function InboxPage() {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const docRef = useRef<HTMLInputElement | null>(null);
 
+  // This inbox is a position:fixed full-screen overlay on top of the storefront
+  // layout (Navbar/Footer + Lenis smooth-scroll on the window). Lock the page
+  // behind it so the browser doesn't show a second, dead scrollbar.
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtml = html.style.overflow;
+    const prevBody = body.style.overflow;
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    return () => {
+      html.style.overflow = prevHtml;
+      body.style.overflow = prevBody;
+    };
+  }, []);
+
   const api = useCallback(async (path: string, init?: RequestInit) => {
     const res = await fetch(path, {
       ...init,
