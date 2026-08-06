@@ -8,7 +8,22 @@ const FAQS: Faq[] = [
   {
     question: "What is Viora Jewel?",
     answer:
-      "Viora Jewel is an Indian fashion jewellery brand offering premium-quality, affordable jewellery for women. Our collections include elegant necklace sets, earrings, rings, bracelets and accessories designed for everyday wear, weddings, parties, festive occasions, office wear and thoughtful gifting. We combine timeless designs, quality craftsmanship and accessible pricing to help every woman elevate her style without overspending.",
+      "Viora Jewel is an Indian fashion and artificial jewellery brand offering premium-quality, affordable jewellery for women. Our collections include elegant necklace sets, earrings, long necklaces, stone necklace sets, bridal jewellery sets, rings, bracelets and accessories designed for everyday wear, weddings, parties, festive occasions, office wear and thoughtful gifting. We combine timeless designs, quality craftsmanship and accessible pricing to help every woman elevate her style without overspending.",
+  },
+  {
+    question: "Does Viora Jewel sell artificial jewellery online?",
+    answer:
+      "Yes. Viora Jewel is an online artificial jewellery brand offering imitation and fashion jewellery for women across India. You can buy necklace sets, earrings for women, long necklaces, stone necklace sets and more online, with free shipping — premium looks at everyday prices, delivered to your door.",
+  },
+  {
+    question: "What kinds of necklace sets and earrings do you have?",
+    answer:
+      "Our collection includes elegant necklace sets for women, stone necklace sets, long necklaces, statement and everyday earrings for women, and bridal jewellery sets for weddings and festive occasions. Every jewellery set is designed to pair beautifully for parties, office wear and daily styling.",
+  },
+  {
+    question: "Do you have Rakhi jewellery and gifts?",
+    answer:
+      "Yes — we have a curated range of Rakhi jewellery and jewellery gift sets, perfect thoughtful gifts for sisters and loved ones. Explore our jewellery for Rakhi and other festive occasions, beautifully packed and ready to gift.",
   },
   {
     question: "Is Viora Jewel jewellery real gold or gold-plated?",
@@ -18,7 +33,7 @@ const FAQS: Faq[] = [
   {
     question: "What materials does Viora Jewel use?",
     answer:
-      "Our pieces are fashion jewellery finished with decorative crystal-style and pearl-style accents, depending on the design. Every piece is hand-checked and inspected before it's packaged and dispatched to you.",
+      "Our jewellery is crafted from premium brass metal, finished with high-quality rhodium plating for a bright, long-lasting shine, and set with original glass stones. With proper care, the polish typically lasts 1.5–2 years. Every piece is hand-checked and inspected before it's packaged and dispatched to you.",
   },
   {
     question: "Is Viora Jewel jewellery safe for sensitive skin?",
@@ -38,7 +53,7 @@ const FAQS: Faq[] = [
   {
     question: "How should I care for my Viora Jewel jewellery?",
     answer:
-      "Keep your jewellery away from water, perfume, sweat and harsh chemicals. Store each piece in an airtight pouch or box and wipe gently with a soft dry cloth after wear. With this simple routine, the finish and stones stay looking fresh for far longer.",
+      "To keep the rhodium polish and glass stones looking their best: wipe each piece with a soft, dry cloth after every use; avoid contact with perfumes, alcohol-based products, water, sweat and harsh chemicals, as these reduce the life of the polish; and store your jewellery in a dry place — an airtight pouch or box — when not in use. With this simple routine, the shine can last 1.5–2 years.",
   },
   {
     question: "How long does delivery take?",

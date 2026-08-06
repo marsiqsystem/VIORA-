@@ -4,14 +4,14 @@ import { wixClientServer } from "@/lib/wixClientServer";
 import ProductList from "@/components/ProductList";
 
 export const metadata: Metadata = {
-  title: "All Products — Jewellery, Earrings & Gifts",
+  title: "Artificial Jewellery Online — Necklace Sets, Earrings & Gifts",
   description:
-    "Shop the full Viora Jewel collection — ethnic jewellery sets, earrings, and gifts, mostly under ₹649. Free shipping across India and easy 48-hour exchange.",
+    "Shop the full Viora Jewel collection online — artificial & fashion jewellery, necklace sets for women, long & stone necklace sets, earrings for women, bridal jewellery sets and Rakhi gifts. Free shipping across India, easy 48-hour exchange.",
   alternates: { canonical: "/products" },
   openGraph: {
-    title: "All Products | Viora Jewel",
+    title: "Artificial Jewellery Online — Necklace Sets & Earrings | Viora Jewel",
     description:
-      "Browse every Viora Jewel piece — jewellery sets, earrings and gifts with free shipping across India.",
+      "Browse every Viora Jewel piece — artificial & fashion jewellery sets, necklace sets, earrings and Rakhi gifts with free shipping across India.",
     url: "/products",
   },
 };

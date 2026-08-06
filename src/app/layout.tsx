@@ -43,27 +43,41 @@ const cormorant = Cormorant_Garamond({
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "Viora Jewel — Everyday Jewellery & Gifts",
+    default: "Viora Jewel — Artificial Jewellery, Necklace Sets & Earrings Online",
     template: "%s | Viora Jewel",
   },
   description:
-    "Affordable Indian ethnic jewellery, earrings & gifts mostly under ₹649. Free shipping across India. Easy 48-hour exchange.",
+    "Shop premium artificial & fashion jewellery online at Viora Jewel — necklace sets for women, earrings, long & stone necklace sets, bridal jewellery sets and Rakhi gifts. Free shipping across India, easy 48-hour exchange.",
   applicationName: "Viora Jewel",
   keywords: [
     "Viora Jewel",
-    "Indian ethnic jewellery",
+    "Artificial Jewellery",
+    "Imitation Jewellery",
+    "Artificial Jewellery Online",
+    "Online Artificial Jewellery Set",
+    "Fashion Jewelry",
+    "Jewellery Online",
+    "Jewellery Website",
+    "Necklace",
+    "Necklace set for women",
+    "Long Necklace",
+    "Stone Necklace Set",
+    "Bridal Jewellery Set",
+    "Jewellery Set",
+    "Earrings",
+    "Earrings for women",
+    "Jewellery for Rakhi",
+    "Rakhi Jewellery",
     "affordable jewellery India",
-    "earrings online",
     "jewellery gifting",
-    "gold plated jewellery",
   ],
   authors: [{ name: "Viora Jewel" }],
   openGraph: {
     type: "website",
     siteName: "Viora Jewel",
-    title: "Viora Jewel — Everyday Jewellery & Gifts",
+    title: "Viora Jewel — Artificial Jewellery, Necklace Sets & Earrings Online",
     description:
-      "Affordable Indian fashion jewellery, earrings & gifts under ₹649. Free shipping across India. Easy 48-hour exchange.",
+      "Shop premium artificial & fashion jewellery online — necklace sets for women, earrings, long & stone necklace sets, bridal sets and Rakhi gifts. Free shipping across India. Easy 48-hour exchange.",
     url: SITE_URL,
     locale: "en_IN",
     images: [
@@ -71,15 +85,15 @@ export const metadata: Metadata = {
         url: "/banner-optimized.jpg",
         width: 1200,
         height: 630,
-        alt: "Viora Jewel — Indian fashion jewellery sets, earrings and gifts",
+        alt: "Viora Jewel — artificial & fashion jewellery, necklace sets, earrings and gifts",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Viora Jewel — Everyday Jewellery & Gifts",
+    title: "Viora Jewel — Artificial Jewellery, Necklace Sets & Earrings",
     description:
-      "Affordable Indian fashion jewellery, earrings & gifts under ₹649. Free shipping. Easy 48-hour exchange.",
+      "Premium artificial & fashion jewellery online — necklace sets for women, earrings, bridal sets & Rakhi gifts. Free shipping across India.",
     images: ["/banner-optimized.jpg"],
   },
   robots: {
@@ -103,7 +117,7 @@ const organizationSchema = {
   logo: `${SITE_URL}/logo%20compressed.png`,
   email: "mail@viorajewel.in",
   description:
-    "Viora Jewel is an Indian direct-to-consumer brand offering affordable everyday fashion jewellery, earrings and gifting pieces mostly under ₹649, with free shipping across India and an easy 48-hour exchange on damaged or incorrect items.",
+    "Viora Jewel is an Indian direct-to-consumer brand offering affordable artificial and fashion jewellery for women — necklace sets, long and stone necklace sets, earrings, bridal jewellery sets and Rakhi gifts. Pieces are crafted from premium brass with high-quality rhodium plating and original glass stones, with free shipping across India and an easy 48-hour exchange on damaged or incorrect items.",
   address: {
     "@type": "PostalAddress",
     streetAddress: "38C B.T. Road (Kalpana Apartment), 1st Floor, Flat 1A",
