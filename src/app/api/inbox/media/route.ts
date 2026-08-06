@@ -28,6 +28,13 @@ export async function GET(req: NextRequest) {
   if (!id) {
     return NextResponse.json({ ok: false, error: "Missing media id." }, { status: 400 });
   }
+  // Defense-in-depth: a Meta media id is a long digit/opaque token. Reject
+  // anything with other characters before interpolating it into the Graph URL,
+  // so a crafted id can't reshape the request path (the route is behind the
+  // inbox passcode anyway, but validate regardless).
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) {
+    return NextResponse.json({ ok: false, error: "Invalid media id." }, { status: 400 });
+  }
 
   const media = await fetchMediaBytes(id);
   if (!media.ok || !media.buffer) {

@@ -165,7 +165,12 @@ function windowRemaining(lastInboundTs?: number, now = Date.now()) {
 function Ticks({ status }: { status?: string }) {
   if (!status) return null;
   if (status === "pending") return <span title="pending" style={{ color: C.sub }}>🕓</span>;
-  if (status === "failed") return <span title="failed" style={{ color: "#c0392b" }}>✗</span>;
+  if (status === "failed")
+    return (
+      <span title="Not delivered — the message failed to send (e.g. 24h window closed)." style={{ color: "#c0392b", fontWeight: 700, fontSize: 10, letterSpacing: 0.2 }}>
+        ✗ Failed
+      </span>
+    );
   const blue = status === "read";
   const double = status === "delivered" || status === "read";
   return (

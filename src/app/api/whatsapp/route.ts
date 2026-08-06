@@ -9,12 +9,42 @@
 // and the work reliable.
 
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { handleInbound } from "@/lib/crm/autoReply";
 import { ingestWebhook } from "@/lib/crm/inbox-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
+
+// Verify Meta's X-Hub-Signature-256 (HMAC-SHA256 of the raw body with the app
+// secret) so nobody can POST forged inbound messages/statuses to this public URL.
+//
+// ADAPTED (non-breaking): enforcement is ON only when WHATSAPP_APP_SECRET is set.
+// If it's unset we WARN and allow, so adding this can't silently break the live
+// webhook on a deploy where the secret isn't configured yet. Set the secret in
+// Vercel (Meta App → Settings → Basic → App Secret) to turn on rejection.
+//   returns true  -> valid, proceed
+//   returns false -> secret set but signature missing/bad -> reject 401
+//   returns "skip" -> secret not set -> allow (logged)
+function verifySignature(req: NextRequest, raw: string): boolean | "skip" {
+  const secret = (process.env.WHATSAPP_APP_SECRET || "").trim();
+  if (!secret) {
+    console.warn(
+      "[whatsapp] WHATSAPP_APP_SECRET not set — skipping signature check. Set it to reject forged webhooks."
+    );
+    return "skip";
+  }
+  const header = req.headers.get("x-hub-signature-256") || "";
+  const expected = "sha256=" + crypto.createHmac("sha256", secret).update(raw, "utf8").digest("hex");
+  try {
+    const a = Buffer.from(header);
+    const b = Buffer.from(expected);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
 
 // GET /api/whatsapp — Meta's verification handshake. Echo hub.challenge back
 // verbatim (text/plain) when the mode + verify token match.
@@ -37,9 +67,16 @@ export async function GET(req: NextRequest) {
 
 // POST /api/whatsapp — incoming messages/statuses. Process then ack.
 export async function POST(req: NextRequest) {
+  // Read the RAW body first — the signature is computed over these exact bytes.
+  const raw = await req.text();
+  if (verifySignature(req, raw) === false) {
+    console.warn("[whatsapp] rejected POST: bad X-Hub-Signature-256.");
+    return new NextResponse(null, { status: 401 });
+  }
+
   let body: any = {};
   try {
-    body = await req.json();
+    body = raw ? JSON.parse(raw) : {};
   } catch {
     /* empty / non-JSON body — treat as no-op */
   }

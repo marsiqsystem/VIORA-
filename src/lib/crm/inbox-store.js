@@ -119,6 +119,45 @@ async function pushMessage(phone, message) {
   await command(["LTRIM", msgsKey(phone), -MSG_CAP, -1]);
 }
 
+// --- inbound dedupe (Meta webhooks are at-least-once) ------------------------
+// If our 200 ACK is slow (a cold start), Meta REDELIVERS the same event, which
+// would RPUSH the customer's message twice. Claim the provider message id once
+// (SET NX) before storing so a redelivery is skipped. TTL because status updates
+// always arrive within minutes — 3 days is very safe and keeps KV from growing.
+const SEEN_TTL_S = 60 * 60 * 24 * 3;
+async function claimInbound(wamid) {
+  if (!wamid) return true; // no id to dedupe on — let it through
+  try {
+    const r = await command(["SET", `${PREFIX}seen:${wamid}`, "1", "NX", "EX", String(SEEN_TTL_S)]);
+    return r === "OK"; // "OK" = first time (store it); null = duplicate (skip)
+  } catch {
+    return true; // fail-open: a store hiccup must never drop a real message
+  }
+}
+
+// --- delivery-status ranking (never downgrade; failed is terminal) -----------
+// Out-of-order webhooks (Meta doesn't guarantee ordering) could otherwise flip a
+// "read" bubble back to "delivered". Rank the states and only ever move forward.
+const STATUS_RANK = { pending: 0, sent: 1, delivered: 2, read: 3 };
+async function applyStatus(phone, wamid, status) {
+  if (!wamid || !status) return;
+  try {
+    const cur = await command(["HGET", statusKey(phone), wamid]);
+    if (cur === "failed") return; // failed sticks — never overwrite it
+    if (status === "failed") {
+      // Only mark failed if it hasn't already been delivered/read (can't un-deliver).
+      if ((STATUS_RANK[cur] ?? -1) >= STATUS_RANK.delivered) return;
+      await command(["HSET", statusKey(phone), wamid, "failed"]);
+      return;
+    }
+    const curRank = STATUS_RANK[cur] ?? -1;
+    const newRank = STATUS_RANK[status] ?? -1;
+    if (newRank > curRank) await command(["HSET", statusKey(phone), wamid, status]);
+  } catch {
+    /* best-effort tick update */
+  }
+}
+
 // --- INGEST (inbound customer messages + delivery statuses) ------------------
 
 /**
@@ -196,6 +235,8 @@ async function ingestWebhook(body) {
         for (const msg of value.messages || []) {
           const phone = normPhone(msg.from);
           if (!phone) continue;
+          // Skip a Meta redelivery of a message we've already stored.
+          if (!(await claimInbound(msg.id))) continue;
           const tsMs = msg.timestamp ? Number(msg.timestamp) * 1000 : Date.now();
           const text = inboundText(msg);
           const media = inboundMedia(msg);
@@ -224,17 +265,14 @@ async function ingestWebhook(body) {
           inbound++;
         }
 
-        // 2) delivery/read statuses for messages WE sent (keyed by wamid)
+        // 2) delivery/read statuses for messages WE sent (keyed by wamid).
+        // Ranked so an out-of-order webhook never downgrades a tick.
         for (const st of value.statuses || []) {
           const phone = normPhone(st.recipient_id);
           const wamid = st.id;
           const status = st.status; // sent | delivered | read | failed
           if (!phone || !wamid || !status) continue;
-          try {
-            await command(["HSET", statusKey(phone), wamid, status]);
-          } catch {
-            /* best-effort tick update */
-          }
+          await applyStatus(phone, wamid, status);
           statuses++;
         }
       }
@@ -287,13 +325,7 @@ async function recordOutbound({ to, text, wamid, ts, status = "sent", name, type
       ...(filename ? { filename } : {}),
       ...(template ? { template: true } : {}),
     });
-    if (wamid) {
-      try {
-        await command(["HSET", statusKey(phone), wamid, status]);
-      } catch {
-        /* ignore */
-      }
-    }
+    if (wamid) await applyStatus(phone, wamid, status);
     const conv = await readConv(phone);
     // A real order name is authoritative — it labels the chat so the operator can
     // tell at a glance who was messaged (no digging by number / order id).
