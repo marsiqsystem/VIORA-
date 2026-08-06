@@ -51,7 +51,7 @@ const money = (v) => {
 // FALLBACK used if Meta can't be reached — never the primary text.
 // Build the customer-facing tracking link from the AWB, matching Velocity's
 // track base (same default as lib/crm/velocity.js). Falls back to the site.
-const TRACK_BASE = (process.env.VELOCITY_TRACK_URL_BASE || "https://shipfastt.in/track").replace(/\/$/, "");
+const TRACK_BASE = (process.env.VELOCITY_TRACK_URL_BASE || "https://shipfast.in/track").replace(/\/$/, "");
 const trackingLink = (o) =>
   String(o.trackingUrl || "").trim() ||
   (o.awb ? `${TRACK_BASE}/${o.awb}` : "https://viorajewel.in/orders");

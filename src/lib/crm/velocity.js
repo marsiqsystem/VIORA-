@@ -35,7 +35,7 @@ function cfg() {
     password: (process.env.VELOCITY_PASSWORD || "").trim(),
     warehouseId: (process.env.VELOCITY_WAREHOUSE_ID || "").trim(), // pre-registered pickup warehouse
     pickupLocation: (process.env.VELOCITY_PICKUP_LOCATION || "").trim(), // warehouse display name (API requires it)
-    trackBase: (process.env.VELOCITY_TRACK_URL_BASE || "https://shipfastt.in/track").replace(
+    trackBase: (process.env.VELOCITY_TRACK_URL_BASE || "https://shipfast.in/track").replace(
       /\/$/,
       ""
     ),
