@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { reference, awb, status, rawStatus } = velocity.parseStatusWebhook(body);
+    const { reference, awb, status, rawStatus, trackingUrl } = velocity.parseStatusWebhook(body);
     console.log(
       `[velocity-webhook] status=${rawStatus} -> ${status} ref=${reference || "-"} awb=${awb || "-"}`
     );
@@ -86,9 +86,15 @@ export async function POST(req: NextRequest) {
       console.warn(`[velocity-webhook] no Wix order (ref=${reference}, awb=${awb}) — cannot message.`);
       return new NextResponse(null, { status: 200 });
     }
-    if (awb && !order.awb) order.awb = awb; // ensure the tracking button has a value
+    if (awb && !order.awb) order.awb = awb; // ensure the tracking link has a value
+    // Carry a tracking URL for the dispatched message's {{3}} (webhook value,
+    // else whatever Wix stored; notify falls back to building it from the AWB).
+    if (trackingUrl && !order.trackingUrl) order.trackingUrl = trackingUrl;
 
-    if (status === "OUT_FOR_DELIVERY") {
+    if (status === "DISPATCHED") {
+      // WhatsApp message #2: packed & on its way, with the tracking link.
+      await dispatchOnce(order, "wa_dispatched_sent", notify.sendDispatched);
+    } else if (status === "OUT_FOR_DELIVERY") {
       await dispatchOnce(order, "wa_wf2_sent", notify.sendOutForDelivery);
     } else if (status === "DELIVERED") {
       // Stamp delivery in Wix so the review queue (WF4) can find it in 3 days.

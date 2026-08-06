@@ -15,7 +15,10 @@
 //    template with a trailing {{1}}; we send only the SUFFIX that fills {{1}}.
 //    e.g. template url "https://track.velocity/{{1}}" + suffix "AWB123".
 
-const LANG = process.env.TPL_LANG || "en_US";
+// Every approved Viora template is in language "en" (verified against the WABA
+// via /api/templates). A wrong code is the #1 cause of 132001 "template does not
+// exist", so default to "en" (overridable per-deploy with TPL_LANG).
+const LANG = process.env.TPL_LANG || "en";
 
 // order_confirmation_v1 was approved with an IMAGE header, so every send must
 // include a media header pointing at a public HTTPS image. Overridable via env;
@@ -30,25 +33,36 @@ export default {
     headerImageUrl: HEADER_IMAGE_URL, // template has an IMAGE header
     // body {{1}} name, {{2}} order id, {{3}} amount, {{4}} payment mode
   },
+  // Order dispatched / picked up — the tracking link is the BODY variable {{3}}
+  // (this template has NO url button); IMAGE header like the others.
+  dispatched: {
+    name: process.env.TPL_ORDER_DISPATCHED || "order_dispatched_v1",
+    lang: LANG,
+    headerImageUrl: HEADER_IMAGE_URL, // template has an IMAGE header
+    // body {{1}} name, {{2}} order id, {{3}} tracking URL
+  },
   outForDelivery: {
     name: process.env.TPL_OUT_FOR_DELIVERY || "out_for_delivery_v1",
     lang: LANG,
-    // body {{1}} name, {{2}} order id, {{3}} product, {{4}} amount
-    // button url {{1}} tracking suffix
+    headerImageUrl: HEADER_IMAGE_URL, // template has an IMAGE header
+    // body {{1}} name, {{2}} order id, {{3}} product, {{4}} amount ; NO button
   },
   delivered: {
     name: process.env.TPL_ORDER_DELIVERED || "order_delivered_v1",
     lang: LANG,
+    headerImageUrl: HEADER_IMAGE_URL, // template has an IMAGE header
     // body {{1}} name, {{2}} order id
   },
   reviewRequest: {
     name: process.env.TPL_REVIEW_REQUEST || "review_request_v1",
     lang: LANG,
+    headerImageUrl: HEADER_IMAGE_URL, // template has an IMAGE header
     // body {{1}} name, {{2}} order id ; button url {{1}} product slug
   },
   abandonedCart: {
     name: process.env.TPL_ABANDONED_CART || "abandoned_cart_v1",
     lang: LANG,
+    headerImageUrl: HEADER_IMAGE_URL, // template has an IMAGE header
     // body {{1}} name, {{2}} product, {{3}} value ; button url {{1}} cart token
   },
   orderCancelled: {

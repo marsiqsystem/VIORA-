@@ -49,9 +49,18 @@ const money = (v) => {
 // `renderTemplateBody` and filled with the params we sent), so it matches what
 // the customer received word-for-word. The `render.*` map below is only a
 // FALLBACK used if Meta can't be reached — never the primary text.
+// Build the customer-facing tracking link from the AWB, matching Velocity's
+// track base (same default as lib/crm/velocity.js). Falls back to the site.
+const TRACK_BASE = (process.env.VELOCITY_TRACK_URL_BASE || "https://shipfastt.in/track").replace(/\/$/, "");
+const trackingLink = (o) =>
+  String(o.trackingUrl || "").trim() ||
+  (o.awb ? `${TRACK_BASE}/${o.awb}` : "https://viorajewel.in/orders");
+
 const render = {
   orderConfirmation: (o) =>
     `✅ Hi ${o.name}, your Viora order #${o.orderId} for ${money(o.amount)} (${o.paymentMode || "—"}) is confirmed! 💛 Tap *Confirm* to lock it in, or *Cancel* if you've changed your mind.`,
+  dispatched: (o) =>
+    `🚚 Hi ${o.name}, great news! Your Viora Jewels order #${o.orderId} has been packed and *dispatched* and is on its way to you. Track it here: ${trackingLink(o)} 💎`,
   outForDelivery: (o) =>
     `🚚 Hi ${o.name}, your order #${o.orderId} (${o.product}) worth ${money(o.amount)} is *out for delivery* today! Tap *Track Order* to follow it live.`,
   delivered: (o) =>
@@ -133,68 +142,91 @@ async function sendOrderConfirmation(o) {
   return res;
 }
 
+// --- Workflow: order dispatched (fires when Velocity marks it in-transit) ------
+// body {{1}} name, {{2}} order id, {{3}} tracking URL. IMAGE header, NO button.
+async function sendDispatched(o) {
+  const bodyParams = [o.name, o.orderId, trackingLink(o)];
+  const headerImageUrl = o.productImage || T.dispatched.headerImageUrl;
+  const res = await sendTemplate({
+    to: o.phone,
+    templateName: T.dispatched.name,
+    languageCode: T.dispatched.lang,
+    headerImageUrl,
+    bodyParams,
+  });
+  const text = await realText(T.dispatched.name, T.dispatched.lang, bodyParams, render.dispatched(o));
+  await logOutbound(o.phone, text, res, o.name, headerImageUrl);
+  return res;
+}
+
 // --- Workflow 2: out for delivery --------------------------------------------
-// body {{1}} name, {{2}} order id, {{3}} product, {{4}} amount ; button url {{1}} tracking suffix.
+// IMAGE header ; body {{1}} name, {{2}} order id, {{3}} product, {{4}} amount. NO button.
 async function sendOutForDelivery(o) {
   const bodyParams = [o.name, o.orderId, o.product, o.amount];
+  const headerImageUrl = o.productImage || T.outForDelivery.headerImageUrl;
   const res = await sendTemplate({
     to: o.phone,
     templateName: T.outForDelivery.name,
     languageCode: T.outForDelivery.lang,
+    headerImageUrl,
     bodyParams,
-    // The AWB is the suffix that fills the template button's tracking URL {{1}}.
-    urlButtons: [{ index: "0", param: o.awb }],
   });
   const text = await realText(T.outForDelivery.name, T.outForDelivery.lang, bodyParams, render.outForDelivery(o));
-  await logOutbound(o.phone, text, res, o.name);
+  await logOutbound(o.phone, text, res, o.name, headerImageUrl);
   return res;
 }
 
 // --- Workflow 3: delivered ----------------------------------------------------
-// body {{1}} name, {{2}} order id.
+// IMAGE header ; body {{1}} name, {{2}} order id.
 async function sendDelivered(o) {
   const bodyParams = [o.name, o.orderId];
+  const headerImageUrl = o.productImage || T.delivered.headerImageUrl;
   const res = await sendTemplate({
     to: o.phone,
     templateName: T.delivered.name,
     languageCode: T.delivered.lang,
+    headerImageUrl,
     bodyParams,
   });
   const text = await realText(T.delivered.name, T.delivered.lang, bodyParams, render.delivered(o));
-  await logOutbound(o.phone, text, res, o.name);
+  await logOutbound(o.phone, text, res, o.name, headerImageUrl);
   return res;
 }
 
 // --- Workflow 4: review request (2-3 days post-delivery) ---------------------
-// body {{1}} name, {{2}} order id ; button url {{1}} product slug.
+// IMAGE header ; body {{1}} name, {{2}} order id ; button url {{1}} product slug.
 async function sendReviewRequest(o) {
   const bodyParams = [o.name, o.orderId];
+  const headerImageUrl = o.productImage || T.reviewRequest.headerImageUrl;
   const res = await sendTemplate({
     to: o.phone,
     templateName: T.reviewRequest.name,
     languageCode: T.reviewRequest.lang,
+    headerImageUrl,
     bodyParams,
     // TODO: pass the real Wix product slug through the store instead of slugifying the name.
     urlButtons: [{ index: "0", param: slugify(o.product) }],
   });
   const text = await realText(T.reviewRequest.name, T.reviewRequest.lang, bodyParams, render.reviewRequest(o));
-  await logOutbound(o.phone, text, res, o.name);
+  await logOutbound(o.phone, text, res, o.name, headerImageUrl);
   return res;
 }
 
 // --- Workflow 5: abandoned cart ----------------------------------------------
-// body {{1}} name, {{2}} product, {{3}} value ; button url {{1}} cart recovery token.
+// IMAGE header ; body {{1}} name, {{2}} product, {{3}} value ; button url {{1}} cart recovery token.
 async function sendAbandonedCart(o) {
   const bodyParams = [o.name, o.product, o.amount];
+  const headerImageUrl = o.productImage || T.abandonedCart.headerImageUrl;
   const res = await sendTemplate({
     to: o.phone,
     templateName: T.abandonedCart.name,
     languageCode: T.abandonedCart.lang,
+    headerImageUrl,
     bodyParams,
     urlButtons: [{ index: "0", param: o.cartToken }],
   });
   const text = await realText(T.abandonedCart.name, T.abandonedCart.lang, bodyParams, render.abandonedCart(o));
-  await logOutbound(o.phone, text, res, o.name);
+  await logOutbound(o.phone, text, res, o.name, headerImageUrl);
   return res;
 }
 
@@ -223,6 +255,7 @@ export {
   slugify,
   prettyPayment,
   sendOrderConfirmation,
+  sendDispatched,
   sendOutForDelivery,
   sendDelivered,
   sendReviewRequest,

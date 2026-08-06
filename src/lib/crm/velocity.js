@@ -368,12 +368,27 @@ async function createOrderOnly(o) {
  * Map a raw Velocity status webhook to our internal status enum. We only act on
  * the two states that trigger a customer message (WF2/WF3); everything else is
  * OTHER and acknowledged with a 200.
- * @returns {"OUT_FOR_DELIVERY"|"DELIVERED"|"CANCELLED"|"OTHER"}
+ * @returns {"DISPATCHED"|"OUT_FOR_DELIVERY"|"DELIVERED"|"CANCELLED"|"OTHER"}
  */
 function normalizeStatus(raw) {
   const s = String(raw || "").toUpperCase().replace(/[\s-]+/g, "_");
+  // Check OUT_FOR_DELIVERY before the dispatched synonyms so an "out for
+  // delivery" scan is never misread as a first dispatch.
   if (["OUT_FOR_DELIVERY", "OFD", "OUT_FOR_DELIVER"].includes(s)) return "OUT_FOR_DELIVERY";
   if (["DELIVERED", "DELIVER", "COMPLETED"].includes(s)) return "DELIVERED";
+  // Order packed & handed to the courier / moving = "dispatched" (WhatsApp
+  // message #2 with the tracking link). Velocity's dashboard shows this as
+  // "In transit"; other carriers phrase it as shipped / picked up / manifested.
+  if (
+    [
+      "IN_TRANSIT", "INTRANSIT", "TRANSIT",
+      "SHIPPED", "DISPATCHED", "DISPATCH",
+      "PICKED_UP", "PICKUP", "PICKUP_DONE", "PICKUP_COMPLETE", "PICKUP_COMPLETED",
+      "SHIPMENT_PICKED_UP", "MANIFESTED", "IN_TRANSIT_",
+    ].includes(s)
+  ) {
+    return "DISPATCHED";
+  }
   // Order cancelled at the fulfilment stage. RTO (return-to-origin) is a distinct
   // state and deliberately NOT mapped here — we don't message "cancelled" for a return.
   if (["CANCELLED", "CANCELED", "CANCEL"].includes(s)) return "CANCELLED";
