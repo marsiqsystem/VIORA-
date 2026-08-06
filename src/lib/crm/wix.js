@@ -68,6 +68,10 @@ function normalize(wixOrder) {
     phone: info.phone,
     name: info.customerName,
     product: info.product,
+    // The product photo — so dispatched/out-for-delivery/delivered messages show
+    // the SAME product image the confirmation did, not the fallback logo. (Was
+    // dropped here before, which is why status messages fell back to the logo.)
+    productImage: info.productImage,
     amount: info.amount,
     paymentMode: info.paymentMode,
     awb: flags.awb || null,
