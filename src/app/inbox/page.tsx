@@ -17,6 +17,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const MOCK = process.env.NEXT_PUBLIC_INBOX_MOCK === "1";
 const POLL_MS = 4000;
 const KEY_STORE = "viora_inbox_key";
+// Every approved Viora template has an IMAGE header; when sending one manually
+// from a chat we attach this default header image (the brand logo) so the send
+// isn't rejected for a missing media header. Matches the server default.
+const DEFAULT_HEADER_IMAGE =
+  process.env.NEXT_PUBLIC_WHATSAPP_HEADER_IMAGE || "https://viorajewel.in/email-logo.png";
 
 type Conversation = {
   phone: string;
@@ -197,6 +202,9 @@ export default function InboxPage() {
   const [tplLoading, setTplLoading] = useState(false);
   const [tplError, setTplError] = useState("");
   const [tplSending, setTplSending] = useState("");
+  const [tplPick, setTplPick] = useState<Template | null>(null); // template being filled
+  const [tplParams, setTplParams] = useState<string[]>([]); // body {{n}} values
+  const [tplBtn, setTplBtn] = useState(""); // URL-button suffix (templates that have one)
   const [headerMenu, setHeaderMenu] = useState(false);
   const [msgMenuId, setMsgMenuId] = useState<string | null>(null);
 
@@ -345,6 +353,7 @@ export default function InboxPage() {
     setTplOpen(true);
     setAttachOpen(false);
     setTplError("");
+    setTplPick(null);
     if (tpls.length) return;
     setTplLoading(true);
     try {
@@ -359,25 +368,46 @@ export default function InboxPage() {
     }
   }, [api, tpls.length]);
 
-  const sendTemplateToChat = useCallback(async (tpl: Template) => {
+  // Open the fill-in form for a template: {{1}} pre-filled with the customer's
+  // name, the rest blank for the operator to type.
+  const pickTemplate = useCallback((tpl: Template) => {
+    const custName = thread?.name || "";
+    setTplPick(tpl);
+    setTplParams(Array.from({ length: tpl.bodyVars }, (_, i) => (i === 0 ? custName : "")));
+    setTplBtn("");
+    setSendError("");
+  }, [thread?.name]);
+
+  // Send the currently-picked template with the operator-entered variables.
+  const sendPickedTemplate = useCallback(async () => {
     const phone = activeRef.current;
-    if (!phone || tplSending) return;
+    const tpl = tplPick;
+    if (!phone || !tpl || tplSending) return;
     setTplSending(tpl.name);
     setSendError("");
     try {
-      // {{1}} auto-fills the customer's name; other body vars go out blank here
-      // (use the Broadcast page for multi-variable / image templates).
-      const custName = thread?.name || "";
-      const bodyParams = tpl.bodyVars >= 1 ? [custName] : [];
       const res = await api("/api/inbox/send-template", {
         method: "POST",
-        body: JSON.stringify({ to: phone, templateName: tpl.name, languageCode: tpl.language, bodyParams }),
+        body: JSON.stringify({
+          to: phone,
+          templateName: tpl.name,
+          languageCode: tpl.language,
+          bodyParams: tplParams,
+          // Every Viora template has an IMAGE header — attach the brand logo so
+          // the send isn't rejected for a missing media header.
+          ...(tpl.headerFormat === "IMAGE" ? { headerImageUrl: DEFAULT_HEADER_IMAGE } : {}),
+          // A dynamic URL button (review / cart) takes a suffix.
+          ...(tpl.hasUrlButton && tplBtn.trim()
+            ? { urlButtons: [{ index: String(tpl.urlButtonIndex ?? 0), param: tplBtn.trim() }] }
+            : {}),
+        }),
       });
       const data = await res.json();
       if (!data.ok) {
         setSendError(typeof data.error === "string" ? data.error : "Template send failed.");
       } else {
         setTplOpen(false);
+        setTplPick(null);
         await loadThread(phone);
         loadConvs();
       }
@@ -386,7 +416,7 @@ export default function InboxPage() {
     } finally {
       setTplSending("");
     }
-  }, [api, tplSending, thread?.name, loadThread, loadConvs]);
+  }, [api, tplPick, tplParams, tplBtn, tplSending, loadThread, loadConvs]);
 
   // --- track viewport so we can switch to a WhatsApp-style single-pane on phones ---
   useEffect(() => {
@@ -871,36 +901,91 @@ export default function InboxPage() {
               <h3 style={{ margin: 0, color: C.plum, fontSize: 22, fontFamily: SERIF, fontWeight: 600 }}>Send a template</h3>
               <button onClick={() => setTplOpen(false)} style={{ background: "transparent", border: "none", fontSize: 24, lineHeight: 1, cursor: "pointer", color: C.sub }}>×</button>
             </div>
-            <p style={{ color: C.sub, fontSize: 12.5, margin: "0 0 10px" }}>
-              Approved templates reach the customer even outside the 24-hour window. <b>{"{{1}}"}</b> auto-fills {thread?.name || "the customer"}’s name.
-            </p>
-            {tplLoading && <div style={{ color: C.sub, fontSize: 13, padding: "12px 0" }}>Loading templates…</div>}
-            {tplError && <div style={{ color: "#c0392b", fontSize: 13 }}>{tplError}</div>}
-            {!tplLoading && !tplError && tpls.length === 0 && <div style={{ color: C.sub, fontSize: 13 }}>No approved templates found.</div>}
-            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
-              {tpls.map((t) => {
-                const quick = t.headerFormat !== "IMAGE" && t.bodyVars <= 1;
+            {!tplPick ? (
+              <>
+                <p style={{ color: C.sub, fontSize: 12.5, margin: "0 0 10px" }}>
+                  Pick a template — it reaches the customer even outside the 24-hour window. <b>{"{{1}}"}</b> pre-fills {thread?.name || "the customer"}’s name; you fill any other fields.
+                </p>
+                {tplLoading && <div style={{ color: C.sub, fontSize: 13, padding: "12px 0" }}>Loading templates…</div>}
+                {tplError && <div style={{ color: "#c0392b", fontSize: 13 }}>{tplError}</div>}
+                {!tplLoading && !tplError && tpls.length === 0 && <div style={{ color: C.sub, fontSize: 13 }}>No approved templates found.</div>}
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
+                  {tpls.map((t) => (
+                    <button
+                      key={`${t.name}:${t.language}`}
+                      onClick={() => pickTemplate(t)}
+                      style={{ textAlign: "left", cursor: "pointer", border: `1px solid ${C.border}`, background: C.bgList, borderRadius: 12, padding: "10px 12px", transition: "border-color .12s" }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                        <strong style={{ fontSize: 13, color: C.text }}>{t.name}</strong>
+                        <span style={{ display: "flex", gap: 5 }}>
+                          {t.headerFormat === "IMAGE" && <span style={{ fontSize: 10, color: C.sub, border: `1px solid ${C.border}`, borderRadius: 6, padding: "1px 6px" }}>🖼</span>}
+                          <span style={{ fontSize: 10, color: C.sub, border: `1px solid ${C.border}`, borderRadius: 6, padding: "1px 6px" }}>{t.language}</span>
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 12.5, color: C.sub, marginTop: 4, whiteSpace: "pre-wrap", maxHeight: 66, overflow: "hidden" }}>{t.bodyText}</div>
+                      <div style={{ fontSize: 11, color: C.goldDark, marginTop: 8, fontWeight: 600 }}>
+                        {t.bodyVars > 0 ? `${t.bodyVars} field${t.bodyVars === 1 ? "" : "s"} to fill →` : "Ready to send →"}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              (() => {
+                const t = tplPick;
+                const filled = tplParams.every((v) => v.trim()) && (!t.hasUrlButton || !!tplBtn.trim());
                 const busy = tplSending === t.name;
+                // Show the body with each {{n}} replaced by the live value so the
+                // operator sees exactly what the customer will get.
+                const preview = t.bodyText.replace(/\{\{\s*(\d+)\s*\}\}/g, (_, n) => tplParams[Number(n) - 1] || `{{${n}}}`);
                 return (
-                  <div key={`${t.name}:${t.language}`} style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: "10px 12px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                      <strong style={{ fontSize: 13 }}>{t.name}</strong>
+                  <>
+                    <button onClick={() => setTplPick(null)} style={{ background: "transparent", border: "none", color: C.plum, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: "2px 0 10px", display: "inline-flex", alignItems: "center", gap: 4 }}>‹ All templates</button>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                      <strong style={{ fontSize: 14, color: C.text }}>{t.name}</strong>
                       <span style={{ fontSize: 10, color: C.sub, border: `1px solid ${C.border}`, borderRadius: 6, padding: "1px 6px" }}>{t.language}</span>
                     </div>
-                    <div style={{ fontSize: 12.5, color: C.sub, marginTop: 4, whiteSpace: "pre-wrap", maxHeight: 66, overflow: "hidden" }}>{t.bodyText}</div>
-                    {quick ? (
-                      <button onClick={() => sendTemplateToChat(t)} disabled={!!tplSending} style={{ ...btn(C.plum), width: "auto", padding: "7px 18px", fontSize: 13, marginTop: 8, opacity: tplSending ? 0.6 : 1 }}>
-                        {busy ? "Sending…" : "Send"}
-                      </button>
-                    ) : (
-                      <div style={{ fontSize: 11.5, color: C.sub, marginTop: 8 }}>
-                        🖼️ Image / multi-field template — send it from the <a href="/broadcast" style={{ color: C.plum }}>Broadcast</a> page.
+                    {t.headerFormat === "IMAGE" && (
+                      <div style={{ fontSize: 11.5, color: C.sub, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+                        <span>🖼</span> Brand image header is attached automatically.
                       </div>
                     )}
-                  </div>
+                    {tplParams.map((v, i) => (
+                      <div key={i} style={{ marginBottom: 10 }}>
+                        <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, color: C.sub, marginBottom: 4 }}>
+                          Variable {`{{${i + 1}}}`}{i === 0 ? " — customer name" : ""}
+                        </label>
+                        <input
+                          value={v}
+                          onChange={(e) => setTplParams((p) => p.map((x, j) => (j === i ? e.target.value : x)))}
+                          placeholder={i === 0 ? "Customer name" : `Value for {{${i + 1}}}`}
+                          style={{ width: "100%", padding: "9px 11px", borderRadius: 9, border: `1px solid ${C.border}`, fontSize: 14, boxSizing: "border-box" }}
+                        />
+                      </div>
+                    ))}
+                    {t.hasUrlButton && (
+                      <div style={{ marginBottom: 10 }}>
+                        <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, color: C.sub, marginBottom: 4 }}>Button link suffix</label>
+                        <input
+                          value={tplBtn}
+                          onChange={(e) => setTplBtn(e.target.value)}
+                          placeholder="e.g. a product slug or code"
+                          style={{ width: "100%", padding: "9px 11px", borderRadius: 9, border: `1px solid ${C.border}`, fontSize: 14, boxSizing: "border-box" }}
+                        />
+                      </div>
+                    )}
+                    <div style={{ background: C.bgChat, border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 11px", fontSize: 12.5, color: C.text, whiteSpace: "pre-wrap", margin: "4px 0 14px", maxHeight: 140, overflowY: "auto" }}>
+                      {preview}
+                    </div>
+                    <button onClick={sendPickedTemplate} disabled={!filled || !!tplSending} style={{ ...btn(C.plum), padding: "11px 0", opacity: !filled || tplSending ? 0.5 : 1, cursor: !filled || tplSending ? "not-allowed" : "pointer" }}>
+                      {busy ? "Sending…" : "Send to " + (thread?.name || "customer")}
+                    </button>
+                    {!filled && <div style={{ fontSize: 11, color: C.sub, marginTop: 8, textAlign: "center" }}>Fill every field to enable send.</div>}
+                  </>
                 );
-              })}
-            </div>
+              })()
+            )}
           </div>
         </div>
       )}

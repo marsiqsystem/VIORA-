@@ -38,12 +38,19 @@ export async function POST(req: NextRequest) {
   const languageCode = String(body?.languageCode || "en_US").trim();
   const headerImageUrl = body?.headerImageUrl ? String(body.headerImageUrl) : undefined;
   const bodyParams = Array.isArray(body?.bodyParams) ? body.bodyParams.map((v: any) => String(v ?? "")) : [];
+  // Optional dynamic URL-button suffixes (e.g. review link slug) — one entry per
+  // button: { index, param }. Ignored for templates without a URL button.
+  const urlButtons = Array.isArray(body?.urlButtons)
+    ? body.urlButtons
+        .filter((b: any) => b && b.param != null && String(b.param) !== "")
+        .map((b: any) => ({ index: String(b.index ?? "0"), param: String(b.param) }))
+    : [];
 
   if (!to || !templateName) {
     return NextResponse.json({ ok: false, error: "Missing `to` or `templateName`." }, { status: 400 });
   }
 
-  const sent: any = await sendTemplate({ to, templateName, languageCode, headerImageUrl, bodyParams });
+  const sent: any = await sendTemplate({ to, templateName, languageCode, headerImageUrl, bodyParams, urlButtons });
   const wamid = sent?.data?.messages?.[0]?.id;
 
   // Keep the existing name on the conversation (don't overwrite with a template),
