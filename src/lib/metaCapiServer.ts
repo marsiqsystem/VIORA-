@@ -77,7 +77,12 @@ export async function sendServerCapi(opts: ServerCapiOptions): Promise<boolean> 
       },
     ],
   };
-  if (testEventCode) payload.test_event_code = testEventCode;
+  if (testEventCode) {
+    payload.test_event_code = testEventCode;
+    console.warn(
+      `[capi] ⚠ META_TEST_EVENT_CODE is SET (${testEventCode}) — "${opts.eventName}" is going to Meta's TEST stream and will NOT count as a real conversion. Remove it from prod after testing.`
+    );
+  }
 
   try {
     const res = await fetch(

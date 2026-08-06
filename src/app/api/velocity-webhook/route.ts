@@ -19,6 +19,7 @@ import * as velocity from "@/lib/crm/velocity";
 import * as wix from "@/lib/crm/wix";
 import * as notify from "@/lib/crm/notify";
 import * as idempotency from "@/lib/crm/idempotency";
+import * as reviewQueue from "@/lib/crm/reviewQueue";
 import { dispatchCancellationOnce } from "@/lib/crm/cancel";
 
 export const runtime = "nodejs";
@@ -111,9 +112,16 @@ export async function POST(req: NextRequest) {
     } else if (status === "OUT_FOR_DELIVERY") {
       await dispatchOnce(order, "wa_wf2_sent", notify.sendOutForDelivery);
     } else if (status === "DELIVERED") {
-      // Stamp delivery in Wix so the review queue (WF4) can find it in 3 days.
+      // Stamp delivery in Wix (best-effort; storefront timeline) …
       await wix.markDelivered(order.orderGuid || order.orderId, Date.now());
       await dispatchOnce(order, "wa_wf3_sent", notify.sendDelivered);
+      // … and queue the WF4 review for 3 days later. ONLY a real DELIVERED gets
+      // here, so in-transit orders are never queued for a review.
+      await reviewQueue.enqueueDelivered(order, Date.now());
+    } else if (status === "RTO") {
+      // Returned to origin — never send a review. Remove it from the review
+      // queue in case it was briefly marked delivered before the return.
+      await reviewQueue.dequeue(order.orderId);
     } else if (status === "CANCELLED") {
       // Cancellation can also be triggered from Wix (see /api/wix-cancel-webhook).
       // Dedupe on a SHARED KV key so cancelling in one system that syncs to the

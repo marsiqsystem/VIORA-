@@ -370,10 +370,13 @@ async function createOrderOnly(o) {
  * Map a raw Velocity status webhook to our internal status enum. We only act on
  * the two states that trigger a customer message (WF2/WF3); everything else is
  * OTHER and acknowledged with a 200.
- * @returns {"DISPATCHED"|"OUT_FOR_DELIVERY"|"DELIVERED"|"CANCELLED"|"OTHER"}
+ * @returns {"DISPATCHED"|"OUT_FOR_DELIVERY"|"DELIVERED"|"RTO"|"CANCELLED"|"OTHER"}
  */
 function normalizeStatus(raw) {
   const s = String(raw || "").toUpperCase().replace(/[\s-]+/g, "_");
+  // RTO / returned FIRST — a returned shipment must never be mistaken for a
+  // delivery/dispatch (any "RTO_*" or "RETURN*" state). It suppresses the review.
+  if (s.startsWith("RTO") || s.startsWith("RETURN")) return "RTO";
   // Check OUT_FOR_DELIVERY before the dispatched synonyms so an "out for
   // delivery" scan is never misread as a first dispatch.
   if (["OUT_FOR_DELIVERY", "OFD", "OUT_FOR_DELIVER"].includes(s)) return "OUT_FOR_DELIVERY";
