@@ -107,7 +107,13 @@ async function findOrderByNumber(number) {
   if (number == null || String(number).trim() === "") return null;
   // Velocity echoes our order_id back (e.g. "VJ-#10207"); strip the "VJ-#"
   // prefix so we search Wix by the bare number (10207).
-  const num = String(number).replace(/^\s*VJ-#?/i, "").trim();
+  let num = String(number).replace(/^\s*VJ-#?/i, "").trim();
+  // When an order is re-created in Velocity (clone), it keeps our reference but
+  // appends a clone suffix: "VJ-#10228-1", "VJ-#10228-2"… Strip that trailing
+  // "-N" so the clone still correlates to the ORIGINAL Wix order (10228) and its
+  // dispatched/delivered messages fire. Wix order numbers are plain integers, so
+  // a hyphen can only be a clone suffix — this is safe.
+  num = num.replace(/-\d+$/, "").trim();
   if (!num) return null;
   if (isMock()) {
     for (const rec of mockDB.values()) if (String(rec.orderId) === num) return rec;
