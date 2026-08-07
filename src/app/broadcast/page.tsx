@@ -9,8 +9,10 @@
 // drives the send in small batches so it shows live progress.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import EmailBroadcast from "./EmailBroadcast";
 
 const KEY_STORE = "viora_inbox_key"; // shared with /inbox
+type Channel = "whatsapp" | "email";
 
 // Sending speed → client batch size (server caps at 60/req + throttles internally).
 const SPEEDS = {
@@ -112,6 +114,7 @@ export default function BroadcastPage() {
   const [needsSetup, setNeedsSetup] = useState(false);
   const [authError, setAuthError] = useState("");
 
+  const [channel, setChannel] = useState<Channel>("whatsapp");
   const [cc, setCc] = useState("91");
   const [fileName, setFileName] = useState("");
   const [headers, setHeaders] = useState<string[]>([]);
@@ -355,7 +358,7 @@ export default function BroadcastPage() {
       <header style={{ position: "sticky", top: 0, zIndex: 2, background: HEADER_BG, color: "#fff", padding: "14px 22px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `2px solid ${C.gold}`, gap: 12 }}>
         <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.05, minWidth: 0 }}>
           <span style={{ fontFamily: SERIF, fontSize: 26, fontWeight: 600, letterSpacing: 0.3 }}>Viora Broadcast</span>
-          <span style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: C.gold, marginTop: 3 }}>Bulk WhatsApp Marketing</span>
+          <span style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: C.gold, marginTop: 3 }}>{channel === "email" ? "Bulk Email Marketing" : "Bulk WhatsApp Marketing"}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
           <span style={{ display: "none", fontSize: 11, fontWeight: 600, color: C.gold, letterSpacing: 0.5, alignItems: "center", gap: 6 }} className="bc-livepill">
@@ -369,6 +372,31 @@ export default function BroadcastPage() {
       </header>
 
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "22px 18px 60px", display: "flex", flexDirection: "column", gap: 18 }}>
+        {/* Channel switcher: WhatsApp (templates) vs Email (free-form) */}
+        <div style={{ display: "flex", gap: 8, background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 6, boxShadow: "0 4px 20px rgba(90,10,24,.05)" }}>
+          {([
+            { id: "whatsapp" as Channel, label: "💬 WhatsApp", note: "Approved templates" },
+            { id: "email" as Channel, label: "📧 Email", note: "Free-form, no approval" },
+          ]).map((t) => {
+            const on = channel === t.id;
+            return (
+              <button key={t.id} onClick={() => setChannel(t.id)}
+                style={{
+                  flex: 1, cursor: "pointer", textAlign: "center",
+                  border: `1.5px solid ${on ? C.plum : "transparent"}`,
+                  background: on ? "rgba(155,27,48,.05)" : "transparent",
+                  borderRadius: 9, padding: "10px 8px", transition: "border-color .12s, background .12s",
+                }}>
+                <div style={{ fontWeight: 700, fontSize: 14.5, color: on ? C.plum : C.text }}>{t.label}</div>
+                <div style={{ fontSize: 11, color: C.sub, marginTop: 2 }}>{t.note}</div>
+              </button>
+            );
+          })}
+        </div>
+
+        {channel === "email" && <EmailBroadcast broadcastKey={key} />}
+
+        {channel === "whatsapp" && (<>
         {/* STEP 1: CSV */}
         <Card step={1} title="Upload customer CSV">
           <p style={{ color: C.sub, fontSize: 13, margin: "0 0 14px" }}>
@@ -619,6 +647,7 @@ export default function BroadcastPage() {
             Each message also appears in that customer’s <a href="/inbox" style={{ color: C.plum }}>Inbox</a> thread.
           </p>
         </Card>
+        </>)}
       </div>
     </div>
   );
