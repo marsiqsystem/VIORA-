@@ -124,6 +124,35 @@ async function processOrder(body: any, trace: any = { steps: [] }) {
   // flag write); the human number is only for display. Fall back to the number.
   const wixKey = info.orderGuid || info.orderId;
 
+  // 2.5) AUTHORITATIVE payment method + amount.
+  // The order_placed webhook body is a SNAPSHOT taken before Razorpay settles and
+  // the prepaid ₹50 discount commits, so a prepaid ₹549 order can arrive labelled
+  // COD ₹599 — which would make Velocity try to COLLECT cash on an already-paid
+  // order (a brand-reputation hit). Re-read the order straight from Wix: its
+  // customFields carry the real payment method + paid amount that checkout stamped
+  // at creation, so this is correct even mid-settlement. Best-effort — any failure
+  // leaves the snapshot values untouched, so this can never break the webhook.
+  try {
+    const fresh: any = await wix.getOrder(wixKey);
+    if (fresh) {
+      if (fresh.paymentMode && fresh.paymentMode !== order.paymentMode) {
+        console.log(
+          `[wix-webhook] payment mode corrected from Wix: ${order.paymentMode} -> ${fresh.paymentMode} (order ${info.orderId})`
+        );
+        order.paymentMode = fresh.paymentMode;
+      }
+      if (fresh.amount && fresh.amount !== order.amount) {
+        console.log(
+          `[wix-webhook] amount corrected from Wix: ${order.amount} -> ${fresh.amount} (order ${info.orderId})`
+        );
+        order.amount = fresh.amount;
+      }
+      trace.authoritative = { paymentMode: order.paymentMode, amount: order.amount };
+    }
+  } catch (e: any) {
+    console.warn("[wix-webhook] authoritative order re-read failed:", e?.message || e);
+  }
+
   // 3) Velocity.
   // DEFAULT = CREATE-ONLY: call Velocity's /forward-order endpoint so the order
   // lands in Velocity's "New Orders" list with NO courier, NO AWB, and NO wallet

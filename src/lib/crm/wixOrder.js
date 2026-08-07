@@ -68,6 +68,30 @@ function moneyValue(m) {
   return m;
 }
 
+/**
+ * Read a Wix order customField value by a fuzzy title match. Our checkout writes
+ * these at updateCheckout (BEFORE the order is created), so they are present and
+ * correct on the order from t=0 — unlike paymentStatus/total, which only settle
+ * a few seconds later. Wix stores them as [{ title, value }]. Also tolerates a
+ * `customFields` object map keyed by title. Returns undefined when absent.
+ */
+function customFieldValue(source = {}, titleIncludes) {
+  const list = source.customFields || source.customField;
+  const want = String(titleIncludes).toLowerCase();
+  if (Array.isArray(list)) {
+    const hit = list.find((f) => String(f?.title || f?.name || "").toLowerCase().includes(want));
+    return hit ? firstDefined(hit.value, hit.translatedValue) : undefined;
+  }
+  if (list && typeof list === "object") {
+    for (const [k, v] of Object.entries(list)) {
+      if (String(k).toLowerCase().includes(want)) {
+        return typeof v === "object" ? firstDefined(v.value, v.translatedValue) : v;
+      }
+    }
+  }
+  return undefined;
+}
+
 /** Normalize a Wix media reference to a public https image URL (or undefined). */
 function toWixImageUrl(raw) {
   if (!raw || typeof raw !== "string") return undefined;
@@ -101,6 +125,23 @@ const deepFindItems = (root) =>
  * everything else as COD (cash collected on delivery).
  */
 function normalizePaymentMode(order = {}, body = {}) {
+  // 1) DEFINITIVE — the "Payment Method" custom field + buyerNote our checkout
+  //    stamps at updateCheckout. These are on the order from the moment it's
+  //    created, so they are correct even when the order_placed webhook fires
+  //    BEFORE Razorpay settles and the prepaid discount commits. Without this a
+  //    prepaid order snapshots as NOT_PAID and gets mislabelled COD — which would
+  //    make Velocity try to COLLECT cash on an order the customer already paid.
+  const cf = firstDefined(
+    customFieldValue(order, "payment method"),
+    customFieldValue(body, "payment method")
+  );
+  const note = String(firstDefined(order.buyerNote, body.buyerNote, order.buyer_note, "") || "");
+  const definitive = `${cf || ""} ${note}`.toUpperCase();
+  if (definitive.includes("PREPAID") || definitive.includes("RAZORPAY") || definitive.includes("ONLINE"))
+    return "PREPAID";
+  if (definitive.includes("COD") || definitive.includes("CASH")) return "COD";
+
+  // 2) Explicit paymentMode/paymentMethod fields (other Wix shapes).
   const explicit = firstDefined(
     body.paymentMode,
     order.paymentMode,
@@ -113,6 +154,8 @@ function normalizePaymentMode(order = {}, body = {}) {
       return "PREPAID";
     if (s.includes("COD") || s.includes("CASH")) return "COD";
   }
+
+  // 3) Last resort — a fully-paid order is prepaid, everything else COD.
   const status = String(
     firstDefined(
       order.paymentStatus,
@@ -122,6 +165,27 @@ function normalizePaymentMode(order = {}, body = {}) {
     ) || ""
   ).toUpperCase();
   return status === "PAID" || status === "FULLY_PAID" ? "PREPAID" : "COD";
+}
+
+/**
+ * The real amount to bill/collect. For a PREPAID order this is what the customer
+ * actually paid online (the "Amount Paid (Razorpay)" custom field, e.g. ₹549 —
+ * the ₹599 subtotal minus the ₹50 online-payment discount), which is stamped at
+ * checkout and therefore race-proof. Falls back to the order total. This is the
+ * figure Velocity should show as sub_total, with nothing to collect on delivery.
+ */
+function extractBillableAmount(order = {}, body = {}, paymentMode) {
+  if (paymentMode === "PREPAID") {
+    const paid = firstDefined(
+      customFieldValue(order, "amount paid"),
+      customFieldValue(body, "amount paid")
+    );
+    if (paid != null) {
+      const cleaned = String(paid).replace(/[^\d.]/g, "");
+      if (cleaned) return cleaned;
+    }
+  }
+  return extractAmount(order, body);
 }
 
 /** Pull a display total from the several places Wix may put it. */
@@ -282,6 +346,8 @@ function extractOrderInfo(body, defaultCountryCode = "91") {
       : first.name
     : firstDefined(b.product, b.productName);
 
+  const paymentMode = normalizePaymentMode(order, b);
+
   return {
     eventType,
     orderId: orderId != null ? String(orderId) : undefined,
@@ -292,8 +358,9 @@ function extractOrderInfo(body, defaultCountryCode = "91") {
     rawPhone: rawPhone || undefined,
     customerName,
     email: firstDefined(order.buyerEmail, contact.email, order.billingInfo?.contactDetails?.email) || undefined,
-    amount: extractAmount(order, b),
-    paymentMode: normalizePaymentMode(order, b),
+    // For prepaid, this is the online-paid amount (₹549), not the ₹599 subtotal.
+    amount: extractBillableAmount(order, b, paymentMode),
+    paymentMode,
     product,
     productId: first.productId,
     productImage: first.image,
@@ -361,6 +428,8 @@ export {
   extractItems,
   normalizePhone,
   normalizePaymentMode,
+  extractBillableAmount,
+  customFieldValue,
   moneyValue,
   toWixImageUrl,
 };
