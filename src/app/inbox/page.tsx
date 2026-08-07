@@ -210,6 +210,13 @@ export default function InboxPage() {
   const [tplPick, setTplPick] = useState<Template | null>(null); // template being filled
   const [tplParams, setTplParams] = useState<string[]>([]); // body {{n}} values
   const [tplBtn, setTplBtn] = useState(""); // URL-button suffix (templates that have one)
+  // Optional product photo for the template's IMAGE header: paste a product link,
+  // we resolve it to that product's photo (else the brand logo is used).
+  const [tplProductLink, setTplProductLink] = useState("");
+  const [tplHeaderImage, setTplHeaderImage] = useState(""); // resolved product image URL
+  const [tplProductName, setTplProductName] = useState("");
+  const [tplImgResolving, setTplImgResolving] = useState(false);
+  const [tplImgError, setTplImgError] = useState("");
   const [headerMenu, setHeaderMenu] = useState(false);
   const [msgMenuId, setMsgMenuId] = useState<string | null>(null);
 
@@ -380,8 +387,36 @@ export default function InboxPage() {
     setTplPick(tpl);
     setTplParams(Array.from({ length: tpl.bodyVars }, (_, i) => (i === 0 ? custName : "")));
     setTplBtn("");
+    setTplProductLink("");
+    setTplHeaderImage("");
+    setTplProductName("");
+    setTplImgError("");
     setSendError("");
   }, [thread?.name]);
+
+  // Resolve a pasted product link to that product's photo, for the IMAGE header.
+  const resolveProductImage = useCallback(async () => {
+    const link = tplProductLink.trim();
+    if (!link) return;
+    setTplImgResolving(true);
+    setTplImgError("");
+    setTplHeaderImage("");
+    setTplProductName("");
+    try {
+      const res = await api(`/api/product-image?link=${encodeURIComponent(link)}`);
+      const data = await res.json();
+      if (data.ok && data.imageUrl) {
+        setTplHeaderImage(data.imageUrl);
+        setTplProductName(data.name || "");
+      } else {
+        setTplImgError(typeof data.error === "string" ? data.error : "Could not find that product.");
+      }
+    } catch {
+      setTplImgError("Network error resolving the product.");
+    } finally {
+      setTplImgResolving(false);
+    }
+  }, [api, tplProductLink]);
 
   // Send the currently-picked template with the operator-entered variables.
   const sendPickedTemplate = useCallback(async () => {
@@ -398,9 +433,12 @@ export default function InboxPage() {
           templateName: tpl.name,
           languageCode: tpl.language,
           bodyParams: tplParams,
-          // Every Viora template has an IMAGE header — attach the brand logo so
-          // the send isn't rejected for a missing media header.
-          ...(tpl.headerFormat === "IMAGE" ? { headerImageUrl: DEFAULT_HEADER_IMAGE } : {}),
+          // Every Viora template has an IMAGE header — use the product photo the
+          // operator resolved from a product link if any, else the brand logo, so
+          // the send is never rejected for a missing media header.
+          ...(tpl.headerFormat === "IMAGE"
+            ? { headerImageUrl: tplHeaderImage || DEFAULT_HEADER_IMAGE }
+            : {}),
           // A dynamic URL button (review / cart) takes a suffix.
           ...(tpl.hasUrlButton && tplBtn.trim()
             ? { urlButtons: [{ index: String(tpl.urlButtonIndex ?? 0), param: tplBtn.trim() }] }
@@ -421,7 +459,7 @@ export default function InboxPage() {
     } finally {
       setTplSending("");
     }
-  }, [api, tplPick, tplParams, tplBtn, tplSending, loadThread, loadConvs]);
+  }, [api, tplPick, tplParams, tplBtn, tplHeaderImage, tplSending, loadThread, loadConvs]);
 
   // --- track viewport so we can switch to a WhatsApp-style single-pane on phones ---
   useEffect(() => {
@@ -952,8 +990,39 @@ export default function InboxPage() {
                       <span style={{ fontSize: 10, color: C.sub, border: `1px solid ${C.border}`, borderRadius: 6, padding: "1px 6px" }}>{t.language}</span>
                     </div>
                     {t.headerFormat === "IMAGE" && (
-                      <div style={{ fontSize: 11.5, color: C.sub, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
-                        <span>🖼</span> Brand image header is attached automatically.
+                      <div style={{ marginBottom: 12, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 11px", background: C.bgList }}>
+                        <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, color: C.sub, marginBottom: 5 }}>
+                          🖼 Header image — paste a product link to show that product’s photo
+                        </label>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <input
+                            value={tplProductLink}
+                            onChange={(e) => { setTplProductLink(e.target.value); setTplHeaderImage(""); setTplProductName(""); setTplImgError(""); }}
+                            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); resolveProductImage(); } }}
+                            placeholder="https://viorajewel.in/…product-link"
+                            style={{ flex: 1, minWidth: 0, padding: "8px 10px", borderRadius: 8, border: `1px solid ${C.border}`, fontSize: 13, boxSizing: "border-box" }}
+                          />
+                          <button
+                            onClick={resolveProductImage}
+                            disabled={!tplProductLink.trim() || tplImgResolving}
+                            style={{ ...btn(C.plum), width: "auto", padding: "8px 14px", fontSize: 13, opacity: !tplProductLink.trim() || tplImgResolving ? 0.5 : 1, cursor: !tplProductLink.trim() || tplImgResolving ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
+                          >
+                            {tplImgResolving ? "…" : "Load"}
+                          </button>
+                        </div>
+                        {tplImgError && <div style={{ color: "#c0392b", fontSize: 11.5, marginTop: 6 }}>{tplImgError}</div>}
+                        {tplHeaderImage ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={tplHeaderImage} alt="product" style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 8, border: `1px solid ${C.border}` }} />
+                            <div style={{ fontSize: 12, color: C.text, lineHeight: 1.4 }}>
+                              <div style={{ fontWeight: 600 }}>{tplProductName || "Product image ready"}</div>
+                              <button onClick={() => { setTplHeaderImage(""); setTplProductName(""); setTplProductLink(""); }} style={{ background: "transparent", border: "none", color: C.plum, fontSize: 11.5, cursor: "pointer", padding: 0, marginTop: 2 }}>Use brand logo instead</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 11, color: C.sub, marginTop: 6 }}>Leave empty to use the Viora logo.</div>
+                        )}
                       </div>
                     )}
                     {tplParams.map((v, i) => (
