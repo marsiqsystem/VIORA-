@@ -395,8 +395,13 @@ function normalizeStatus(raw) {
     return "DISPATCHED";
   }
   // Order cancelled at the fulfilment stage. RTO (return-to-origin) is a distinct
-  // state and deliberately NOT mapped here — we don't message "cancelled" for a return.
-  if (["CANCELLED", "CANCELED", "CANCEL"].includes(s)) return "CANCELLED";
+  // state and deliberately NOT mapped here — we don't message "cancelled" for a
+  // return. "REJECTED" is Velocity's label when the order is killed BEFORE
+  // shipping — most commonly the customer declines it on the AI confirmation
+  // call — so from the customer's side it IS a cancellation and gets the same
+  // (once-only, deduped) cancellation message.
+  if (["CANCELLED", "CANCELED", "CANCEL", "REJECTED", "REJECT", "REJECTED_BY_CUSTOMER"].includes(s))
+    return "CANCELLED";
   return "OTHER";
 }
 
