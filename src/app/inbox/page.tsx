@@ -43,6 +43,9 @@ type Message = {
   filename?: string;
   imageUrl?: string;
   template?: boolean;
+  location?: { lat: number; long: number; name?: string; address?: string };
+  quoted?: { id: string; text: string; dir: "in" | "out" }; // snapshot of a quoted msg (outbound reply)
+  quotedId?: string; // id of a quoted msg (inbound reply) — resolved from the thread
 };
 type Template = {
   name: string;
@@ -219,6 +222,7 @@ export default function InboxPage() {
   const [tplImgError, setTplImgError] = useState("");
   const [headerMenu, setHeaderMenu] = useState(false);
   const [msgMenuId, setMsgMenuId] = useState<string | null>(null);
+  const [replyTo, setReplyTo] = useState<Message | null>(null); // message the composer is quoting
 
   const keyRef = useRef(key);
   const activeRef = useRef(active);
@@ -283,6 +287,7 @@ export default function InboxPage() {
   const openConv = useCallback(async (phone: string) => {
     setActive(phone);
     setSendError("");
+    setReplyTo(null); // a pending reply belongs to the chat you're leaving
     await loadThread(phone);
     setConvs((prev) => prev.map((c) => (c.phone === phone ? { ...c, unread: 0 } : c)));
     if (!MOCK) api("/api/inbox/conversations", { method: "POST", body: JSON.stringify({ markRead: true, phone }) }).catch(() => {});
@@ -295,13 +300,18 @@ export default function InboxPage() {
     if (!text || !phone || sending) return;
     setSending(true);
     setSendError("");
+    const rt = replyTo;
     // optimistic
-    const optimistic: Message = { id: `tmp_${Date.now()}`, dir: "out", text, ts: Date.now(), status: "pending" };
+    const optimistic: Message = {
+      id: `tmp_${Date.now()}`, dir: "out", text, ts: Date.now(), status: "pending",
+      ...(rt ? { quoted: { id: rt.id, text: String(rt.text || "").slice(0, 140), dir: rt.dir } } : {}),
+    };
     setThread((t) => (t ? { ...t, messages: [...t.messages, optimistic] } : t));
     setDraft("");
+    setReplyTo(null);
     if (MOCK) { setSending(false); return; }
     try {
-      const res = await api("/api/inbox/send", { method: "POST", body: JSON.stringify({ to: phone, text }) });
+      const res = await api("/api/inbox/send", { method: "POST", body: JSON.stringify({ to: phone, text, replyTo: rt?.id }) });
       const data = await res.json();
       if (!data.ok) setSendError(typeof data.error === "string" ? data.error : "Send failed.");
       await loadThread(phone);
@@ -311,7 +321,7 @@ export default function InboxPage() {
     } finally {
       setSending(false);
     }
-  }, [draft, sending, api, loadThread, loadConvs]);
+  }, [draft, sending, replyTo, api, loadThread, loadConvs]);
 
   // --- send a photo OR document: upload to Meta, then send by media id ---
   const sendAttachment = useCallback(async (file: File) => {
@@ -321,6 +331,7 @@ export default function InboxPage() {
     setSendError("");
     setAttachOpen(false);
     const caption = draft.trim();
+    const rt = replyTo;
     try {
       const form = new FormData();
       form.append("file", file);
@@ -342,12 +353,14 @@ export default function InboxPage() {
         text: caption || (kind === "document" ? `📄 ${fname || "Document"}` : "📷 Photo"),
         ts: Date.now(), status: "pending", type: kind, mediaId: upData.mediaId,
         filename: kind === "document" ? fname : undefined,
+        ...(rt ? { quoted: { id: rt.id, text: String(rt.text || "").slice(0, 140), dir: rt.dir } } : {}),
       };
       setThread((t) => (t ? { ...t, messages: [...t.messages, optimistic] } : t));
       setDraft("");
+      setReplyTo(null);
       const res = await api("/api/inbox/send", {
         method: "POST",
-        body: JSON.stringify({ to: phone, mediaId: upData.mediaId, kind, filename: fname, text: caption }),
+        body: JSON.stringify({ to: phone, mediaId: upData.mediaId, kind, filename: fname, text: caption, replyTo: rt?.id }),
       });
       const data = await res.json();
       if (!data.ok) setSendError(typeof data.error === "string" ? data.error : "Send failed.");
@@ -358,7 +371,7 @@ export default function InboxPage() {
     } finally {
       setUploading(false);
     }
-  }, [draft, uploading, api, loadThread, loadConvs]);
+  }, [draft, uploading, replyTo, api, loadThread, loadConvs]);
 
   // --- approved templates: load list + send one to this chat ---
   const openTemplates = useCallback(async () => {
@@ -821,12 +834,26 @@ export default function InboxPage() {
                 // photo) or a proxied Meta media id (a sent/received photo).
                 const isImage = m.type === "image" && (!!m.mediaId || !!m.imageUrl);
                 const isDoc = m.type === "document";
+                const isLocation = m.type === "location" && !!m.location;
                 const proxy = m.mediaId
                   ? `/api/inbox/media?id=${encodeURIComponent(m.mediaId)}&key=${encodeURIComponent(key)}`
                   : "";
                 const imgSrc = m.imageUrl || proxy;
-                const placeholder = m.text === "📷 Photo" || m.text === `📄 ${m.filename || "Document"}`;
+                const placeholder =
+                  m.text === "📷 Photo" ||
+                  m.text === "📍 Location" ||
+                  m.text === `📄 ${m.filename || "Document"}`;
                 const caption = m.text && !placeholder ? m.text : "";
+                // Quoted preview: an outbound reply carries a snapshot; an inbound
+                // reply carries only the quoted id, resolved from the thread here.
+                const quotedPreview =
+                  m.quoted ||
+                  (m.quotedId
+                    ? (() => {
+                        const q = thread.messages.find((x) => x.id === m.quotedId);
+                        return q ? { id: q.id, text: q.text, dir: q.dir } : null;
+                      })()
+                    : null);
                 return (
                   <div key={m.id} style={{ display: "contents" }}>
                     {showDay && (
@@ -837,6 +864,7 @@ export default function InboxPage() {
                     <div style={{ alignSelf: out ? "flex-end" : "flex-start", maxWidth: "72%", position: "relative" }}>
                       {msgMenuId === m.id && (
                         <div style={{ position: "absolute", top: 0, [out ? "right" : "left"]: 0, transform: "translateY(-108%)", zIndex: 7, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 10, boxShadow: "0 6px 20px rgba(0,0,0,.16)", overflow: "hidden" }}>
+                          <button onClick={() => { setReplyTo(m); setMsgMenuId(null); }} style={{ ...menuItem, whiteSpace: "nowrap", fontSize: 13, color: C.plum }}>↩ Reply</button>
                           <button onClick={() => deleteMsg(m.id)} style={{ ...menuItem, color: "#c0392b", whiteSpace: "nowrap", fontSize: 13 }}>🗑 Delete for me</button>
                         </div>
                       )}
@@ -845,6 +873,29 @@ export default function InboxPage() {
                           <div style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 9, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: C.goldDark, background: "rgba(201,166,107,.16)", border: `1px solid ${C.gold}`, borderRadius: 5, padding: "1px 6px", marginBottom: 5 }}>
                             ✦ Template
                           </div>
+                        )}
+                        {quotedPreview && (
+                          <div style={{ borderLeft: `3px solid ${C.gold}`, background: "rgba(0,0,0,.045)", borderRadius: 6, padding: "3px 8px", marginBottom: 5, maxWidth: "100%", overflow: "hidden" }}>
+                            <div style={{ fontSize: 10.5, fontWeight: 700, color: C.plum }}>
+                              {quotedPreview.dir === "out" ? "You" : (thread.name || "Customer")}
+                            </div>
+                            <div style={{ fontSize: 12, color: C.sub, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {quotedPreview.text || "Media"}
+                            </div>
+                          </div>
+                        )}
+                        {isLocation && m.location && (
+                          <a href={`https://www.google.com/maps?q=${m.location.lat},${m.location.long}`} target="_blank" rel="noreferrer"
+                            style={{ display: "flex", gap: 9, alignItems: "flex-start", textDecoration: "none", color: C.text, padding: "2px 2px 4px" }}>
+                            <span style={{ fontSize: 26, lineHeight: 1 }}>📍</span>
+                            <span>
+                              <span style={{ display: "block", fontWeight: 600 }}>{m.location.name || "Location"}</span>
+                              <span style={{ display: "block", fontSize: 12, color: C.sub }}>
+                                {m.location.address || `${m.location.lat.toFixed(5)}, ${m.location.long.toFixed(5)}`}
+                              </span>
+                              <span style={{ display: "block", fontSize: 12, color: C.goldDark, marginTop: 2, fontWeight: 600 }}>Open in Maps →</span>
+                            </span>
+                          </a>
                         )}
                         {isImage && imgSrc && (
                           <a href={imgSrc} target="_blank" rel="noreferrer" style={{ display: "block" }}>
@@ -859,7 +910,7 @@ export default function InboxPage() {
                           </a>
                         )}
                         <div style={{ padding: isImage ? "4px 7px 2px" : 0 }}>
-                          {caption || (isImage || isDoc ? "" : m.text)}
+                          {caption || (isImage || isDoc || isLocation ? "" : m.text)}
                           <span style={{ float: "right", marginLeft: 10, marginTop: 6, fontSize: 10, color: C.sub, display: "inline-flex", gap: 4, alignItems: "center" }}>
                             <button onClick={(e) => { e.stopPropagation(); setMsgMenuId((cur) => (cur === m.id ? null : m.id)); }} title="Message options" style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 13, color: C.sub, padding: 0, lineHeight: 1 }}>⋮</button>
                             {clock(m.ts)} {out && <Ticks status={m.status} />}
@@ -880,6 +931,20 @@ export default function InboxPage() {
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) sendAttachment(f); e.target.value = ""; }} />
               <input ref={docRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,application/pdf" style={{ display: "none" }}
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) sendAttachment(f); e.target.value = ""; }} />
+
+              {replyTo && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, background: C.cream2, borderLeft: `3px solid ${C.gold}`, borderRadius: 8, padding: "6px 10px", marginBottom: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: C.plum }}>
+                      Replying to {replyTo.dir === "out" ? "yourself" : (thread.name || "customer")}
+                    </div>
+                    <div style={{ fontSize: 12, color: C.sub, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {replyTo.text || "Media"}
+                    </div>
+                  </div>
+                  <button onClick={() => setReplyTo(null)} title="Cancel reply" style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 18, color: C.sub, lineHeight: 1 }}>×</button>
+                </div>
+              )}
 
               {!canType ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "center", padding: "6px 4px" }}>

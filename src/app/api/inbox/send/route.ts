@@ -51,6 +51,7 @@ export async function POST(req: NextRequest) {
   const mediaId = String(body?.mediaId ?? "").trim(); // set for an image/document send
   const kind = String(body?.kind ?? (mediaId ? "image" : "text")); // "image" | "document" | "text"
   const filename = String(body?.filename ?? "").trim();
+  const replyTo = String(body?.replyTo ?? "").trim(); // wamid this reply quotes
   const isImage = !!mediaId && kind === "image";
   const isDoc = !!mediaId && kind === "document";
   if (!to || (!text && !mediaId)) {
@@ -72,11 +73,21 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Reply/quote: only send WhatsApp a `context` for a REAL wamid (our stored ids
+  // for synthetic sends look like "out_…" and Meta would reject those). Regardless,
+  // snapshot the quoted message so our own inbox bubble shows the quote.
+  const quoteRemote = replyTo.startsWith("wamid.") ? replyTo : undefined;
+  let quoted: { id: string; text: string; dir: string } | undefined;
+  if (replyTo) {
+    const q = (thread.messages as any[]).find((m) => m?.id === replyTo);
+    if (q) quoted = { id: q.id, text: String(q.text ?? "").slice(0, 140), dir: q.dir };
+  }
+
   const sent: any = isImage
-    ? await sendImage({ to, mediaId, caption: text || undefined })
+    ? await sendImage({ to, mediaId, caption: text || undefined, replyTo: quoteRemote })
     : isDoc
-    ? await sendDocument({ to, mediaId, filename: filename || undefined, caption: text || undefined })
-    : await sendText({ to, body: text });
+    ? await sendDocument({ to, mediaId, filename: filename || undefined, caption: text || undefined, replyTo: quoteRemote })
+    : await sendText({ to, body: text, replyTo: quoteRemote });
   const wamid = sent?.data?.messages?.[0]?.id;
 
   // Record it in the thread regardless of live/dry-run so the operator sees it.
@@ -90,6 +101,7 @@ export async function POST(req: NextRequest) {
     type: isImage ? "image" : isDoc ? "document" : "text",
     mediaId: mediaId || undefined,
     filename: isDoc ? filename || undefined : undefined,
+    quoted,
   });
 
   if (!sent?.ok) {

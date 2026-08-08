@@ -206,6 +206,23 @@ function inboundMedia(msg) {
 }
 
 /**
+ * Pull latitude/longitude (+ optional name/address) off an inbound location
+ * message so the inbox can render a tappable Google-Maps card. Returns null for
+ * any non-location message.
+ */
+function inboundLocation(msg) {
+  if (msg?.type !== "location" || !msg.location) return null;
+  const { latitude, longitude, name, address } = msg.location;
+  if (latitude == null || longitude == null) return null;
+  return {
+    lat: Number(latitude),
+    long: Number(longitude),
+    name: name || "",
+    address: address || "",
+  };
+}
+
+/**
  * Ingest a raw Meta webhook body into the inbox store: saves every inbound
  * customer message and applies every outbound delivery/read status.
  *
@@ -240,6 +257,11 @@ async function ingestWebhook(body) {
           const tsMs = msg.timestamp ? Number(msg.timestamp) * 1000 : Date.now();
           const text = inboundText(msg);
           const media = inboundMedia(msg);
+          const location = inboundLocation(msg);
+          // When the customer swipe-replies to one of our messages, Meta echoes
+          // the quoted message's id in msg.context.id — store it so the inbox can
+          // render "in reply to …" by looking that id up in the thread.
+          const quotedId = msg.context?.id || "";
 
           await pushMessage(phone, {
             id: msg.id || `in_${tsMs}`,
@@ -250,6 +272,8 @@ async function ingestWebhook(body) {
             ...(media
               ? { mediaId: media.mediaId, mime: media.mime, filename: media.filename }
               : {}),
+            ...(location ? { location } : {}),
+            ...(quotedId ? { quotedId } : {}),
           });
 
           const conv = await readConv(phone);
@@ -306,8 +330,9 @@ async function ingestWebhook(body) {
  * @param {string} [p.imageUrl] public image URL (e.g. a template's header image) — rendered directly.
  * @param {string} [p.filename] document file name (for a 'document' message).
  * @param {boolean} [p.template] true if this was an approved-template send (shows a TEMPLATE tag).
+ * @param {{id:string,text:string,dir:string}} [p.quoted] snapshot of the message this reply quotes.
  */
-async function recordOutbound({ to, text, wamid, ts, status = "sent", name, type = "text", mediaId, imageUrl, filename, template } = {}) {
+async function recordOutbound({ to, text, wamid, ts, status = "sent", name, type = "text", mediaId, imageUrl, filename, template, quoted } = {}) {
   if (!isConfigured()) return { ok: false };
   const phone = normPhone(to);
   if (!phone) return { ok: false };
@@ -324,6 +349,9 @@ async function recordOutbound({ to, text, wamid, ts, status = "sent", name, type
       ...(imageUrl ? { imageUrl } : {}),
       ...(filename ? { filename } : {}),
       ...(template ? { template: true } : {}),
+      // A snapshot { id, text, dir } of the message this reply quotes, so the
+      // bubble can show the quoted preview without a lookup.
+      ...(quoted && quoted.id ? { quoted } : {}),
     });
     if (wamid) await applyStatus(phone, wamid, status);
     const conv = await readConv(phone);

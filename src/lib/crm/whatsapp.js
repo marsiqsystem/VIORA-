@@ -79,17 +79,18 @@ async function sendRaw(payload, { dryRun } = {}) {
  * service window (i.e. the customer messaged you recently). For a fresh order
  * confirmation to a cold number, use sendTemplate() instead.
  */
-function sendText({ to, body }, opts) {
-  return sendRaw(
-    {
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to,
-      type: "text",
-      text: { preview_url: false, body },
-    },
-    opts
-  );
+function sendText({ to, body, replyTo }, opts) {
+  const payload = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to,
+    type: "text",
+    text: { preview_url: false, body },
+  };
+  // Quote/reply: WhatsApp threads this message under the one being replied to.
+  // `replyTo` must be a real inbound/outbound wamid ("wamid.…").
+  if (replyTo) payload.context = { message_id: replyTo };
+  return sendRaw(payload, opts);
 }
 
 /**
@@ -192,33 +193,31 @@ function sendTemplate(
  * link. Like sendText, only allowed inside the 24-hour service window. Used by
  * the inbox composer's attach button.
  *
- * @param {{to:string, mediaId?:string, link?:string, caption?:string}} p
+ * @param {{to:string, mediaId?:string, link?:string, caption?:string, replyTo?:string}} p
  * @param {object} [opts]
  */
-function sendImage({ to, mediaId, link, caption }, opts) {
+function sendImage({ to, mediaId, link, caption, replyTo }, opts) {
   const image = mediaId ? { id: mediaId } : { link };
   if (caption) image.caption = caption;
-  return sendRaw(
-    { messaging_product: "whatsapp", recipient_type: "individual", to, type: "image", image },
-    opts
-  );
+  const payload = { messaging_product: "whatsapp", recipient_type: "individual", to, type: "image", image };
+  if (replyTo) payload.context = { message_id: replyTo };
+  return sendRaw(payload, opts);
 }
 
 /**
  * Send a document message (PDF, etc.) by Meta media id. 24-hour-window only,
  * like sendText/sendImage. Used by the inbox composer's document attachment.
  *
- * @param {{to:string, mediaId:string, filename?:string, caption?:string}} p
+ * @param {{to:string, mediaId:string, filename?:string, caption?:string, replyTo?:string}} p
  * @param {object} [opts]
  */
-function sendDocument({ to, mediaId, filename, caption }, opts) {
+function sendDocument({ to, mediaId, filename, caption, replyTo }, opts) {
   const document = { id: mediaId };
   if (filename) document.filename = filename;
   if (caption) document.caption = caption;
-  return sendRaw(
-    { messaging_product: "whatsapp", recipient_type: "individual", to, type: "document", document },
-    opts
-  );
+  const payload = { messaging_product: "whatsapp", recipient_type: "individual", to, type: "document", document };
+  if (replyTo) payload.context = { message_id: replyTo };
+  return sendRaw(payload, opts);
 }
 
 /**
