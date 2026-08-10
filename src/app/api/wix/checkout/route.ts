@@ -3,6 +3,7 @@ import { wixAdminClientServer } from "@/lib/wixAdminClientServer";
 import { sendOrderConfirmationEmail } from "@/lib/orderEmail";
 import { sendServerCapi } from "@/lib/metaCapiServer";
 import { readCookieRaw } from "@/lib/metaFbc";
+import { slugFromUrl } from "@/lib/metaCatalogId";
 
 type CheckoutAddressPayload = {
   email: string;
@@ -496,13 +497,17 @@ export async function POST(req: Request) {
         : Number.isFinite(wixOrderTotal)
         ? wixOrderTotal
         : undefined;
+      // Meta's catalog keys on the product SLUG (its Content ID), not the Wix
+      // GUID. Derive the slug from each line item's product-page URL so the
+      // server Purchase matches a catalog product; fall back to the GUID.
       const capiContentIds = (((finalOrder?.lineItems as any[]) || [])
-        .map(
-          (li) =>
+        .map((li) => {
+          const guid =
             li?.catalogReference?.catalogItemId ||
             li?.productId ||
-            li?.catalogReference?.appId
-        )
+            li?.catalogReference?.appId;
+          return slugFromUrl(li?.url) || guid;
+        })
         .filter(Boolean) as string[]);
 
       const cookieHeader = req.headers.get("cookie") || "";

@@ -21,6 +21,9 @@ const BuyNowConfirmModal = dynamic(
 );
 type Props = {
   productId: string;
+  // Meta catalog Content ID (product slug) for content_ids; productId stays the
+  // Wix GUID used for the actual cart operation.
+  contentId?: string;
   variantId: string;
   productName: string;
   productPrice: number;
@@ -33,6 +36,7 @@ type Props = {
 
 const StickyAddToCart = ({
   productId,
+  contentId,
   variantId,
   productName,
   productPrice,
@@ -64,13 +68,14 @@ const StickyAddToCart = ({
     return () => observer.disconnect();
   }, [triggerSelector]);
 
+  const metaId = contentId || productId;
   const baseEvent = {
     currency: "INR",
     value: productPrice,
-    content_ids: [productId],
+    content_ids: [metaId],
     content_name: productName,
     content_type: "product",
-    contents: [{ id: productId, quantity: 1, item_price: productPrice }],
+    contents: [{ id: metaId, quantity: 1, item_price: productPrice }],
     num_items: 1,
   };
 

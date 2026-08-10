@@ -3,6 +3,7 @@
 import { products } from "@wix/stores";
 import { useEffect, useState, useMemo } from "react";
 import { trackMetaEvent } from "@/lib/metaEvents";
+import { rememberMetaCatalogId } from "@/lib/metaCatalogId";
 import dynamic from "next/dynamic";
 import ProductImages from "./ProductImages";
 import CustomizeProducts from "./CustomizeProducts";
@@ -45,20 +46,28 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
         .filter(Boolean)
         .join(" ");
 
+    // The ID our Meta catalog keys on is the product's URL SLUG, not the Wix
+    // GUID. Send the slug on every Meta event so events match a catalog product
+    // (fall back to the GUID only if a slug is somehow missing).
+    const metaContentId = product.slug || product._id || "";
+
     // Fire ViewContent (Pixel + CAPI) once per product load
     useEffect(() => {
         if (!product?._id) return;
+        // Remember GUID→slug so the cart/success pages (which only see the GUID
+        // on cart line items) can send the catalog-matching slug too.
+        rememberMetaCatalogId(product._id, product.slug);
         trackMetaEvent("ViewContent", {
             currency: "INR",
             value:
                 product.price?.discountedPrice ||
                 product.price?.price ||
                 0,
-            content_ids: [product._id],
+            content_ids: [metaContentId],
             content_name: product.name || undefined,
             content_type: "product",
         });
-    }, [product?._id, product?.name, product?.price?.discountedPrice, product?.price?.price]);
+    }, [product?._id, product?.slug, metaContentId, product?.name, product?.price?.discountedPrice, product?.price?.price]);
 
     // Get all media items from the product
     const allMediaItems = product.media?.items || [];
@@ -253,6 +262,7 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                     {product.variants && product.productOptions ? (
                         <CustomizeProducts
                             productId={product._id!}
+                            contentId={metaContentId}
                             productName={product.name || "Unnamed Product"}
                             basePrice={
                                 product.price?.discountedPrice || product.price?.price || 0
@@ -264,6 +274,7 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                     ) : (
                         <Add
                             productId={product._id!}
+                            contentId={metaContentId}
                             variantId="00000000-0000-0000-0000-000000000000"
                             stockNumber={
                                 // When inventory isn't tracked, treat stock as essentially unlimited
@@ -453,6 +464,7 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
 
             <StickyAddToCart
                 productId={product._id!}
+                contentId={metaContentId}
                 variantId="00000000-0000-0000-0000-000000000000"
                 productName={product.name || "Unnamed Product"}
                 productPrice={

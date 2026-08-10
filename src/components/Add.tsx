@@ -22,6 +22,7 @@ const BuyNowConfirmModal = dynamic(
 
 const Add = ({
   productId,
+  contentId,
   variantId,
   stockNumber,
   productName,
@@ -29,12 +30,17 @@ const Add = ({
   selectedOptions,
 }: {
   productId: string;
+  // The Meta catalog Content ID (product slug). Used for content_ids on Meta
+  // events so they match a catalog product; productId (the Wix GUID) is kept
+  // for the actual cart operations. Falls back to productId if not provided.
+  contentId?: string;
   variantId: string;
   stockNumber: number;
   productName: string;
   productPrice: number;
   selectedOptions?: Record<string, string>;
 }) => {
+  const metaId = contentId || productId;
   const [localQuantity, setLocalQuantity] = useState(1);
   const [isAdded, setIsAdded] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
@@ -102,10 +108,10 @@ const Add = ({
     trackMetaEvent("AddToCart", {
       currency: "INR",
       value: productPrice * quantity,
-      content_ids: [productId],
+      content_ids: [metaId],
       content_name: productName,
       content_type: "product",
-      contents: [{ id: productId, quantity, item_price: productPrice }],
+      contents: [{ id: metaId, quantity, item_price: productPrice }],
       num_items: quantity,
     });
     try {
@@ -158,10 +164,10 @@ const Add = ({
     trackMetaEvent("AddToCart", {
       currency: "INR",
       value: productPrice * quantity,
-      content_ids: [productId],
+      content_ids: [metaId],
       content_name: productName,
       content_type: "product",
-      contents: [{ id: productId, quantity, item_price: productPrice }],
+      contents: [{ id: metaId, quantity, item_price: productPrice }],
       num_items: quantity,
     });
 
@@ -175,10 +181,10 @@ const Add = ({
     trackMetaEvent("InitiateCheckout", {
       currency: "INR",
       value: productPrice * quantity,
-      content_ids: [productId],
+      content_ids: [metaId],
       content_name: productName,
       content_type: "product",
-      contents: [{ id: productId, quantity, item_price: productPrice }],
+      contents: [{ id: metaId, quantity, item_price: productPrice }],
       num_items: quantity,
     });
 

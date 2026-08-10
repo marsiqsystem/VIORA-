@@ -8,7 +8,18 @@ import { useCartStore } from "@/hooks/useCartStore";
 import { useWixClient } from "@/hooks/useWixClient";
 import { trackMetaEvent, setMetaUserData } from "@/lib/metaEvents";
 import { trackAddPaymentInfo } from "@/lib/metaPixel";
+import { resolveMetaCatalogId, slugFromUrl } from "@/lib/metaCatalogId";
 import BackButton from "@/components/BackButton";
+
+// The Meta catalog Content ID (product slug) for a cart line item. Cart line
+// items only carry the Wix product GUID, so prefer the GUID→slug map remembered
+// on the product page, then the line item's product URL, then the GUID itself.
+const catalogIdForItem = (item: any): string => {
+  const guid = item?.catalogReference?.catalogItemId || item?._id || "";
+  const mapped = resolveMetaCatalogId(guid);
+  if (mapped && mapped !== guid) return mapped;
+  return slugFromUrl(item?.url) || guid;
+};
 
 type AddressForm = {
   fullName: string;
@@ -219,12 +230,10 @@ const CheckoutPage = () => {
       trackMetaEvent("InitiateCheckout", {
         currency: "INR",
         value: subtotal,
-        content_ids: lineItems
-          .map((item: any) => item.catalogReference?.catalogItemId)
-          .filter(Boolean),
+        content_ids: lineItems.map(catalogIdForItem).filter(Boolean),
         content_type: "product",
         contents: lineItems.map((item: any) => ({
-          id: item.catalogReference?.catalogItemId || item._id || "",
+          id: catalogIdForItem(item),
           quantity: item.quantity || 1,
           item_price: Number(item.price?.amount) || 0,
         })),
@@ -283,9 +292,7 @@ const CheckoutPage = () => {
             JSON.stringify({
               value: subtotal,
               currency: "INR",
-              content_ids: lineItems
-                .map((item: any) => item.catalogReference?.catalogItemId)
-                .filter(Boolean),
+              content_ids: lineItems.map(catalogIdForItem).filter(Boolean),
             })
           );
         } catch {}

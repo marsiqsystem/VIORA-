@@ -6,6 +6,7 @@ import Add from "./Add";
 
 const CustomizeProducts = ({
   productId,
+  contentId,
   productName,
   basePrice,
   variants,
@@ -13,6 +14,8 @@ const CustomizeProducts = ({
   onOptionChange,
 }: {
   productId: string;
+  // Meta catalog Content ID (product slug) — forwarded to <Add> for content_ids.
+  contentId?: string;
   productName: string;
   basePrice: number;
   variants: products.Variant[];
@@ -146,6 +149,7 @@ const CustomizeProducts = ({
       })}
       <Add
         productId={productId}
+        contentId={contentId}
         variantId={
           selectedVariant?._id || "00000000-0000-0000-0000-000000000000"
         }
