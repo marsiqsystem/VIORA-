@@ -127,8 +127,16 @@ function toPlainText(html: string): string {
     .trim();
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    // Which value to emit as <g:id>. Default is the Wix GUID (what Google
+    // Merchant Center already imports — do NOT change that). Meta's catalog is
+    // built by crawling the site and it keys items on the page-declared id; our
+    // Meta PIXEL sends the product SLUG as content_ids, so Meta must key on the
+    // slug too or nothing matches. Fetching this feed as `?id=slug` emits the
+    // slug as <g:id>, giving Meta a catalog whose ids line up with the pixel.
+    const useSlugId = new URL(req.url).searchParams.get("id") === "slug";
+
     const wixClient = await wixClientServer();
     const itemNodes: string[] = [];
 
@@ -175,7 +183,11 @@ export async function GET() {
         // per product (even across colour variants). The SKU is sometimes
         // shared across variants of the same base set — using it as g:id
         // caused Google to silently dedupe and drop variants from the feed.
-        const id = p._id;
+        // GUID for Google (default); slug for Meta (?id=slug) so the catalog ids
+        // match the slug the Meta pixel sends as content_ids. `p.slug` is always
+        // present here (products without one were skipped above) and is unique
+        // per colour variant, so it is a valid unique <g:id>.
+        const id = useSlugId ? p.slug : p._id;
         if (!id) {
           stats.skippedNoId += 1;
           continue;
