@@ -185,6 +185,11 @@ function inboundText(msg) {
       return "🌟 Sticker";
     case "location":
       return "📍 Location";
+    case "reaction":
+      // Customer tapped an emoji reaction on one of our messages. Meta sends the
+      // chosen emoji in msg.reaction.emoji (empty string when the reaction is
+      // removed). Show the emoji itself instead of a bare "[reaction]" label.
+      return msg.reaction?.emoji ? `Reacted ${msg.reaction.emoji}` : "↩️ Removed reaction";
     default:
       return msg?.type ? `[${msg.type}]` : "";
   }
