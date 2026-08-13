@@ -11,6 +11,28 @@
 
 const GRAPH = "https://graph.facebook.com";
 
+// WhatsApp rejects an image-header/media link whose file is larger than 5 MB
+// with error 131053 ("Image file has size … must be atmost 5242880 bytes"),
+// which silently drops the whole template send. Wix product photos are served
+// at up to 2048×2048 q90 PNG (~9 MB), well over that limit — so before handing
+// any Wix image to Meta, rewrite its transform to a small, safe size. A jewelry
+// photo at 800×800 q80 is ~1.5 MB, comfortably under 5 MB (the 2048 original is
+// ~9 MB), and looks identical inside WhatsApp's header. Non-Wix links (our own
+// logo asset) are already small and pass through untouched.
+function capImageForWhatsApp(url) {
+  const u = String(url ?? "").trim();
+  if (!u) return u;
+  // Wix static media URLs look like:
+  //   https://static.wixstatic.com/media/<id>~mv2.png/v1/<transform>/file.png
+  // Replace whatever `<transform>` is (fit/fill, any w/h/q) with a capped one.
+  // The `<transform>` is itself several slash-separated parts
+  // (e.g. `fit/w_2048,h_2048,q_90`), so match non-greedily up to `/file`.
+  return u.replace(
+    /(static\.wixstatic\.com\/media\/[^/]+)\/v1\/.+?\/file/i,
+    "$1/v1/fit/w_800,h_800,q_80/file"
+  );
+}
+
 function config() {
   return {
     token: process.env.WHATSAPP_ACCESS_TOKEN,
@@ -142,10 +164,12 @@ function sendTemplate(
 
   if (headerImageUrl) {
     // Media header: the parameter type must match the template's approved
-    // header format (image), with the asset supplied as a public link.
+    // header format (image), with the asset supplied as a public link. Cap the
+    // image size first — a Wix product photo can be ~9 MB, over WhatsApp's 5 MB
+    // media limit, which fails the send with error 131053.
     components.push({
       type: "header",
-      parameters: [{ type: "image", image: { link: headerImageUrl } }],
+      parameters: [{ type: "image", image: { link: capImageForWhatsApp(headerImageUrl) } }],
     });
   } else if (headerParams.length > 0) {
     components.push({
@@ -197,7 +221,9 @@ function sendTemplate(
  * @param {object} [opts]
  */
 function sendImage({ to, mediaId, link, caption, replyTo }, opts) {
-  const image = mediaId ? { id: mediaId } : { link };
+  // A link-based image is subject to WhatsApp's 5 MB media limit (error 131053),
+  // so cap a Wix product photo the same way template headers are capped.
+  const image = mediaId ? { id: mediaId } : { link: capImageForWhatsApp(link) };
   if (caption) image.caption = caption;
   const payload = { messaging_product: "whatsapp", recipient_type: "individual", to, type: "image", image };
   if (replyTo) payload.context = { message_id: replyTo };
