@@ -12,7 +12,7 @@
 import * as notify from "./notify";
 import * as reviewQueue from "./reviewQueue";
 
-const DELAY_DAYS = Number(process.env.REVIEW_DELAY_DAYS || 3);
+const DELAY_DAYS = Number(process.env.REVIEW_DELAY_DAYS || 2);
 
 let busy = false; // guard so a slow scan can't overlap the next tick
 

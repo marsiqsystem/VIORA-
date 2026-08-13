@@ -72,7 +72,7 @@ const render = {
   delivered: (o) =>
     `📦 Hi ${o.name}, your order #${o.orderId} has been *delivered*! We hope you love it 💛`,
   reviewRequest: (o) =>
-    `⭐ Hi ${o.name}, how was your Viora experience with order #${o.orderId}? Tap below to leave a quick review — it means the world to us! 💛`,
+    `Hi ${o.name}, thank you for your order #${o.orderId} from Viora Jewels. We'd love your feedback on this order — it helps us improve our service. Tap the button below to share a quick review.`,
   abandonedCart: (o) =>
     `🛍️ Hi ${o.name}, you left *${o.product}* (${money(o.amount)}) in your cart. Complete your order before it's gone — tap below to check out!`,
   orderCancelled: (o) =>
@@ -203,12 +203,18 @@ async function sendDelivered(o) {
 // IMAGE header ; body {{1}} name, {{2}} order id ; button url {{1}} product slug.
 async function sendReviewRequest(o) {
   const bodyParams = [o.name, o.orderId];
-  const headerImageUrl = o.productImage || T.reviewRequest.headerImageUrl;
+  // review_request_util_v1 (UTILITY) is HEADER-LESS. Only send a header if the
+  // configured review template actually has one (keeps this correct if the env
+  // is ever pointed back at an image-header template). Sending an image header to
+  // a header-less template gives Meta's "header: Format mismatch" error.
+  const headerImageUrl = T.reviewRequest.headerImageUrl
+    ? o.productImage || T.reviewRequest.headerImageUrl
+    : undefined;
   const res = await sendTemplate({
     to: o.phone,
     templateName: T.reviewRequest.name,
     languageCode: T.reviewRequest.lang,
-    headerImageUrl,
+    ...(headerImageUrl ? { headerImageUrl } : {}),
     bodyParams,
     // TODO: pass the real Wix product slug through the store instead of slugifying the name.
     urlButtons: [{ index: "0", param: slugify(o.product) }],

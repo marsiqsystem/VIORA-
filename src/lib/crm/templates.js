@@ -54,9 +54,12 @@ export default {
     // body {{1}} name, {{2}} order id
   },
   reviewRequest: {
-    name: process.env.TPL_REVIEW_REQUEST || "review_request_v1",
+    // review_request_util_v1 is UTILITY (not MARKETING) so it isn't hit by Meta's
+    // per-user marketing frequency cap (error 131049) that was silently dropping
+    // the old review_request_v1 for some customers. See send fn: it is HEADER-LESS.
+    name: process.env.TPL_REVIEW_REQUEST || "review_request_util_v1",
     lang: LANG,
-    headerImageUrl: HEADER_IMAGE_URL, // template has an IMAGE header
+    headerImageUrl: null, // UTILITY review template has NO header — send none
     // body {{1}} name, {{2}} order id ; button url {{1}} product slug
   },
   abandonedCart: {
