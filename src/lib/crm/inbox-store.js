@@ -76,6 +76,32 @@ function msgsKey(phone) {
 function statusKey(phone) {
   return `${PREFIX}st:${phone}`;
 }
+// Per-conversation map of wamid -> the Meta error (code/title/details) for a
+// FAILED outbound message, so the inbox can show WHY a send failed instead of a
+// bare "Failed". TTL'd so it can't grow forever.
+function errKey(phone) {
+  return `${PREFIX}er:${phone}`;
+}
+const ERR_TTL_S = 60 * 60 * 24 * 45;
+
+/**
+ * Store the Meta failure reason for one outbound message. `err` is the first
+ * entry of a status webhook's `errors[]`. Best-effort; never throws.
+ */
+async function recordSendError(phone, wamid, err) {
+  if (!wamid || !err) return;
+  try {
+    const payload = JSON.stringify({
+      code: err.code ?? null,
+      title: err.title || "",
+      details: err.error_data?.details || err.message || "",
+    });
+    await command(["HSET", errKey(phone), wamid, payload]);
+    await command(["EXPIRE", errKey(phone), String(ERR_TTL_S)]);
+  } catch {
+    /* best-effort */
+  }
+}
 
 function safeParse(str, fallback) {
   if (str == null) return fallback;
@@ -302,6 +328,17 @@ async function ingestWebhook(body) {
           const status = st.status; // sent | delivered | read | failed
           if (!phone || !wamid || !status) continue;
           await applyStatus(phone, wamid, status);
+          // On a failure, keep Meta's error (code + reason) so the inbox — and we
+          // — can see exactly WHY it failed, not just that it did.
+          if (status === "failed") {
+            const err = Array.isArray(st.errors) && st.errors.length ? st.errors[0] : null;
+            if (err) {
+              console.error(
+                `[whatsapp] send FAILED to ${phone} wamid=${wamid}: code=${err.code} title="${err.title}" details="${err.error_data?.details || err.message || ""}"`
+              );
+              await recordSendError(phone, wamid, err);
+            }
+          }
           statuses++;
         }
       }
@@ -432,16 +469,26 @@ async function getMessages(phone) {
   const empty = { phone: p, name: "", withinWindow: false, messages: [] };
   if (!isConfigured() || !p) return empty;
   try {
-    const [rawList, rawStatus, conv] = await Promise.all([
+    const [rawList, rawStatus, rawErrors, conv] = await Promise.all([
       command(["LRANGE", msgsKey(p), 0, -1]).catch(() => []),
       command(["HGETALL", statusKey(p)]).catch(() => ({})),
+      command(["HGETALL", errKey(p)]).catch(() => ({})),
       readConv(p),
     ]);
     const statuses = hashToObj(rawStatus);
+    const errors = hashToObj(rawErrors);
     const messages = (rawList || [])
       .map((m) => safeParse(m, null))
       .filter(Boolean)
-      .map((m) => (m.dir === "out" && statuses[m.id] ? { ...m, status: statuses[m.id] } : m));
+      .map((m) => {
+        if (m.dir !== "out") return m;
+        const withStatus = statuses[m.id] ? { ...m, status: statuses[m.id] } : m;
+        // Surface the failure reason on a failed bubble so the inbox shows WHY.
+        if (statuses[m.id] === "failed" && errors[m.id]) {
+          return { ...withStatus, error: safeParse(errors[m.id], null) };
+        }
+        return withStatus;
+      });
     return {
       phone: p,
       name: conv.name || "",

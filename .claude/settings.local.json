@@ -25,7 +25,15 @@
       "Bash(mv \"RuPay Logo.jpg\" \"rupay.jpg\")",
       "Bash(mv \"cash on delivery.jpg\" \"cod.jpg\")",
       "Bash(mv \"facebook new.jpg\" \"facebook-blue.jpg\")",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(node *)",
+      "Bash(RESEND_API_KEY=dummy-dryrun-only node --env-file=.env.local scripts/send-newsletter-blast.mjs --dry-run)",
+      "Bash(git checkout *)",
+      "Bash(git merge *)",
+      "Bash(PYTHONIOENCODING=utf-8 python -c ' *)",
+      "Bash(python -)",
+      "Bash(PYTHONIOENCODING=utf-8 python -)",
+      "Bash(git -C whatsapp-crm log --since=\"2026-08-08\" --pretty=format:\"%h %ad %s\" --date=format:\"%Y-%m-%d %H:%M\")"
     ]
   }
 }

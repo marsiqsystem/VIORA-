@@ -29,7 +29,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as wix from "@/lib/crm/wix";
 import * as notify from "@/lib/crm/notify";
 import * as reviewQueue from "@/lib/crm/reviewQueue";
-import { authOk, authConfigured, keyFromRequest } from "@/lib/crm/inbox-store";
+import { authOk, authConfigured, keyFromRequest, getMessages } from "@/lib/crm/inbox-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -71,6 +71,16 @@ export async function POST(req: NextRequest) {
   }
   if (!authOk(body?.key ?? keyFromRequest(req))) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Debug: read back the captured Meta failure reasons for a phone number.
+  const readErrors = String(body?.readErrors ?? "").trim();
+  if (readErrors) {
+    const thread = await getMessages(readErrors);
+    const failed = (thread.messages || [])
+      .filter((m: any) => m.dir === "out" && m.status === "failed")
+      .map((m: any) => ({ id: m.id, ts: m.ts, text: String(m.text || "").slice(0, 60), error: m.error || null }));
+    return NextResponse.json({ ok: true, mode: "readErrors", phone: readErrors, failed });
   }
 
   const force = body?.force === true;

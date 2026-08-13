@@ -43,6 +43,7 @@ type Message = {
   filename?: string;
   imageUrl?: string;
   template?: boolean;
+  error?: { code?: number | null; title?: string; details?: string } | null; // Meta failure reason on a failed send
   location?: { lat: number; long: number; name?: string; address?: string };
   quoted?: { id: string; text: string; dir: "in" | "out" }; // snapshot of a quoted msg (outbound reply)
   quotedId?: string; // id of a quoted msg (inbound reply) — resolved from the thread
@@ -165,15 +166,21 @@ function windowRemaining(lastInboundTs?: number, now = Date.now()) {
   const label = h > 0 ? `${h}h ${m}m left` : `${m}m left`;
   return { open: true, label, urgent: left < 3_600_000 }; // < 1h → amber
 }
-function Ticks({ status }: { status?: string }) {
+function Ticks({ status, error }: { status?: string; error?: { code?: number | null; title?: string; details?: string } | null }) {
   if (!status) return null;
   if (status === "pending") return <span title="pending" style={{ color: C.sub }}>🕓</span>;
-  if (status === "failed")
+  if (status === "failed") {
+    // When Meta told us WHY (captured from the status webhook), show the error
+    // code inline and the full reason on hover — instead of a bare "Failed".
+    const reason = error
+      ? `Not delivered — Meta error ${error.code ?? "?"}: ${error.title || error.details || ""}${error.details && error.title ? ` — ${error.details}` : ""}`
+      : "Not delivered — the message failed to send (e.g. 24h window closed).";
     return (
-      <span title="Not delivered — the message failed to send (e.g. 24h window closed)." style={{ color: "#c0392b", fontWeight: 700, fontSize: 10, letterSpacing: 0.2 }}>
-        ✗ Failed
+      <span title={reason} style={{ color: "#c0392b", fontWeight: 700, fontSize: 10, letterSpacing: 0.2 }}>
+        ✗ Failed{error?.code != null ? ` (${error.code})` : ""}
       </span>
     );
+  }
   const blue = status === "read";
   const double = status === "delivered" || status === "read";
   return (
@@ -913,7 +920,7 @@ export default function InboxPage() {
                           {caption || (isImage || isDoc || isLocation ? "" : m.text)}
                           <span style={{ float: "right", marginLeft: 10, marginTop: 6, fontSize: 10, color: C.sub, display: "inline-flex", gap: 4, alignItems: "center" }}>
                             <button onClick={(e) => { e.stopPropagation(); setMsgMenuId((cur) => (cur === m.id ? null : m.id)); }} title="Message options" style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 13, color: C.sub, padding: 0, lineHeight: 1 }}>⋮</button>
-                            {clock(m.ts)} {out && <Ticks status={m.status} />}
+                            {clock(m.ts)} {out && <Ticks status={m.status} error={m.error} />}
                           </span>
                         </div>
                       </div>
