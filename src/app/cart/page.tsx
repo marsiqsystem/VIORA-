@@ -75,9 +75,10 @@ const CartPage = () => {
     // --- Real Wix coupon data ---
     const CLUB_VIORA_CODE = "CLUBVIORA";
     const CLUB_VIORA_MINIMUM = 999;
-    const SHINE_50_CODE = "SHINE50";
-    const SHINE_50_MINIMUM = 700;
-    const SHINE_50_DISCOUNT = 50;
+    // SHINE50 DISABLED 2026-08-17 — re-enable on/after 30 Aug 2026:
+    // const SHINE_50_CODE = "SHINE50";
+    // const SHINE_50_MINIMUM = 700;
+    // const SHINE_50_DISCOUNT = 50;
     const [couponCode, setCouponCode] = useState("");
     const [applyingCoupon, setApplyingCoupon] = useState(false);
     const [removingCoupon, setRemovingCoupon] = useState(false);
@@ -98,14 +99,15 @@ const CartPage = () => {
         if (couponCode === CLUB_VIORA_CODE && subtotal >= CLUB_VIORA_MINIMUM) {
             return sum + subtotal * 0.1;
         }
-        // SHINE50: flat ₹50 off on orders ≥ ₹700 (matches the Wix coupon rules).
-        if (couponCode === "SHINE50" && subtotal >= 700) {
-            return sum + 50;
-        }
+        // SHINE50 DISABLED 2026-08-17 (deleted from Wix while Rakhi set is live).
+        // Re-enable on/after 30 Aug 2026 by uncommenting the block below.
+        // if (couponCode === "SHINE50" && subtotal >= 700) {
+        //     return sum + 50;
+        // }
         return sum;
     }, 0);
     const amountToUnlockCoupon = Math.max(0, CLUB_VIORA_MINIMUM - subtotal);
-    const amountToUnlockShine = Math.max(0, SHINE_50_MINIMUM - subtotal);
+    // const amountToUnlockShine = Math.max(0, SHINE_50_MINIMUM - subtotal); // SHINE50 DISABLED 2026-08-17
     const finalTotal = Math.max(0, subtotal - wixCouponDiscount);
     const totalSavings = 149 + mrpSavings + wixCouponDiscount;
 
@@ -353,6 +355,7 @@ const CartPage = () => {
                                             <p className="mt-2 text-xs text-red-600">{couponError}</p>
                                         ) : (
                                             <div className="mt-2 space-y-1">
+                                                {/* SHINE50 nudge DISABLED 2026-08-17 (deleted from Wix while Rakhi set is live). Re-enable on/after 30 Aug 2026.
                                                 {amountToUnlockShine > 0 ? (
                                                     <p className="text-xs text-gray-500">
                                                         Add ₹{amountToUnlockShine.toFixed(0)} more to use <span className="font-semibold tracking-wider">{SHINE_50_CODE}</span> (₹{SHINE_50_DISCOUNT} off).
@@ -362,6 +365,7 @@ const CartPage = () => {
                                                         ✅ Eligible! Use <span className="font-semibold tracking-wider">{SHINE_50_CODE}</span> for ₹{SHINE_50_DISCOUNT} off.
                                                     </p>
                                                 )}
+                                                */}
                                                 {amountToUnlockCoupon > 0 ? (
                                                     <p className="text-xs text-gray-500">
                                                         Add ₹{amountToUnlockCoupon.toFixed(0)} more to use <span className="font-semibold tracking-wider">{CLUB_VIORA_CODE}</span> (10% off).

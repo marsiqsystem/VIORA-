@@ -86,7 +86,9 @@ const HomePage = async () => {
         className="w-full bg-[#9B1B30] text-white py-3 text-center text-sm md:text-base font-medium block
                    max-md:fixed max-md:left-0 max-md:right-0 max-md:bottom-[64px] max-md:z-[60]"
       >
-        ✨ FLAT ₹50 DISCOUNT on orders above ₹700 (Code: SHINE50) | 10% DISCOUNT on orders above ₹999 (Code: CLUBVIORA) ✨
+        {/* SHINE50 removed from banner 2026-08-17 (deleted from Wix while Rakhi set is live). Restore full text on/after 30 Aug 2026:
+            ✨ FLAT ₹50 DISCOUNT on orders above ₹700 (Code: SHINE50) | 10% DISCOUNT on orders above ₹999 (Code: CLUBVIORA) ✨ */}
+        ✨ 10% DISCOUNT on orders above ₹999 (Code: CLUBVIORA) ✨
       </div>
 
       <section className="px-4 pb-4 pt-14 md:px-8 md:pb-5 md:pt-18 lg:px-12 xl:px-16 2xl:px-24">

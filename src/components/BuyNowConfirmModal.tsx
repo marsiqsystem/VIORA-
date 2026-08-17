@@ -22,7 +22,7 @@ type Props = {
   onDecision: (decision: "yes" | "no") => Promise<void> | void;
 };
 
-const SHINE50_MIN = 700;
+// const SHINE50_MIN = 700; // SHINE50 DISABLED 2026-08-17 — re-enable on/after 30 Aug 2026
 const CLUBVIORA_MIN = 999;
 
 const BuyNowConfirmModal = ({
@@ -75,12 +75,13 @@ const BuyNowConfirmModal = ({
         label: `Unlock 10% OFF (≈ ₹${saving} savings) with code CLUBVIORA`,
       };
     }
-    if (combinedSubtotal >= SHINE50_MIN && currentProductPrice < SHINE50_MIN) {
-      return {
-        code: "SHINE50",
-        label: "Unlock ₹50 OFF with code SHINE50",
-      };
-    }
+    // SHINE50 DISABLED 2026-08-17 (deleted from Wix while Rakhi set is live). Re-enable on/after 30 Aug 2026:
+    // if (combinedSubtotal >= SHINE50_MIN && currentProductPrice < SHINE50_MIN) {
+    //   return {
+    //     code: "SHINE50",
+    //     label: "Unlock ₹50 OFF with code SHINE50",
+    //   };
+    // }
     return null;
   }, [combinedSubtotal, currentProductPrice]);
 

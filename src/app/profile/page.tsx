@@ -368,11 +368,13 @@ const ProfileContent = () => {
             <div className="animate-fade-in">
               <h2 className="text-xl font-playfair font-bold text-primary mb-6">Coupons & Offers</h2>
               <div className="grid gap-4 sm:grid-cols-2">
+                {/* SHINE50 coupon DISABLED 2026-08-17 (deleted from Wix while Rakhi set is live). Re-enable on/after 30 Aug 2026.
                 <CouponCard
                   code="SHINE50"
                   title="Flat ₹50 OFF on orders above ₹700"
                   badge="New"
                 />
+                */}
                 <CouponCard
                   code="CLUBVIORA"
                   title="10% DISCOUNT on orders above ₹999"

@@ -10,7 +10,8 @@ const AnnouncementMarquee = () => {
     "🔄 Easy Exchange",
     "✨ Premium Quality",
     "💸 ₹50 OFF on Prepaid Orders",
-    "✨ FLAT ₹50 DISCOUNT on orders above ₹700 (Code: SHINE50) ✨",
+    // SHINE50 DISABLED 2026-08-17 (deleted from Wix while Rakhi set is live). Re-enable on/after 30 Aug 2026:
+    // "✨ FLAT ₹50 DISCOUNT on orders above ₹700 (Code: SHINE50) ✨",
   ];
 
   return (

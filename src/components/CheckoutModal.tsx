@@ -24,9 +24,10 @@ interface CheckoutModalProps {
 const PREPAID_DISCOUNT = 50;
 const CLUB_VIORA_CODE = "CLUBVIORA";
 const CLUB_VIORA_MINIMUM = 999;
-const SHINE_50_CODE = "SHINE50";
-const SHINE_50_MINIMUM = 700;
-const SHINE_50_DISCOUNT = 50;
+// SHINE50 DISABLED 2026-08-17 (deleted from Wix while Rakhi set is live). Re-enable on/after 30 Aug 2026:
+// const SHINE_50_CODE = "SHINE50";
+// const SHINE_50_MINIMUM = 700;
+// const SHINE_50_DISCOUNT = 50;
 
 const INDIAN_SUBDIVISIONS: { code: string; name: string }[] = [
   { code: "IN-AN", name: "Andaman and Nicobar Islands" },
@@ -185,7 +186,8 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
       if (reported > 0) return sum + reported;
       const code = d.coupon.code?.toUpperCase();
       if (code === "CLUBVIORA" && subtotal >= 999) return sum + subtotal * 0.1;
-      if (code === "SHINE50" && subtotal >= 700) return sum + 50;
+      // SHINE50 DISABLED 2026-08-17 — re-enable on/after 30 Aug 2026:
+      // if (code === "SHINE50" && subtotal >= 700) return sum + 50;
       return sum;
     }, 0);
   }, [cart, subtotal]);
@@ -199,7 +201,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
     return appliedDiscounts.find((d: any) => d.coupon)?.coupon?.code || "";
   }, [cart]);
   const amountToUnlockClub = Math.max(0, CLUB_VIORA_MINIMUM - subtotal);
-  const amountToUnlockShine = Math.max(0, SHINE_50_MINIMUM - subtotal);
+  // const amountToUnlockShine = Math.max(0, SHINE_50_MINIMUM - subtotal); // SHINE50 DISABLED 2026-08-17
 
   const handleApplyCoupon = async () => {
     const code = couponCode.trim().toUpperCase();
@@ -827,6 +829,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                         <p className="mt-1.5 text-[11px] text-red-600">{couponError}</p>
                       ) : (
                         <div className="mt-1.5 space-y-1">
+                          {/* SHINE50 nudge DISABLED 2026-08-17 (deleted from Wix while Rakhi set is live). Re-enable on/after 30 Aug 2026.
                           <p className={`text-[11px] ${amountToUnlockShine > 0 ? "text-gray-500" : "text-green-600 font-medium"}`}>
                             {amountToUnlockShine > 0 ? (
                               <>Add ₹{amountToUnlockShine.toFixed(0)} more to use <span className="font-semibold tracking-wider">{SHINE_50_CODE}</span> (₹{SHINE_50_DISCOUNT} off).</>
@@ -834,6 +837,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                               <>✅ Eligible! Use <span className="font-semibold tracking-wider">{SHINE_50_CODE}</span> for ₹{SHINE_50_DISCOUNT} off.</>
                             )}
                           </p>
+                          */}
                           <p className={`text-[11px] ${amountToUnlockClub > 0 ? "text-gray-500" : "text-green-600 font-medium"}`}>
                             {amountToUnlockClub > 0 ? (
                               <>Add ₹{amountToUnlockClub.toFixed(0)} more to use <span className="font-semibold tracking-wider">{CLUB_VIORA_CODE}</span> (10% off).</>
