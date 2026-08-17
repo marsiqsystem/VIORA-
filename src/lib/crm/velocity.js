@@ -35,11 +35,14 @@ function cfg() {
     password: (process.env.VELOCITY_PASSWORD || "").trim(),
     warehouseId: (process.env.VELOCITY_WAREHOUSE_ID || "").trim(), // pre-registered pickup warehouse
     pickupLocation: (process.env.VELOCITY_PICKUP_LOCATION || "").trim(), // warehouse display name (API requires it)
-    trackBase: (process.env.VELOCITY_TRACK_URL_BASE || "https://www.velocityshipping.in/track")
-      // The real customer tracking host is www.velocityshipping.in/track/<AWB>.
-      // Rewrite the old wrong hosts (shipfast.in / shipfastt.in typo) even if
-      // they're still set in the env, so links always work.
+    trackBase: (process.env.VELOCITY_TRACK_URL_BASE || "https://viorajewel.velocityshipping.in/track")
+      // Customer tracking host = the Viora-branded page configured in the Velocity
+      // portal: viorajewel.velocityshipping.in/track/<AWB> (set 2026-08-17).
+      // Rewrite the old wrong hosts (shipfast.in / shipfastt.in typo) AND the
+      // generic www.velocityshipping.in host up to the branded subdomain, even if
+      // a stale value is still set in the env, so links always land on the brand.
       .replace(/https?:\/\/(www\.)?shipfastt?\.in/gi, "https://www.velocityshipping.in")
+      .replace(/https?:\/\/(www\.)?velocityshipping\.in/gi, "https://viorajewel.velocityshipping.in")
       .replace(/\/$/, ""),
     // Viora's standard jewellery package — FIXED. Hardcoded (not env) so a wrong
     // VELOCITY_DEFAULT_* value in a dashboard can't silently change it (a stale
@@ -405,6 +408,17 @@ function normalizeStatus(raw) {
   return "OTHER";
 }
 
+// Force any tracking URL (from Velocity's API/webhook) onto the Viora-branded
+// host viorajewel.velocityshipping.in — matches cfg().trackBase, so every surface
+// (WhatsApp, Wix order, storefront timeline) shows the branded tracking page.
+// Returns null for an empty/missing url (preserves the existing `|| null` shape).
+function brandTrackUrl(url) {
+  const out = String(url || "")
+    .replace(/https?:\/\/(www\.)?shipfastt?\.in/gi, "https://www.velocityshipping.in")
+    .replace(/https?:\/\/(www\.)?velocityshipping\.in/gi, "https://viorajewel.velocityshipping.in");
+  return out || null;
+}
+
 /**
  * Pull { reference, awb, status } out of a Velocity status webhook body.
  * reference = the order_id we sent at creation (the Wix GUID), echoed back as
@@ -418,7 +432,7 @@ function parseStatusWebhook(body) {
     // order GUID) — the reliable key back to the Wix order. tracking_number = AWB.
     reference: data.order_external_id || data.order_id || data.reference || null,
     awb: data.tracking_number || data.awb || data.awb_code || null,
-    trackingUrl: data.tracking_url || null,
+    trackingUrl: brandTrackUrl(data.tracking_url),
     rawStatus: data.status || data.current_status || null,
     status: normalizeStatus(data.status || data.current_status),
   };
@@ -466,7 +480,7 @@ async function trackShipment(awb) {
             rec.shipment_track?.[0]?.current_status ||
             null,
           activities: rec.shipment_track_activities || [],
-          trackUrl: rec.track_url || `${c.trackBase}/${awb}`,
+          trackUrl: brandTrackUrl(rec.track_url) || `${c.trackBase}/${awb}`,
           raw: data,
         };
       },

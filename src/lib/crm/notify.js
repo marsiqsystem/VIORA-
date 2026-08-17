@@ -51,15 +51,22 @@ const money = (v) => {
 // FALLBACK used if Meta can't be reached — never the primary text.
 // Build the customer-facing tracking link from the AWB, matching Velocity's
 // track base (same default as lib/crm/velocity.js). Falls back to the site.
-// Customer tracking page — the Viora-branded "Powered by Velocity" page at
-// www.velocityshipping.in/track/<AWB>. We also rewrite the old wrong hosts
-// (shipfast.in and the shipfastt.in typo) in case either is still baked into the
-// VELOCITY_TRACK_URL_BASE env var, so tracking links work without an env edit.
-const TRACK_BASE = (process.env.VELOCITY_TRACK_URL_BASE || "https://www.velocityshipping.in/track")
-  .replace(/https?:\/\/(www\.)?shipfastt?\.in/gi, "https://www.velocityshipping.in")
+// Customer tracking page — the Viora-branded tracking page configured in the
+// Velocity portal at viorajewel.velocityshipping.in/track/<AWB> (set 2026-08-17).
+// brandTrack() forces every tracking URL onto that branded host so links are
+// consistent WITHOUT any Vercel env edit: it rewrites the old wrong hosts
+// (shipfast.in / the shipfastt.in typo) and the generic www.velocityshipping.in
+// host (whether it comes from a stale VELOCITY_TRACK_URL_BASE env var or from a
+// tracking_url returned by the Velocity webhook) up to the branded subdomain.
+const BRAND_TRACK_HOST = "https://viorajewel.velocityshipping.in";
+const brandTrack = (url) =>
+  String(url || "")
+    .replace(/https?:\/\/(www\.)?shipfastt?\.in/gi, "https://www.velocityshipping.in")
+    .replace(/https?:\/\/(www\.)?velocityshipping\.in/gi, BRAND_TRACK_HOST);
+const TRACK_BASE = brandTrack(process.env.VELOCITY_TRACK_URL_BASE || `${BRAND_TRACK_HOST}/track`)
   .replace(/\/$/, "");
 const trackingLink = (o) =>
-  String(o.trackingUrl || "").trim() ||
+  brandTrack(String(o.trackingUrl || "").trim()) ||
   (o.awb ? `${TRACK_BASE}/${o.awb}` : "https://viorajewel.in/orders");
 
 const render = {
