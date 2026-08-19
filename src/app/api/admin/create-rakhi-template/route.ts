@@ -42,7 +42,9 @@ const BODY_TEXT =
   "💳 Pay *online / prepaid* for smoother, faster delivery — and get *FLAT ₹50 OFF*!\n\n" +
   "{{1}}, you've shopped with us before, and we'd love to make this Rakhi extra special for your family. 🌸";
 
-const FOOTER_TEXT = "Viora • Limited-time Rakhi offer 🌸";
+// Meta rejects footers containing newlines OR emojis (error 2388073), so this
+// stays plain text — the emoji flourish lives in the body instead.
+const FOOTER_TEXT = "Viora • Limited-time Rakhi offer";
 
 const BUTTONS = [
   { type: "URL", text: "Order Gift Set", url: "https://www.viorajewel.in/rakhi-luxe-gift-set" },
@@ -73,7 +75,7 @@ async function uploadSampleHeader(imageUrl: string, token: string, version: stri
   const upRes = await fetch(`${GRAPH}/${version}/${sess.id}`, {
     method: "POST",
     headers: { Authorization: `OAuth ${token}`, file_offset: "0" },
-    body: bytes,
+    body: new Uint8Array(bytes),
   });
   const up = await upRes.json().catch(() => ({}));
   if (!upRes.ok || !up?.h) {
