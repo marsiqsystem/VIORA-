@@ -202,7 +202,7 @@ function inboundText(msg) {
     case "image":
       return msg.image?.caption ? `📷 ${msg.image.caption}` : "📷 Photo";
     case "video":
-      return "🎥 Video";
+      return msg.video?.caption ? `🎥 ${msg.video.caption}` : "🎥 Video";
     case "audio":
       return "🎵 Audio";
     case "document":

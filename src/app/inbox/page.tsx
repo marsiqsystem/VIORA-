@@ -840,14 +840,22 @@ export default function InboxPage() {
                 // An image bubble can come from a public URL (template header
                 // photo) or a proxied Meta media id (a sent/received photo).
                 const isImage = m.type === "image" && (!!m.mediaId || !!m.imageUrl);
+                const isVideo = m.type === "video" && !!m.mediaId;
+                const isAudio = m.type === "audio" && !!m.mediaId;
+                const isSticker = m.type === "sticker" && !!m.mediaId;
                 const isDoc = m.type === "document";
                 const isLocation = m.type === "location" && !!m.location;
+                // Photo, video and sticker render as edge-to-edge tiles (padding 4).
+                const isTile = isImage || isVideo || isSticker;
                 const proxy = m.mediaId
                   ? `/api/inbox/media?id=${encodeURIComponent(m.mediaId)}&key=${encodeURIComponent(key)}`
                   : "";
                 const imgSrc = m.imageUrl || proxy;
                 const placeholder =
                   m.text === "📷 Photo" ||
+                  m.text === "🎥 Video" ||
+                  m.text === "🎵 Audio" ||
+                  m.text === "🌟 Sticker" ||
                   m.text === "📍 Location" ||
                   m.text === `📄 ${m.filename || "Document"}`;
                 const caption = m.text && !placeholder ? m.text : "";
@@ -875,7 +883,7 @@ export default function InboxPage() {
                           <button onClick={() => deleteMsg(m.id)} style={{ ...menuItem, color: "#c0392b", whiteSpace: "nowrap", fontSize: 13 }}>🗑 Delete for me</button>
                         </div>
                       )}
-                      <div title={fullStamp(m.ts)} style={{ background: out ? C.outBubble : C.inBubble, border: `1px solid ${C.border}`, borderLeft: m.template ? `3px solid ${C.gold}` : `1px solid ${C.border}`, borderRadius: 12, padding: isImage ? 4 : "8px 11px", fontSize: 14, lineHeight: 1.4, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                      <div title={fullStamp(m.ts)} style={{ background: out ? C.outBubble : C.inBubble, border: `1px solid ${C.border}`, borderLeft: m.template ? `3px solid ${C.gold}` : `1px solid ${C.border}`, borderRadius: 12, padding: isTile ? 4 : "8px 11px", fontSize: 14, lineHeight: 1.4, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
                         {m.template && (
                           <div style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 9, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: C.goldDark, background: "rgba(201,166,107,.16)", border: `1px solid ${C.gold}`, borderRadius: 5, padding: "1px 6px", marginBottom: 5 }}>
                             ✦ Template
@@ -910,14 +918,26 @@ export default function InboxPage() {
                             <img src={imgSrc} alt={caption || "Photo"} style={{ maxWidth: "100%", width: 240, maxHeight: 280, objectFit: "cover", borderRadius: 9, display: "block" }} />
                           </a>
                         )}
+                        {isVideo && proxy && (
+                          // eslint-disable-next-line jsx-a11y/media-has-caption
+                          <video src={proxy} controls preload="metadata" style={{ maxWidth: "100%", width: 260, maxHeight: 320, borderRadius: 9, display: "block", background: "#000" }} />
+                        )}
+                        {isSticker && proxy && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={proxy} alt="Sticker" style={{ width: 120, height: 120, objectFit: "contain", display: "block" }} />
+                        )}
+                        {isAudio && proxy && (
+                          // eslint-disable-next-line jsx-a11y/media-has-caption
+                          <audio src={proxy} controls preload="metadata" style={{ display: "block", width: 240, maxWidth: "100%" }} />
+                        )}
                         {isDoc && (
                           <a href={proxy || "#"} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, color: C.plum, textDecoration: "none", padding: "2px 2px 6px" }}>
                             <span style={{ fontSize: 22 }}>📄</span>
                             <span style={{ fontWeight: 600, wordBreak: "break-all" }}>{m.filename || "Document"}</span>
                           </a>
                         )}
-                        <div style={{ padding: isImage ? "4px 7px 2px" : 0 }}>
-                          {caption || (isImage || isDoc || isLocation ? "" : m.text)}
+                        <div style={{ padding: isTile ? "4px 7px 2px" : 0 }}>
+                          {caption || (isTile || isAudio || isDoc || isLocation ? "" : m.text)}
                           <span style={{ float: "right", marginLeft: 10, marginTop: 6, fontSize: 10, color: C.sub, display: "inline-flex", gap: 4, alignItems: "center" }}>
                             <button onClick={(e) => { e.stopPropagation(); setMsgMenuId((cur) => (cur === m.id ? null : m.id)); }} title="Message options" style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 13, color: C.sub, padding: 0, lineHeight: 1 }}>⋮</button>
                             {clock(m.ts)} {out && <Ticks status={m.status} error={m.error} />}
