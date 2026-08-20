@@ -35,6 +35,29 @@ type ParsedTemplate = {
   urlButtonIndex: number | null;
 };
 
+// Known-approved templates that Meta's UI has activated but whose APPROVED status
+// the Graph /message_templates list can lag on for a while (common for MARKETING).
+// If such a template is missing from the live approved list, fall back to this
+// hard-coded metadata so the broadcast composer can still select it. Metadata here
+// MUST mirror what the template was actually created with (see the matching admin
+// create-* route), because it drives how the composer builds each send.
+const FALLBACK_TEMPLATES: ParsedTemplate[] = [
+  {
+    name: "rakhi_luxe_gift_v1",
+    language: "en_US",
+    category: "MARKETING",
+    bodyText:
+      "Hi {{1}}, Raksha Bandhan is almost here — surprise your sister with the " +
+      "Viora Rakhi Luxe Gift Set: Necklace, Earrings, Ring & Bracelet in a premium " +
+      "gift box. Order before 22nd for on-time delivery. Pay online/prepaid for FLAT ₹50 OFF!",
+    bodyVars: 1, // {{1}} = customer name
+    headerFormat: "IMAGE", // operator supplies the photo at send time
+    headerVars: 0,
+    hasUrlButton: false, // 2 STATIC URL buttons — no dynamic {{n}} param
+    urlButtonIndex: null,
+  },
+];
+
 function parseTemplate(t: any): ParsedTemplate {
   const comps: any[] = Array.isArray(t?.components) ? t.components : [];
   const body = comps.find((c) => c?.type === "BODY");
@@ -79,10 +102,34 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const templates = (res.templates || [])
+  const raw = res.templates || [];
+
+  // Diagnostic: ?debug=1 dumps every template's raw status so we can see why an
+  // approved-in-UI template isn't showing (e.g. Graph list still reports PENDING).
+  if (req.nextUrl.searchParams.get("debug") === "1") {
+    return NextResponse.json({
+      ok: true,
+      count: raw.length,
+      raw: raw.map((t: any) => ({
+        name: t?.name,
+        status: t?.status,
+        language: t?.language,
+        category: t?.category,
+      })),
+    });
+  }
+
+  const templates = raw
     .filter((t: any) => String(t?.status).toUpperCase() === "APPROVED")
-    .map(parseTemplate)
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .map(parseTemplate);
+
+  // Add any known-approved fallback the live list dropped, keyed by name+language.
+  const have = new Set(templates.map((t) => `${t.name}::${t.language}`));
+  for (const fb of FALLBACK_TEMPLATES) {
+    if (!have.has(`${fb.name}::${fb.language}`)) templates.push(fb);
+  }
+
+  templates.sort((a, b) => a.name.localeCompare(b.name));
 
   return NextResponse.json({ ok: true, templates });
 }
