@@ -70,9 +70,10 @@ function hashToObj(arr: any): Record<string, string> {
   return o;
 }
 function firstName(n: string) {
-  const t = String(n || "").trim().split(/\s+/)[0];
-  // drop honorifics so "{{1}}" reads naturally
-  return /^(dr|mr|mrs|ms|prof)\.?$/i.test(t) ? String(n).trim().split(/\s+/)[1] || t : t;
+  // strip a leading honorific whether spaced ("Dr. Kritika") or glued ("Dr.Kritika")
+  const cleaned = String(n || "").trim().replace(/^(dr|mr|mrs|ms|prof)\.?\s*/i, "");
+  const first = cleaned.split(/\s+/)[0];
+  return first || String(n || "").trim().split(/\s+/)[0];
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
