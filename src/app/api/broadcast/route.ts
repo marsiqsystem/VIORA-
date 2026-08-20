@@ -57,6 +57,7 @@ export async function POST(req: NextRequest) {
   const templateName = String(template?.name || "").trim();
   const languageCode = String(template?.languageCode || "en_US").trim();
   const headerImageUrl = template?.headerImageUrl ? String(template.headerImageUrl) : undefined;
+  const headerMediaId = template?.headerMediaId ? String(template.headerMediaId) : undefined;
   const urlButtonIndex =
     template?.urlButtonIndex === 0 || template?.urlButtonIndex
       ? String(template.urlButtonIndex)
@@ -105,6 +106,7 @@ export async function POST(req: NextRequest) {
       templateName,
       languageCode,
       headerImageUrl,
+      headerMediaId,
       bodyParams,
       urlButtons,
     });

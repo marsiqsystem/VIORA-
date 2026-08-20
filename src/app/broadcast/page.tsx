@@ -127,6 +127,12 @@ export default function BroadcastPage() {
   const [selectedName, setSelectedName] = useState("");
   const [mapping, setMapping] = useState<Mapping[]>([]);
   const [headerImageUrl, setHeaderImageUrl] = useState("");
+  // Device-uploaded header photo: uploaded once to Meta, reused (by media id)
+  // for every recipient. When set, it takes priority over the URL field.
+  const [headerMediaId, setHeaderMediaId] = useState("");
+  const [headerFileName, setHeaderFileName] = useState("");
+  const [uploadingHeader, setUploadingHeader] = useState(false);
+  const [headerUploadErr, setHeaderUploadErr] = useState("");
   const [buttonMap, setButtonMap] = useState<Mapping>({ source: "static", column: "", value: "" });
 
   const [progress, setProgress] = useState<{ running: boolean; done: number; total: number; sent: number; failed: number }>(
@@ -198,8 +204,45 @@ export default function BroadcastPage() {
       }))
     );
     setHeaderImageUrl("");
+    setHeaderMediaId(""); setHeaderFileName(""); setHeaderUploadErr("");
     setButtonMap({ source: "static", column: "", value: "" });
   }, [selectedName, headers]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Upload a header photo straight from the device: send it to /api/inbox/upload
+  // (reused — same Meta media upload the inbox uses), keep the returned media id,
+  // and reuse it for every recipient in the broadcast.
+  const uploadHeaderImage = async (file: File | null | undefined) => {
+    if (!file) return;
+    setHeaderUploadErr("");
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
+      setHeaderUploadErr("Use a JPG, PNG or WebP image."); return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setHeaderUploadErr("Image too large (max 5MB)."); return;
+    }
+    setUploadingHeader(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/inbox/upload", {
+        method: "POST",
+        headers: { "x-inbox-key": keyRef.current },
+        body: fd,
+      });
+      const data = await res.json();
+      if (data.ok && data.mediaId) {
+        setHeaderMediaId(String(data.mediaId));
+        setHeaderFileName(file.name || "photo");
+        setHeaderImageUrl(""); // media id wins; clear any pasted URL to avoid confusion
+      } else {
+        setHeaderUploadErr(typeof data.error === "string" ? data.error : "Upload failed.");
+      }
+    } catch {
+      setHeaderUploadErr("Upload failed — check your connection.");
+    } finally {
+      setUploadingHeader(false);
+    }
+  };
 
   const unlock = () => {
     const k = keyInput.trim();
@@ -261,7 +304,7 @@ export default function BroadcastPage() {
 
   const readyToSend =
     !!selected && sendable.length > 0 && !progress.running &&
-    (selected.headerFormat !== "IMAGE" || !!headerImageUrl.trim()) &&
+    (selected.headerFormat !== "IMAGE" || !!headerImageUrl.trim() || !!headerMediaId) &&
     mapping.every((mp) => (mp.source === "static" ? true : !!mp.column));
 
   const startBroadcast = async () => {
@@ -297,7 +340,9 @@ export default function BroadcastPage() {
             template: {
               name: selected.name,
               languageCode: selected.language,
-              headerImageUrl: selected.headerFormat === "IMAGE" ? headerImageUrl.trim() : undefined,
+              headerImageUrl:
+                selected.headerFormat === "IMAGE" && !headerMediaId ? headerImageUrl.trim() : undefined,
+              headerMediaId: selected.headerFormat === "IMAGE" && headerMediaId ? headerMediaId : undefined,
               urlButtonIndex: selected.hasUrlButton ? selected.urlButtonIndex : null,
             },
             contacts: batch,
@@ -529,9 +574,39 @@ export default function BroadcastPage() {
 
               {selected.headerFormat === "IMAGE" && (
                 <div style={{ marginTop: 12 }}>
-                  <label style={label}>Header image URL (required for this template)</label>
-                  <input value={headerImageUrl} onChange={(e) => setHeaderImageUrl(e.target.value)} placeholder="https://…/image.jpg"
-                    style={inputStyle} />
+                  <label style={label}>Header image (required for this template)</label>
+
+                  {headerMediaId ? (
+                    // Device photo uploaded → show it as chosen, with a way to clear.
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                      background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px" }}>
+                      <span style={{ color: C.ok, fontWeight: 600, fontSize: 13 }}>✓ Photo ready</span>
+                      <span style={{ color: C.sub, fontSize: 13, wordBreak: "break-all" }}>{headerFileName}</span>
+                      <button type="button"
+                        onClick={() => { setHeaderMediaId(""); setHeaderFileName(""); }}
+                        style={{ marginLeft: "auto", background: "none", border: "none", color: C.plum,
+                          cursor: "pointer", fontSize: 13, textDecoration: "underline" }}>
+                        Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: uploadingHeader ? "default" : "pointer",
+                        background: GOLD_BG, color: "#1A1410", fontWeight: 600, fontSize: 13,
+                        padding: "9px 14px", borderRadius: 10, opacity: uploadingHeader ? 0.6 : 1 }}>
+                        {uploadingHeader ? "Uploading…" : "📷 Upload from device"}
+                        <input type="file" accept="image/jpeg,image/png,image/webp" disabled={uploadingHeader}
+                          onChange={(e) => { uploadHeaderImage(e.target.files?.[0]); e.currentTarget.value = ""; }}
+                          style={{ display: "none" }} />
+                      </label>
+                      <div style={{ margin: "8px 0 6px", color: C.sub, fontSize: 12 }}>— or paste an image URL —</div>
+                      <input value={headerImageUrl} onChange={(e) => setHeaderImageUrl(e.target.value)} placeholder="https://…/image.jpg"
+                        style={inputStyle} />
+                    </>
+                  )}
+                  {headerUploadErr && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: C.bad }}>{headerUploadErr}</div>
+                  )}
                 </div>
               )}
               {selected.headerVars > 0 && (

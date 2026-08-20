@@ -141,6 +141,7 @@ function sendText({ to, body, replyTo }, opts) {
  * @param {string}   [p.languageCode="en_US"]  must match the approved template's language
  * @param {(string|number)[]} [p.bodyParams=[]]   ordered body {{1}},{{2}}… values
  * @param {string}   [p.headerImageUrl]  public HTTPS image URL for a media header
+ * @param {string}   [p.headerMediaId]  Meta media id for a media header (takes priority over headerImageUrl)
  * @param {(string|number)[]} [p.headerParams=[]] ordered header TEXT variable values (usually 0 or 1)
  * @param {{index:string|number, param:string}[]} [p.urlButtons=[]]
  *        one entry per dynamic URL button: `index` is the button's position in
@@ -155,6 +156,7 @@ function sendTemplate(
     languageCode = "en_US",
     bodyParams = [],
     headerImageUrl,
+    headerMediaId,
     headerParams = [],
     urlButtons = [],
   },
@@ -162,7 +164,15 @@ function sendTemplate(
 ) {
   const components = [];
 
-  if (headerImageUrl) {
+  if (headerMediaId) {
+    // Media header by uploaded media id (via uploadMedia). Preferred for a
+    // device-uploaded broadcast photo: upload once, reuse the same id for every
+    // recipient — no public URL needed and no per-send re-fetch/size worry.
+    components.push({
+      type: "header",
+      parameters: [{ type: "image", image: { id: String(headerMediaId) } }],
+    });
+  } else if (headerImageUrl) {
     // Media header: the parameter type must match the template's approved
     // header format (image), with the asset supplied as a public link. Cap the
     // image size first — a Wix product photo can be ~9 MB, over WhatsApp's 5 MB
