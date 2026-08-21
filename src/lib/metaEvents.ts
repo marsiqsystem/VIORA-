@@ -1,5 +1,7 @@
 "use client";
 
+import { trackGa4FromMeta } from "@/lib/ga4";
+
 export type MetaEventName =
   | "ViewContent"
   | "AddToCart"
@@ -165,6 +167,13 @@ export async function trackMetaEvent(
   explicitEventId?: string
 ) {
   if (typeof window === "undefined") return;
+
+  // GA4 (analytics) mirror. Fired BEFORE the marketing-consent gate below: GA4 is
+  // analytics, not advertising, and — like the automatic page_view and the
+  // existing purchase event — is not tied to the marketing opt-out. This is what
+  // populates GA4's view_item / add_to_cart / begin_checkout funnel steps. The
+  // Meta Pixel + CAPI below stay gated by marketing consent.
+  trackGa4FromMeta(eventName, customData);
 
   // Consent gate: no Pixel and no CAPI unless the visitor opted into marketing.
   // (The browser Pixel is already gated by fbq not loading, but the server-side
