@@ -18,7 +18,11 @@
 
 import type { MetaCustomData, MetaEventName } from "@/lib/metaEvents";
 
-const GA4_ID = "G-2PY7N0E5WE";
+// Both GA4 properties this site feeds: the code-based one (G-2PY7N0E5WE) and the
+// one linked through the GT-T8ZJVVT9 Google Tag (G-69BB087ZMC) — the latter is
+// where `purchase` already lands. Send ecommerce events to BOTH so the funnel is
+// complete in whichever property marketing actually opens, no guessing required.
+const GA4_IDS = ["G-2PY7N0E5WE", "G-69BB087ZMC"];
 
 // Meta standard event -> GA4 recommended event name.
 const GA4_EVENT_BY_META: Partial<Record<MetaEventName, string>> = {
@@ -81,10 +85,13 @@ export function trackGa4FromMeta(
   const gtag = (window as unknown as { gtag?: (...args: unknown[]) => void }).gtag;
   if (typeof gtag !== "function") return;
 
-  gtag("event", ga4Event, {
-    send_to: GA4_ID,
+  const payload = {
     currency: data.currency || "INR",
     ...(typeof data.value === "number" ? { value: data.value } : {}),
     items: toGa4Items(data),
-  });
+  };
+  // Fire once per property so each GA4 destination gets its own scoped event.
+  for (const id of GA4_IDS) {
+    gtag("event", ga4Event, { send_to: id, ...payload });
+  }
 }
