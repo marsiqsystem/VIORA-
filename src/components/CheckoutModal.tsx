@@ -485,7 +485,10 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
       0
     );
 
-    trackInitiateCheckout(total, "INR", totalQuantity);
+    // This is the place-order SUBMIT stage (user has entered details and is
+    // confirming), so in GA4 it's add_payment_info — not a second begin_checkout.
+    // Meta keeps InitiateCheckout here (unchanged) to preserve existing pixel data.
+    trackInitiateCheckout(total, "INR", totalQuantity, { ga4Event: "add_payment_info" });
 
     try {
       if (paymentMethod === "PREPAID") {

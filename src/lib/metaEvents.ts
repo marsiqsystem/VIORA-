@@ -161,10 +161,17 @@ export function setMetaUserData(userData: MetaUserData) {
  * Use this when the SAME event is also fired from a different surface (e.g.
  * server-side after order finalize) so Meta can dedupe them properly.
  */
+export type TrackOpts = {
+  // Pin the GA4 event name for this call (or `null` to skip the GA4 mirror).
+  // Used to map the checkout-submit InitiateCheckout to `add_payment_info`.
+  ga4Event?: string | null;
+};
+
 export async function trackMetaEvent(
   eventName: MetaEventName,
   customData: MetaCustomData = {},
-  explicitEventId?: string
+  explicitEventId?: string,
+  opts?: TrackOpts
 ) {
   if (typeof window === "undefined") return;
 
@@ -173,7 +180,7 @@ export async function trackMetaEvent(
   // existing purchase event — is not tied to the marketing opt-out. This is what
   // populates GA4's view_item / add_to_cart / begin_checkout funnel steps. The
   // Meta Pixel + CAPI below stay gated by marketing consent.
-  trackGa4FromMeta(eventName, customData);
+  trackGa4FromMeta(eventName, customData, opts?.ga4Event);
 
   // Consent gate: no Pixel and no CAPI unless the visitor opted into marketing.
   // (The browser Pixel is already gated by fbq not loading, but the server-side

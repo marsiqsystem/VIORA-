@@ -227,21 +227,28 @@ const CheckoutPage = () => {
         country: "IN",
       });
 
-      trackMetaEvent("InitiateCheckout", {
-        currency: "INR",
-        value: subtotal,
-        content_ids: lineItems.map(catalogIdForItem).filter(Boolean),
-        content_type: "product",
-        contents: lineItems.map((item: any) => ({
-          id: catalogIdForItem(item),
-          quantity: item.quantity || 1,
-          item_price: Number(item.price?.amount) || 0,
-        })),
-        num_items: lineItems.reduce(
-          (sum: number, item: any) => sum + (item.quantity || 1),
-          0
-        ),
-      });
+      // Place-order SUBMIT stage → GA4 add_payment_info (not a second
+      // begin_checkout). Meta keeps InitiateCheckout here, unchanged.
+      trackMetaEvent(
+        "InitiateCheckout",
+        {
+          currency: "INR",
+          value: subtotal,
+          content_ids: lineItems.map(catalogIdForItem).filter(Boolean),
+          content_type: "product",
+          contents: lineItems.map((item: any) => ({
+            id: catalogIdForItem(item),
+            quantity: item.quantity || 1,
+            item_price: Number(item.price?.amount) || 0,
+          })),
+          num_items: lineItems.reduce(
+            (sum: number, item: any) => sum + (item.quantity || 1),
+            0
+          ),
+        },
+        undefined,
+        { ga4Event: "add_payment_info" }
+      );
 
       const checkout = await wixClient.currentCart.createCheckoutFromCurrentCart({
         channelType: currentCart.ChannelType.WEB,

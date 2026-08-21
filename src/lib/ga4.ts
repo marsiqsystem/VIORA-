@@ -61,10 +61,21 @@ function toGa4Items(data: MetaCustomData): Ga4Item[] {
 /**
  * Mirror a Meta ecommerce event into GA4 as the equivalent recommended event.
  * No-op on the server, when gtag hasn't loaded, or for events we don't map.
+ *
+ * `override` lets a caller pin an explicit GA4 event name (or skip GA4 with
+ * `null`). We use it so the checkout-SUBMIT stage — which reuses Meta's
+ * InitiateCheckout — maps to GA4 `add_payment_info` instead of a second
+ * `begin_checkout`. Without this, one purchase journey fires begin_checkout
+ * twice (open + submit), making begin_checkout out-count add_to_cart.
  */
-export function trackGa4FromMeta(eventName: MetaEventName, data: MetaCustomData) {
+export function trackGa4FromMeta(
+  eventName: MetaEventName,
+  data: MetaCustomData,
+  override?: string | null
+) {
   if (typeof window === "undefined") return;
-  const ga4Event = GA4_EVENT_BY_META[eventName];
+  if (override === null) return; // caller explicitly suppressed the GA4 mirror
+  const ga4Event = override || GA4_EVENT_BY_META[eventName];
   if (!ga4Event) return;
 
   const gtag = (window as unknown as { gtag?: (...args: unknown[]) => void }).gtag;

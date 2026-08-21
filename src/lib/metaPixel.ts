@@ -1,6 +1,6 @@
 "use client";
 
-import { trackMetaEvent, type MetaEventName } from "@/lib/metaEvents";
+import { trackMetaEvent, type MetaEventName, type TrackOpts } from "@/lib/metaEvents";
 
 export interface ContentParams {
   content_ids?: string[];
@@ -40,9 +40,10 @@ const safeTrack = (event: string, params?: Record<string, unknown>): void => {
 
 const safeTrackMeta = (
   event: MetaEventName,
-  params?: Record<string, unknown>
+  params?: Record<string, unknown>,
+  opts?: TrackOpts
 ): void => {
-  void trackMetaEvent(event, params || {});
+  void trackMetaEvent(event, params || {}, undefined, opts);
 };
 
 export const trackSearch = (search_string: string): void => {
@@ -97,9 +98,10 @@ export const trackAddToCart = (
 export const trackInitiateCheckout = (
   value: number,
   currency: string = "INR",
-  num_items?: number
+  num_items?: number,
+  opts?: TrackOpts
 ): void => {
-  safeTrackMeta("InitiateCheckout", { value, currency, num_items });
+  safeTrackMeta("InitiateCheckout", { value, currency, num_items }, opts);
 };
 
 export const trackAddPaymentInfo = (
