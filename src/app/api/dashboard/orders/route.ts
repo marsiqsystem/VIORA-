@@ -38,11 +38,13 @@ export async function GET(req: NextRequest) {
       const r = await fetch(kvUrl, { method: "POST", headers: { Authorization: `Bearer ${kvTok}`, "Content-Type": "application/json" }, body: JSON.stringify(args) });
       return { status: r.status, body: await r.json().catch(() => ({})) };
     };
-    const zcard = await raw(["ZCARD", "orders:index"]);
-    const sampleIds = await raw(["ZREVRANGE", "orders:index", 0, 4]);
-    const keyExists = await raw(["EXISTS", "orders:10216"]);
-    const sampleBlob = await raw(["GET", "orders:10216"]);
-    return NextResponse.json({ ok: true, debug: { zcard, sampleIds, keyExists, sampleBlob } });
+    const type = await raw(["TYPE", "orders:index"]);
+    const zcardBefore = await raw(["ZCARD", "orders:index"]);
+    const zaddTest = await raw(["ZADD", "orders:index", 999, "__probe__"]);
+    const zcardAfter = await raw(["ZCARD", "orders:index"]);
+    const zscore = await raw(["ZSCORE", "orders:index", "10216"]);
+    const zrev = await raw(["ZREVRANGE", "orders:index", 0, 4]);
+    return NextResponse.json({ ok: true, debug: { type, zcardBefore, zaddTest, zcardAfter, zscore, zrev } });
   }
 
   const { orders, total } = await ordersStore.listOrders({ limit, offset });
