@@ -80,13 +80,18 @@ function StatusBadge({ status }: { status: string }) {
 
 const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
 
-type Tab = "summary" | "orders" | "rto" | "products";
+type Tab = "summary" | "orders" | "rto" | "products" | "inventory" | "cod";
+type Meta = {
+  inventory: { code: string; colour: string; qty: number }[];
+  cod: Record<string, { label: string; value: string }[]>;
+};
 
 export default function DashboardPage() {
   const [key, setKey] = useState("");
   const [authed, setAuthed] = useState(false);
   const [pass, setPass] = useState("");
   const [orders, setOrders] = useState<Order[]>([]);
+  const [meta, setMeta] = useState<Meta>({ inventory: [], cod: {} });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [tab, setTab] = useState<Tab>("summary");
@@ -110,6 +115,12 @@ export default function DashboardPage() {
         return;
       }
       setOrders(data.orders || []);
+      // meta (inventory + COD) is best-effort — never blocks the orders view.
+      try {
+        const mres = await fetch(`/api/dashboard/meta?key=${encodeURIComponent(k)}`, { cache: "no-store" });
+        const mdata = await mres.json();
+        if (mres.ok && mdata.ok && mdata.meta) setMeta({ inventory: mdata.meta.inventory || [], cod: mdata.meta.cod || {} });
+      } catch {}
     } catch (e: any) { setError(e?.message || "Failed to load"); }
     finally { setLoading(false); }
   }, []);
@@ -216,7 +227,7 @@ export default function DashboardPage() {
     );
   }
 
-  const TABS: [Tab, string][] = [["summary", "Summary"], ["orders", "Orders"], ["rto", "RTO Report"], ["products", "Products"]];
+  const TABS: [Tab, string][] = [["summary", "Summary"], ["orders", "Orders"], ["rto", "RTO Report"], ["products", "Products"], ["inventory", "Inventory"], ["cod", "COD & Freight"]];
 
   return (
     <div style={{ minHeight: "100vh", background: C.bg, color: C.text }}>
@@ -244,6 +255,8 @@ export default function DashboardPage() {
         {tab === "orders" && <OrdersTab orders={orders} loading={loading} />}
         {tab === "rto" && <RtoTab kpi={kpi} byProduct={byProduct} rtoByCourier={rtoByCourier} rtoByPayment={rtoByPayment} />}
         {tab === "products" && <ProductsTab byProduct={byProduct} />}
+        {tab === "inventory" && <InventoryTab inventory={meta.inventory} />}
+        {tab === "cod" && <CodTab cod={meta.cod} />}
       </div>
     </div>
   );
@@ -500,6 +513,89 @@ function ProductsTab({ byProduct }: any) {
           </tbody>
         </table>
       </TableWrap>
+    </div>
+  );
+}
+
+// ============================ Inventory ===================================
+function InventoryTab({ inventory }: { inventory: { code: string; colour: string; qty: number }[] }) {
+  const byCode = useMemo(() => {
+    const map: Record<string, { code: string; total: number; rows: { colour: string; qty: number }[] }> = {};
+    for (const it of inventory) {
+      const e = (map[it.code] ||= { code: it.code, total: 0, rows: [] });
+      e.total += Number(it.qty) || 0;
+      e.rows.push({ colour: it.colour, qty: Number(it.qty) || 0 });
+    }
+    return Object.values(map).sort((a, b) => a.code.localeCompare(b.code));
+  }, [inventory]);
+  const totalUnits = byCode.reduce((s, e) => s + e.total, 0);
+
+  if (!inventory.length)
+    return <div style={{ color: C.sub, padding: 30 }}>No inventory data yet.</div>;
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <Card label="Products in stock" value={String(byCode.filter((e) => e.total > 0).length)} />
+        <Card label="Total units in hand" value={String(totalUnits)} />
+      </div>
+      <SectionTitle>Stock by Product &amp; Colour</SectionTitle>
+      <TableWrap>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+          <thead><tr><th style={th}>Product</th><th style={{ ...th, textAlign: "right" }}>Total</th><th style={th}>Colours</th></tr></thead>
+          <tbody>
+            {byCode.map((e) => (
+              <tr key={e.code}>
+                <td style={{ ...td, fontWeight: 700 }}>{e.code}{CATALOG[e.code] && <div style={{ color: C.sub, fontSize: 12, fontWeight: 400 }}>{CATALOG[e.code].name}</div>}</td>
+                <td style={{ ...tnum, fontWeight: 700, color: e.total === 0 ? C.bad : e.total <= 5 ? C.warn : C.text }}>{e.total}</td>
+                <td style={td}>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {e.rows.map((r, i) => (
+                      <span key={i} style={{ fontSize: 12, padding: "2px 9px", borderRadius: 999, background: r.qty === 0 ? "#FBE3E1" : C.cream2, color: r.qty === 0 ? C.bad : C.text, whiteSpace: "nowrap" }}>
+                        {r.colour}: <b>{r.qty}</b>
+                      </span>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableWrap>
+    </div>
+  );
+}
+
+// ============================ COD & Freight ===============================
+function CodTab({ cod }: { cod: Record<string, { label: string; value: string }[]> }) {
+  const BLOCKS: [string, string][] = [
+    ["shiprocket_cod", "Shiprocket — COD Remittance"],
+    ["shiprocket_freight", "Shiprocket — Freight & VAS"],
+    ["velocity_cod", "Velocity — COD Remittance"],
+  ];
+  const fmt = (v: string) => {
+    const n = Number(v);
+    return v && !Number.isNaN(n) ? `₹${n.toLocaleString("en-IN")}` : v || "—";
+  };
+  const has = Object.values(cod || {}).some((b) => b && b.length);
+  return (
+    <div>
+      <div style={{ background: "#FFF8E6", border: `1px solid ${C.gold}`, borderRadius: 12, padding: "12px 16px", fontSize: 13.5, color: C.text, marginBottom: 6 }}>
+        📌 Snapshot from the Sales Report (updated manually from courier dashboards). Live auto-sync from the Velocity Payments section is the next phase.
+      </div>
+      {!has && <div style={{ color: C.sub, padding: 30 }}>No COD/freight data yet.</div>}
+      {BLOCKS.map(([k, title]) =>
+        cod?.[k]?.length ? (
+          <div key={k}>
+            <SectionTitle>{title}</SectionTitle>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              {cod[k].map((it, i) => (
+                <Card key={i} label={it.label} value={fmt(it.value)} />
+              ))}
+            </div>
+          </div>
+        ) : null
+      )}
     </div>
   );
 }
