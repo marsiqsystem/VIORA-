@@ -180,15 +180,16 @@ async function processOrder(body: any, trace: any = { steps: [] }) {
     console.warn("[wix-webhook] orders-store record failed:", e?.message || e);
   }
 
-  // 3) Velocity.
-  // DEFAULT = CREATE-ONLY: call Velocity's /forward-order endpoint so the order
-  // lands in Velocity's "New Orders" list with NO courier, NO AWB, and NO wallet
-  // deduction. The user then picks a courier + ships it MANUALLY in Velocity.
-  // (This replaces relying on Velocity's Wix connector, which wasn't importing.)
-  //
-  // Set VELOCITY_SHIP_ON_ORDER=true to instead auto create+ship via
-  // /forward-order-orchestration (assigns courier + AWB + deducts wallet).
-  if (String(process.env.VELOCITY_SHIP_ON_ORDER).trim().toLowerCase() === "true") {
+  // 3) Courier.
+  // HOLD MODE (DASHBOARD_HOLD_ORDERS=true): do NOT create the order in any courier
+  // here — leave it sitting in the dashboard so an operator picks the courier
+  // (Velocity / iThink / …) from the Orders tab, which then creates it. Use this
+  // once multi-courier is live. The order is already recorded in the store above
+  // and the WhatsApp confirmation still goes out below.
+  if (String(process.env.DASHBOARD_HOLD_ORDERS).trim().toLowerCase() === "true") {
+    console.log(`[wix-webhook] HOLD mode — order ${info.orderId} awaits courier pick in dashboard.`);
+    trace.velocity = { mode: "hold", ok: true };
+  } else if (String(process.env.VELOCITY_SHIP_ON_ORDER).trim().toLowerCase() === "true") {
     const ship: any = await velocity.createShipment(order);
     if (ship.ok && ship.awb) {
       // Write tracking back into Wix — the storefront reads it from there.
