@@ -22,7 +22,11 @@
 // message. Nothing here throws.
 
 const PREFIX = "orders:";
-const INDEX_KEY = `${PREFIX}index`;
+// NOTE: the original "orders:index" zset was unusable in the shared KV — ZADD
+// succeeded and ZSCORE read back correctly, yet ZCARD returned 0 and ZREVRANGE
+// returned foreign junk ("Count","589",…), i.e. that key is occupied/managed by
+// something outside this codebase. Use a private, versioned index key instead.
+const INDEX_KEY = "orders:idx:v2";
 const key = (orderId) => `${PREFIX}${orderId}`;
 
 function kvCfg() {

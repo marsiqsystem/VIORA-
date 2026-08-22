@@ -38,13 +38,15 @@ export async function GET(req: NextRequest) {
       const r = await fetch(kvUrl, { method: "POST", headers: { Authorization: `Bearer ${kvTok}`, "Content-Type": "application/json" }, body: JSON.stringify(args) });
       return { status: r.status, body: await r.json().catch(() => ({})) };
     };
-    const type = await raw(["TYPE", "orders:index"]);
-    const zcardBefore = await raw(["ZCARD", "orders:index"]);
-    const zaddTest = await raw(["ZADD", "orders:index", 999, "__probe__"]);
-    const zcardAfter = await raw(["ZCARD", "orders:index"]);
-    const zscore = await raw(["ZSCORE", "orders:index", "10216"]);
-    const zrev = await raw(["ZREVRANGE", "orders:index", 0, 4]);
-    return NextResponse.json({ ok: true, debug: { type, zcardBefore, zaddTest, zcardAfter, zscore, zrev } });
+    // Test a brand-new random key to prove the store is consistent, plus the new
+    // v2 index key that the store/backfill now use.
+    const rnd = `orders:probe:${Date.now()}`;
+    const freshAdd = await raw(["ZADD", rnd, 1, "a"]);
+    const freshCard = await raw(["ZCARD", rnd]);
+    await raw(["DEL", rnd]);
+    const v2Card = await raw(["ZCARD", "orders:idx:v2"]);
+    const v2Rev = await raw(["ZREVRANGE", "orders:idx:v2", 0, 4]);
+    return NextResponse.json({ ok: true, debug: { freshAdd, freshCard, v2Card, v2Rev } });
   }
 
   const { orders, total } = await ordersStore.listOrders({ limit, offset });

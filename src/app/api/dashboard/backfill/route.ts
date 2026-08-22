@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const PREFIX = "orders:";
-const INDEX_KEY = `${PREFIX}index`;
+const INDEX_KEY = "orders:idx:v2"; // must match orders-store INDEX_KEY (see note there)
 const rowKey = (id: string) => `${PREFIX}${id}`;
 
 function kvCfg() {
