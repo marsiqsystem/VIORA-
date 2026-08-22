@@ -29,26 +29,6 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(1000, Math.max(1, parseInt(sp.get("limit") || "200", 10)));
   const offset = Math.max(0, parseInt(sp.get("offset") || "0", 10));
 
-  // Temporary diagnostics: ?debug=1 returns raw KV state so we can see whether the
-  // index (ZADD) actually populated. Remove after backfill is verified.
-  if (sp.get("debug") === "1") {
-    const kvUrl = (process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || "").trim().replace(/\/$/, "");
-    const kvTok = (process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || "").trim();
-    const raw = async (args: (string | number)[]) => {
-      const r = await fetch(kvUrl, { method: "POST", headers: { Authorization: `Bearer ${kvTok}`, "Content-Type": "application/json" }, body: JSON.stringify(args) });
-      return { status: r.status, body: await r.json().catch(() => ({})) };
-    };
-    // Test a brand-new random key to prove the store is consistent, plus the new
-    // v2 index key that the store/backfill now use.
-    const rnd = `orders:probe:${Date.now()}`;
-    const freshAdd = await raw(["ZADD", rnd, 1, "a"]);
-    const freshCard = await raw(["ZCARD", rnd]);
-    await raw(["DEL", rnd]);
-    const v2Card = await raw(["ZCARD", "orders:idx:v2"]);
-    const v2Rev = await raw(["ZREVRANGE", "orders:idx:v2", 0, 4]);
-    return NextResponse.json({ ok: true, debug: { freshAdd, freshCard, v2Card, v2Rev } });
-  }
-
   const { orders, total } = await ordersStore.listOrders({ limit, offset });
   return NextResponse.json({ ok: true, orders, total, limit, offset });
 }

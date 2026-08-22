@@ -22,11 +22,13 @@
 // message. Nothing here throws.
 
 const PREFIX = "orders:";
-// NOTE: the original "orders:index" zset was unusable in the shared KV — ZADD
-// succeeded and ZSCORE read back correctly, yet ZCARD returned 0 and ZREVRANGE
-// returned foreign junk ("Count","589",…), i.e. that key is occupied/managed by
-// something outside this codebase. Use a private, versioned index key instead.
-const INDEX_KEY = "orders:idx:v2";
+// The order-id index. We deliberately use a plain Redis SET (SADD/SMEMBERS) under
+// a private, versioned key and sort in JS — NOT a ZSET. The earlier "orders:index"
+// zset behaved incoherently in this shared KV (ZADD ok + ZSCORE ok, but ZCARD=0
+// and ZREVRANGE returned foreign junk like "Count"/"589"), i.e. that key was
+// occupied/managed by something outside this codebase. A private SET avoids the
+// flaky range/card ops entirely.
+const INDEX_KEY = "orders:ids:v1";
 const key = (orderId) => `${PREFIX}${orderId}`;
 
 function kvCfg() {
@@ -51,6 +53,7 @@ async function command(args) {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify(args),
+    cache: "no-store", // never let Next.js serve a cached KV response
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -149,7 +152,7 @@ async function recordOrder(order) {
       updatedAt: now,
     };
     await command(["SET", key(rec.orderId), JSON.stringify(rec)]);
-    await command(["ZADD", INDEX_KEY, String(rec.createdAt), rec.orderId]);
+    await command(["SADD", INDEX_KEY, rec.orderId]);
     return { ok: true, created: !existing };
   } catch (e) {
     console.warn("[orders-store] recordOrder failed:", e?.message || e);
@@ -170,7 +173,7 @@ async function updateOrder(orderId, patch) {
     const rec = { ...base, ...patch, orderId: String(orderId), updatedAt: Date.now() };
     await command(["SET", key(rec.orderId), JSON.stringify(rec)]);
     // Ensure it's in the index even if this update arrived before recordOrder.
-    await command(["ZADD", INDEX_KEY, String(rec.createdAt || Date.now()), rec.orderId]);
+    await command(["SADD", INDEX_KEY, rec.orderId]);
     return { ok: true };
   } catch (e) {
     console.warn("[orders-store] updateOrder failed:", e?.message || e);
@@ -186,12 +189,11 @@ async function updateOrder(orderId, patch) {
 async function listOrders({ limit = 200, offset = 0 } = {}) {
   if (!isConfigured()) return { orders: [], total: 0 };
   try {
-    const total = Number(await command(["ZCARD", INDEX_KEY])) || 0;
-    const ids =
-      (await command(["ZREVRANGE", INDEX_KEY, offset, offset + Math.max(0, limit) - 1])) || [];
-    if (!ids.length) return { orders: [], total };
+    const ids = (await command(["SMEMBERS", INDEX_KEY])) || [];
+    if (!ids.length) return { orders: [], total: 0 };
+    // MGET every blob, then sort newest-first IN JS (avoids the flaky zset range).
     const blobs = (await command(["MGET", ...ids.map(key)])) || [];
-    const orders = blobs
+    const all = blobs
       .map((b) => {
         try {
           return b ? JSON.parse(b) : null;
@@ -200,6 +202,9 @@ async function listOrders({ limit = 200, offset = 0 } = {}) {
         }
       })
       .filter(Boolean);
+    all.sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+    const total = all.length;
+    const orders = all.slice(offset, offset + Math.max(0, limit));
     return { orders, total };
   } catch (e) {
     console.warn("[orders-store] listOrders failed:", e?.message || e);

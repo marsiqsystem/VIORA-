@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const PREFIX = "orders:";
-const INDEX_KEY = "orders:idx:v2"; // must match orders-store INDEX_KEY (see note there)
+const INDEX_KEY = "orders:ids:v1"; // must match orders-store INDEX_KEY (a SET; see note there)
 const rowKey = (id: string) => `${PREFIX}${id}`;
 
 function kvCfg() {
@@ -43,6 +43,7 @@ async function pipe(cmds: (string | number)[][]) {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify(chunk),
+      cache: "no-store",
     });
     const data = await res.json().catch(() => []);
     if (!res.ok) throw new Error(`kv pipeline ${res.status}`);
@@ -96,7 +97,7 @@ export async function POST(req: NextRequest) {
     const createdAt = Number(o.createdAt) || base.createdAt || now;
     const rec = { ...base, ...o, orderId: id, createdAt, updatedAt: now };
     cmds.push(["SET", rowKey(id), JSON.stringify(rec)]);
-    cmds.push(["ZADD", INDEX_KEY, String(createdAt), id]);
+    cmds.push(["SADD", INDEX_KEY, id]);
     upserted++;
   }
   await pipe(cmds);
