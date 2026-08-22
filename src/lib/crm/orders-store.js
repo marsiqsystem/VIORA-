@@ -81,11 +81,22 @@ function blankRecord() {
     courierOrderId: "",
     awb: "",
     trackingUrl: "",
-    status: "new", // new | created | dispatched | out_for_delivery | delivered | rto | cancelled
+    status: "new", // new | created | dispatched | out_for_delivery | delivered | rto | cancelled | on_hold | not_shipped
     statusAt: 0,
+    // Raw courier sub-statuses (preserved from historical Excel / future webhooks).
+    deliveryStatus: "",
+    pickupStatus: "",
+    transitStatus: "",
     // --- money (filled from courier payments; freight already includes hidden COD) ---
     freight: null, // combined shipping + hidden COD, from Velocity Payments
+    goodsCost: null, // base + ₹30 packaging × qty
+    prepaidFee: null, // Razorpay 2% (prepaid only)
+    codFee: null, // legacy per-qty COD fee (Velocity folds COD into freight)
+    profit: null, // selling − goodsCost − freight − prepaidFee − rtoCost
     rtoCost: null,
+    paymentReceived: "", // yes/no (courier remittance received)
+    inStock: "",
+    source: "", // "wix-webhook" | "backfill-excel" — where the record came from
     updatedAt: 0,
   };
 }

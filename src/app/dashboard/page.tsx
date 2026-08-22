@@ -49,7 +49,12 @@ type Order = {
   courier: string;
   awb: string;
   status: string;
+  deliveryStatus?: string;
+  pickupStatus?: string;
+  transitStatus?: string;
   freight: number | null;
+  goodsCost?: number | null;
+  profit?: number | null;
   rtoCost: number | null;
   address: { city?: string; state?: string; postalCode?: string } | null;
 };
@@ -355,6 +360,8 @@ export default function DashboardPage() {
                     "Courier",
                     "Status",
                     "Freight ₹",
+                    "Cost ₹",
+                    "Profit ₹",
                     "RTO ₹",
                   ].map((h) => (
                     <th
@@ -407,14 +414,30 @@ export default function DashboardPage() {
                     <td style={{ ...td, textTransform: "capitalize" }}>{o.courier || "—"}</td>
                     <td style={td}>
                       <StatusBadge status={o.status || "new"} />
+                      {(o.transitStatus || o.pickupStatus) && (
+                        <div style={{ color: C.sub, fontSize: 11, marginTop: 3 }}>
+                          {[o.transitStatus, o.pickupStatus].filter(Boolean).join(" · ")}
+                        </div>
+                      )}
                     </td>
                     <td style={td}>{money(o.freight)}</td>
+                    <td style={td}>{money(o.goodsCost)}</td>
+                    <td
+                      style={{
+                        ...td,
+                        fontWeight: 700,
+                        color:
+                          o.profit == null ? C.sub : o.profit >= 0 ? C.ok : C.bad,
+                      }}
+                    >
+                      {money(o.profit)}
+                    </td>
                     <td style={td}>{money(o.rtoCost)}</td>
                   </tr>
                 ))}
                 {!loading && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={11} style={{ ...td, textAlign: "center", color: C.sub, padding: 40 }}>
+                    <td colSpan={13} style={{ ...td, textAlign: "center", color: C.sub, padding: 40 }}>
                       No orders yet. New orders will appear here automatically.
                     </td>
                   </tr>

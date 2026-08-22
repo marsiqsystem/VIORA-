@@ -647,6 +647,7 @@ export default function InboxPage() {
             <span style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: C.gold, marginTop: 2 }}>Inbox</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <a href="/dashboard" style={{ color: C.gold, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", textDecoration: "none" }}>← Dashboard</a>
             <span style={{ fontSize: 10, letterSpacing: 1, textTransform: "uppercase", color: C.gold, display: "inline-flex", alignItems: "center", gap: 5 }}>
               <span style={{ width: 7, height: 7, borderRadius: "50%", background: MOCK ? C.sub : "#3ecf6a", display: "inline-block", boxShadow: MOCK ? "none" : "0 0 0 2px rgba(62,207,106,.25)" }} />
               {MOCK ? "MOCK" : "Live"}

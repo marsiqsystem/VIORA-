@@ -410,6 +410,7 @@ export default function BroadcastPage() {
             <span style={{ width: 7, height: 7, borderRadius: "50%", background: templates.length ? "#3ecf6a" : C.sub, display: "inline-block" }} />
             {templates.length ? `${templates.length} template${templates.length === 1 ? "" : "s"} ready` : "Loading…"}
           </span>
+          <a href="/dashboard" style={{ color: C.gold, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>← Dashboard</a>
           <a href="/inbox" style={{ color: C.gold, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>Inbox →</a>
           <button onClick={lock} title="Log out — you'll need the passcode again next time" style={{ background: "rgba(201,166,107,.16)", color: "#fff", border: `1px solid rgba(201,166,107,.4)`, borderRadius: 8, padding: "6px 12px", fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>🔓 Log out</button>
         </div>
