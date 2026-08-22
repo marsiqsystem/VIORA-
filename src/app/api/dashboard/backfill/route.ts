@@ -69,6 +69,13 @@ export async function POST(req: NextRequest) {
   const incoming: any[] = Array.isArray(body?.orders) ? body.orders : [];
   if (!incoming.length) return NextResponse.json({ ok: false, error: "no orders" }, { status: 400 });
 
+  // reset:true wipes the index SET first so a re-import can't leave behind stale
+  // members from an earlier (dirty) payload. Orphaned blobs are harmless — they're
+  // only ever surfaced via the index.
+  if (body?.reset === true) {
+    await pipe([["DEL", INDEX_KEY]]);
+  }
+
   // Read existing records for the incoming ids so we MERGE (never blindly wipe a
   // record a live webhook may already have enriched).
   const ids = incoming.map((o) => String(o.orderId || "").trim()).filter(Boolean);
