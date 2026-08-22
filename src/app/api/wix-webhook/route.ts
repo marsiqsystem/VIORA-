@@ -13,6 +13,7 @@ import * as velocity from "@/lib/crm/velocity";
 import * as wix from "@/lib/crm/wix";
 import * as notify from "@/lib/crm/notify";
 import * as idempotency from "@/lib/crm/idempotency";
+import * as ordersStore from "@/lib/crm/orders-store";
 import { config as whatsappCfg } from "@/lib/crm/whatsapp";
 import T from "@/lib/crm/templates";
 
@@ -151,6 +152,32 @@ async function processOrder(body: any, trace: any = { steps: [] }) {
     }
   } catch (e: any) {
     console.warn("[wix-webhook] authoritative order re-read failed:", e?.message || e);
+  }
+
+  // 2.7) Record the order into the dashboard store (best-effort, additive).
+  // Idempotent upsert — a duplicate webhook refreshes base fields but preserves
+  // any courier/status/freight already set. Never breaks the webhook.
+  try {
+    const qty =
+      Array.isArray(order.items) && order.items.length
+        ? order.items.reduce((s: number, it: any) => s + (Number(it.quantity) || 1), 0)
+        : 1;
+    const rec = await ordersStore.recordOrder({
+      orderId: order.orderId,
+      orderGuid: order.orderGuid,
+      name: order.name,
+      phone: order.phone,
+      email: order.email,
+      product: order.product,
+      productId: order.productId,
+      qty,
+      sellingPrice: order.amount,
+      paymentMode: order.paymentMode,
+      address: order.address,
+    });
+    trace.orderStore = rec;
+  } catch (e: any) {
+    console.warn("[wix-webhook] orders-store record failed:", e?.message || e);
   }
 
   // 3) Velocity.
