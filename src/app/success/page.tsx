@@ -3,6 +3,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import Confetti from "react-confetti";
 import { trackMetaEvent } from "@/lib/metaEvents";
+import { trackGa4Purchase } from "@/lib/ga4";
 
 const SuccessContent = () => {
   const searchParams = useSearchParams();
@@ -51,6 +52,14 @@ const SuccessContent = () => {
           },
           `purchase_${orderId}`
         );
+        // Meta only covers the Pixel/CAPI side — GA4 gets purchase from here too,
+        // sent to both GA4 properties. GA4 de-dupes by transaction_id.
+        trackGa4Purchase({
+          transactionId: orderId,
+          value,
+          currency,
+          contentIds: content_ids,
+        });
         window.sessionStorage.setItem(firedKey, "1");
         window.sessionStorage.removeItem("vioraPendingPurchase");
       }

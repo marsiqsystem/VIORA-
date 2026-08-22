@@ -13,8 +13,10 @@
 // Here we translate our existing Meta event payload into GA4's recommended
 // ecommerce shape and push it via gtag, targeted at GA4 only.
 //
-// `purchase` is deliberately NOT mapped here — it already reaches GA4 through a
-// separate path, and emitting a second one would double-count revenue.
+// `purchase` is NOT part of the trackMetaEvent bridge below (that maps the funnel
+// middle only). Purchase is emitted explicitly via trackGa4Purchase() from the
+// success page — see that function. GA4 de-dupes purchase by `transaction_id`, so
+// a stray GTM-side purchase can't double-count revenue against it.
 
 import type { MetaCustomData, MetaEventName } from "@/lib/metaEvents";
 
@@ -93,5 +95,36 @@ export function trackGa4FromMeta(
   // Fire once per property so each GA4 destination gets its own scoped event.
   for (const id of GA4_IDS) {
     gtag("event", ga4Event, { send_to: id, ...payload });
+  }
+}
+
+/**
+ * Emit the GA4 `purchase` recommended event to every GA4 property. Called once
+ * from the success page. GA4 de-duplicates purchase by `transaction_id`, so
+ * passing the order id makes a repeat (reload, or a GTM-side purchase) harmless.
+ * No-op on the server or before gtag has loaded.
+ */
+export function trackGa4Purchase(args: {
+  transactionId: string;
+  value?: number;
+  currency?: string;
+  contentIds?: string[];
+}) {
+  if (typeof window === "undefined") return;
+  const gtag = (window as unknown as { gtag?: (...args: unknown[]) => void }).gtag;
+  if (typeof gtag !== "function") return;
+
+  const items: Ga4Item[] = Array.isArray(args.contentIds)
+    ? args.contentIds.map((id) => ({ item_id: id }))
+    : [];
+
+  const payload = {
+    transaction_id: args.transactionId,
+    currency: args.currency || "INR",
+    ...(typeof args.value === "number" ? { value: args.value } : {}),
+    items,
+  };
+  for (const id of GA4_IDS) {
+    gtag("event", "purchase", { send_to: id, ...payload });
   }
 }
