@@ -29,6 +29,22 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(1000, Math.max(1, parseInt(sp.get("limit") || "200", 10)));
   const offset = Math.max(0, parseInt(sp.get("offset") || "0", 10));
 
+  // Temporary diagnostics: ?debug=1 returns raw KV state so we can see whether the
+  // index (ZADD) actually populated. Remove after backfill is verified.
+  if (sp.get("debug") === "1") {
+    const kvUrl = (process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || "").trim().replace(/\/$/, "");
+    const kvTok = (process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || "").trim();
+    const raw = async (args: (string | number)[]) => {
+      const r = await fetch(kvUrl, { method: "POST", headers: { Authorization: `Bearer ${kvTok}`, "Content-Type": "application/json" }, body: JSON.stringify(args) });
+      return { status: r.status, body: await r.json().catch(() => ({})) };
+    };
+    const zcard = await raw(["ZCARD", "orders:index"]);
+    const sampleIds = await raw(["ZREVRANGE", "orders:index", 0, 4]);
+    const keyExists = await raw(["EXISTS", "orders:10216"]);
+    const sampleBlob = await raw(["GET", "orders:10216"]);
+    return NextResponse.json({ ok: true, debug: { zcard, sampleIds, keyExists, sampleBlob } });
+  }
+
   const { orders, total } = await ordersStore.listOrders({ limit, offset });
   return NextResponse.json({ ok: true, orders, total, limit, offset });
 }
