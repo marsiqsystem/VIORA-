@@ -10,6 +10,7 @@
 import { sendTemplate } from "./whatsapp";
 import { recordOutbound } from "./inbox-store";
 import { renderTemplateBody } from "./templateText";
+import { applyOverride } from "./orderOverride";
 import T from "./templates";
 
 /** Normalize a SQLite order row (snake_case) into the shape used below. */
@@ -139,6 +140,12 @@ const slugify = (s) =>
 // {{1}} name, {{2}} order id, {{3}} amount, {{4}} payment mode.
 // Confirm/Cancel are static quick replies — no params on send.
 async function sendOrderConfirmation(o) {
+  // Apply any operator product override (customer changed colour/variant after
+  // ordering — item edited in Velocity but Wix still holds the old product). This
+  // is the ONE choke point every WhatsApp template send passes through, so every
+  // message for that order — now and in future — shows the corrected name+photo.
+  // No-op when no override is stored. See src/lib/crm/orderOverride.js.
+  await applyOverride(o);
   const bodyParams = [o.name, o.orderId, o.amount, o.paymentMode];
   const headerImageUrl = o.productImage || T.orderConfirmation.headerImageUrl;
   const res = await sendTemplate({
@@ -158,6 +165,7 @@ async function sendOrderConfirmation(o) {
 // --- Workflow: order dispatched (fires when Velocity marks it in-transit) ------
 // body {{1}} name, {{2}} order id, {{3}} tracking URL. IMAGE header, NO button.
 async function sendDispatched(o) {
+  await applyOverride(o);
   const bodyParams = [o.name, o.orderId, trackingLink(o)];
   const headerImageUrl = o.productImage || T.dispatched.headerImageUrl;
   const res = await sendTemplate({
@@ -175,6 +183,7 @@ async function sendDispatched(o) {
 // --- Workflow 2: out for delivery --------------------------------------------
 // IMAGE header ; body {{1}} name, {{2}} order id, {{3}} product, {{4}} amount. NO button.
 async function sendOutForDelivery(o) {
+  await applyOverride(o);
   const bodyParams = [o.name, o.orderId, o.product, o.amount];
   const headerImageUrl = o.productImage || T.outForDelivery.headerImageUrl;
   const res = await sendTemplate({
@@ -192,6 +201,7 @@ async function sendOutForDelivery(o) {
 // --- Workflow 3: delivered ----------------------------------------------------
 // IMAGE header ; body {{1}} name, {{2}} order id.
 async function sendDelivered(o) {
+  await applyOverride(o);
   const bodyParams = [o.name, o.orderId];
   const headerImageUrl = o.productImage || T.delivered.headerImageUrl;
   const res = await sendTemplate({
@@ -209,6 +219,7 @@ async function sendDelivered(o) {
 // --- Workflow 4: review request (2-3 days post-delivery) ---------------------
 // IMAGE header ; body {{1}} name, {{2}} order id ; button url {{1}} product slug.
 async function sendReviewRequest(o) {
+  await applyOverride(o);
   const bodyParams = [o.name, o.orderId];
   // review_request_util_v1 (UTILITY) is HEADER-LESS. Only send a header if the
   // configured review template actually has one (keeps this correct if the env
@@ -234,6 +245,7 @@ async function sendReviewRequest(o) {
 // --- Workflow 5: abandoned cart ----------------------------------------------
 // IMAGE header ; body {{1}} name, {{2}} product, {{3}} value ; button url {{1}} cart recovery token.
 async function sendAbandonedCart(o) {
+  await applyOverride(o);
   const bodyParams = [o.name, o.product, o.amount];
   const headerImageUrl = o.productImage || T.abandonedCart.headerImageUrl;
   const res = await sendTemplate({
@@ -254,6 +266,7 @@ async function sendAbandonedCart(o) {
 // One template covers both reasons (customer request / couldn't connect on call);
 // the approved body text mentions both, so no reason variable is needed.
 async function sendOrderCancelled(o) {
+  await applyOverride(o);
   const bodyParams = [o.name, o.orderId, o.product, o.amount, prettyPayment(o.paymentMode)];
   const headerImageUrl = o.productImage || T.orderCancelled.headerImageUrl;
   const res = await sendTemplate({

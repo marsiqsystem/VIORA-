@@ -105,6 +105,9 @@ export async function POST(req: NextRequest) {
     // Carry a tracking URL for the dispatched message's {{3}} (webhook value,
     // else whatever Wix stored; notify falls back to building it from the AWB).
     if (trackingUrl && !order.trackingUrl) order.trackingUrl = trackingUrl;
+    // NOTE: the customer product override (colour/variant changed after ordering)
+    // is applied centrally in notify.js — the single choke point every template
+    // send passes through — so it covers every message without wiring it here.
 
     if (status === "DISPATCHED") {
       // WhatsApp message #2: packed & on its way, with the tracking link.
