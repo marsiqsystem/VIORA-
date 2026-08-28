@@ -112,11 +112,25 @@ export async function POST(req: NextRequest) {
 
   const results: any[] = [];
   for (const number of numbers) {
-    const order = await wix.findOrderByNumber(number);
-    if (!order) {
+    const found = await wix.findOrderByNumber(number);
+    if (!found) {
       results.push({ number, ok: false, reason: "no wix order" });
       continue;
     }
+    // searchOrders (findOrderByNumber) can return a partial order missing the
+    // shipping address. Re-fetch the FULL order by GUID so the Velocity payload
+    // gets city/state/zip. Fall back to the search result if the fetch fails.
+    let order = found;
+    const guid = found.orderGuid || found.orderId;
+    if (guid) {
+      try {
+        const full = await wix.getOrder(guid);
+        if (full) order = { ...found, ...full };
+      } catch {
+        /* keep the search result */
+      }
+    }
+    const addr = order.address || {};
     if (!doSend) {
       results.push({
         number,
@@ -125,6 +139,11 @@ export async function POST(req: NextRequest) {
         product: order.product,
         amount: order.amount,
         paymentMode: order.paymentMode,
+        address: {
+          city: addr.city || "",
+          state: addr.state || "",
+          postalCode: addr.postalCode || "",
+        },
         existingAwb: order.awb || null,
         wouldCreate: ship ? "ship (courier + AWB)" : "create-only (New Orders)",
       });

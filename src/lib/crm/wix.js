@@ -74,6 +74,12 @@ function normalize(wixOrder) {
     productImage: info.productImage,
     amount: info.amount,
     paymentMode: info.paymentMode,
+    // Shipping address + line items — needed to (re)build a Velocity payload from
+    // a fetched order (createShipment/createOrderOnly read o.address / o.items).
+    // Previously dropped here, so a Velocity create from a fetched order failed
+    // with "Missing required address fields: city, state, zip".
+    address: info.address,
+    items: info.items,
     awb: flags.awb || null,
     trackingUrl: flags.tracking_url || null,
     status,
