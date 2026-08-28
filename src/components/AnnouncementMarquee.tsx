@@ -4,7 +4,6 @@ import React from "react";
 
 const AnnouncementMarquee = () => {
   const items = [
-    "🎁 RAKHI SPECIAL — Gift Sets from ₹899 · Order early for on-time Rakhi delivery 🎁",
     "🚚 Free Delivery",
     "💳 COD Available",
     "🔄 Easy Exchange",
