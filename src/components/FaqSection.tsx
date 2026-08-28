@@ -43,7 +43,7 @@ const FAQS: Faq[] = [
   {
     question: "Where does Viora Jewel ship?",
     answer:
-      "We ship pan-India through trusted courier partners including Bluedart, Delhivery and India Post. Free delivery on every order with no minimum cart value. Cash on Delivery and prepaid options (UPI, cards, RuPay) are available at checkout. International shipping isn't available currently.",
+      "We ship pan-India through trusted courier partners including Bluedart, Delhivery and India Post. Prepaid orders (UPI, cards, RuPay) get FREE delivery plus an extra ₹25 off; Cash on Delivery is available with a small ₹49 delivery & handling charge. International shipping isn't available currently.",
   },
   {
     question: "What is the return and exchange policy?",

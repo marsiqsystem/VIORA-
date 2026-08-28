@@ -185,6 +185,20 @@ function extractBillableAmount(order = {}, body = {}, paymentMode) {
       if (cleaned) return cleaned;
     }
   }
+  // For COD, prefer the "COD Amount to Collect" custom field stamped at checkout
+  // (subtotal − coupon + ₹49 delivery/handling charge). It is present on the
+  // order from creation, so Velocity collects the right cash even if the
+  // order_placed webhook fires before the COD charge draft-edit commits.
+  if (paymentMode === "COD") {
+    const collect = firstDefined(
+      customFieldValue(order, "cod amount to collect"),
+      customFieldValue(body, "cod amount to collect")
+    );
+    if (collect != null) {
+      const cleaned = String(collect).replace(/[^\d.]/g, "");
+      if (cleaned) return cleaned;
+    }
+  }
   return extractAmount(order, body);
 }
 

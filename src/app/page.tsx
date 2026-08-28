@@ -40,7 +40,7 @@ const trustItems = [
   },
   {
     title: "Fast Shipping",
-    desc: "Free delivery on all orders",
+    desc: "Free delivery on prepaid orders",
     icon: (
       <svg className="w-6 h-6 text-[#9B1B30]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -88,7 +88,7 @@ const HomePage = async () => {
       >
         {/* SHINE50 removed from banner 2026-08-17 (deleted from Wix while Rakhi set is live). Restore full text on/after 30 Aug 2026:
             ✨ FLAT ₹50 DISCOUNT on orders above ₹700 (Code: SHINE50) | 10% DISCOUNT on orders above ₹999 (Code: CLUBVIORA) ✨ */}
-        ✨ 10% DISCOUNT on orders above ₹999 (Code: CLUBVIORA) ✨
+        ✨ Prepaid = FREE Shipping + ₹25 OFF · 10% OFF above ₹999 (Code: CLUBVIORA) ✨
       </div>
 
       <section className="px-4 pb-4 pt-14 md:px-8 md:pb-5 md:pt-18 lg:px-12 xl:px-16 2xl:px-24">

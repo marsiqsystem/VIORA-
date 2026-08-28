@@ -17,6 +17,12 @@ type CheckoutAddressPayload = {
   paymentMethod: "COD" | "PREPAID";
   razorpayPaymentId?: string;
   razorpayAmount?: string;
+  // COD delivery + handling charge to add onto the order so the courier
+  // collects subtotal + this amount. Sent by the checkout for COD orders.
+  codCharge?: string | number;
+  // Final COD amount to collect (subtotal − coupon + charge). Stamped on the
+  // order as a custom field so the CRM/Velocity read it race-proof.
+  codAmount?: string;
 };
 
 const getWixErrorMessage = (err: any) =>
@@ -157,6 +163,21 @@ export async function POST(req: Request) {
     const paymentMethod = details?.paymentMethod === "PREPAID" ? "PREPAID" : "COD";
     const razorpayPaymentId = normalizeText(details?.razorpayPaymentId);
     const razorpayAmount = normalizeText(details?.razorpayAmount);
+    // COD delivery + handling charge. Clamp to a sane range so a bad client
+    // value can never inflate an order (0 disables the fee).
+    const codChargeRaw = Number(details?.codCharge);
+    const codCharge =
+      paymentMethod === "COD" && Number.isFinite(codChargeRaw)
+        ? Math.min(Math.max(codChargeRaw, 0), 200)
+        : 0;
+    // Final COD collection amount (subtotal − coupon + charge) the courier must
+    // collect. Stamped as a custom field below so the CRM/Velocity read it
+    // race-proof (independent of the COD draft-edit timing).
+    const codAmountRaw = Number(normalizeText(details?.codAmount).replace(/[^\d.]/g, ""));
+    const codAmount =
+      paymentMethod === "COD" && Number.isFinite(codAmountRaw) && codAmountRaw > 0
+        ? codAmountRaw.toFixed(2)
+        : "";
 
     if (!email || !fullName || !phone || !addressLine1 || !city || !state || !postalCode) {
       return NextResponse.json(
@@ -204,6 +225,11 @@ export async function POST(req: Request) {
             : []),
           ...(razorpayAmount
             ? [{ title: "Amount Paid (Razorpay)", value: `₹${razorpayAmount}` }]
+            : []),
+          // COD collection amount, stamped at creation so the CRM/Velocity read
+          // the ₹49-inclusive figure race-proof (see extractBillableAmount).
+          ...(codAmount
+            ? [{ title: "COD Amount to Collect", value: `₹${codAmount}` }]
             : []),
         ],
       } as any
@@ -273,6 +299,64 @@ export async function POST(req: Request) {
     let finalTotal = wixOrderTotal; // amount we record as paid
     let committedOrder: any = null;
     let discountApplied = false;
+    let codChargeApplied = false;
+
+    // For COD orders, add the delivery + handling charge as a custom line item
+    // via a draft-order edit so the Wix order TOTAL — and therefore the amount
+    // the courier collects — becomes subtotal + ₹49. Mirrors the prepaid
+    // draft-edit below (which subtracts) but this one ADDS a charge.
+    //
+    // Best-effort: if the edit fails the underlying order is untouched. We still
+    // record the intended total so the email/tracking match what the customer
+    // agreed to, and log loudly so the Wix order can be corrected manually.
+    if (paymentMethod === "COD" && codCharge > 0 && Number.isFinite(wixOrderTotal)) {
+      try {
+        const draftRes = await (wixClient.draftOrders as any).createDraftOrder({
+          sourceOrderId: orderId,
+        });
+        const draftId =
+          draftRes?.calculatedDraftOrder?.draftOrder?._id ||
+          draftRes?.draftOrder?._id;
+        if (!draftId) throw new Error("Draft order id missing from response.");
+
+        await (wixClient.draftOrders as any).addLineItemsToDraftOrder(draftId, {
+          customLineItems: [
+            {
+              quantity: 1,
+              price: { amount: codCharge.toFixed(2) },
+              productName: { original: "Delivery + COD Charges" },
+              itemType: { preset: "SERVICE" },
+            },
+          ],
+        });
+
+        const commitRes = await (wixClient.draftOrders as any).commitDraftOrder(
+          draftId,
+          {
+            commitSettings: {
+              sendNotificationsToBuyer: false,
+              sendNotificationsToBusiness: false,
+            },
+            reason: "COD delivery & handling charge",
+          }
+        );
+
+        committedOrder = commitRes?.orderAfterCommit || null;
+        const committedTotal = committedOrder?.priceSummary?.total?.amount;
+        finalTotal =
+          committedTotal != null
+            ? Number(committedTotal)
+            : Number((wixOrderTotal + codCharge).toFixed(2));
+        codChargeApplied = true;
+      } catch (feeErr) {
+        console.error(
+          `COD charge (draft edit) FAILED for order ${orderId} — Wix order may ` +
+            `still show the product-only total and must be corrected manually:`,
+          feeErr
+        );
+        finalTotal = Number((wixOrderTotal + codCharge).toFixed(2));
+      }
+    }
 
     if (paymentMethod === "PREPAID" && razorpayPaymentId) {
       const amountPaid = Number(razorpayAmount);
@@ -563,6 +647,7 @@ export async function POST(req: Request) {
       orderId,
       paymentMarkedPaid,
       discountApplied,
+      codChargeApplied,
       finalTotal: Number.isFinite(finalTotal) ? finalTotal : undefined,
       order: committedOrder || approvedOrderResult?.order || (orderResult as any)?.order,
     });

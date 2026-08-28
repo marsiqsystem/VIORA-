@@ -21,7 +21,12 @@ interface CheckoutModalProps {
   onClose: () => void;
 }
 
-const PREPAID_DISCOUNT = 50;
+// Prepaid (pay-online) perks: a flat discount ON TOP of free delivery. COD
+// orders instead carry a delivery + handling charge. Both figures are the
+// single source of truth for the display AND the real amount charged/collected
+// (COD charge is added to the Wix order server-side so the courier collects it).
+const PREPAID_DISCOUNT = 25;
+const COD_CHARGE = 49;
 const CLUB_VIORA_CODE = "CLUBVIORA";
 const CLUB_VIORA_MINIMUM = 999;
 // SHINE50 DISABLED 2026-08-17 (deleted from Wix while Rakhi set is live). Re-enable on/after 30 Aug 2026:
@@ -94,7 +99,6 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   } = useCartStore();
   const { showToast } = useToast();
   const [mounted, setMounted] = useState(false);
-  const [step, setStep] = useState<1 | 2>(1);
   const [email, setEmail] = useState("");
   const [mobile, setMobile] = useState("");
   const [fullName, setFullName] = useState("");
@@ -103,7 +107,8 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   const [pincode, setPincode] = useState("");
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("COD");
+  // Prepaid is the default to push online payments (fewer COD orders → lower RTO).
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("PREPAID");
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
   const [showCouponInput, setShowCouponInput] = useState(false);
@@ -120,11 +125,10 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
       document.body.style.overflow = "hidden";
       setError("");
       setProcessing(false);
-      // Auto-skip to Step 2 if user is logged in. Also pull their member email
-      // so the order isn't rejected with "Missing checkout contact" — Step 1
-      // (where email is normally captured) is skipped in this branch.
+      // Single-page checkout: everything (email + delivery + payment) is on one
+      // screen. For logged-in members, prefill their email so they don't retype
+      // it — the field stays visible and editable.
       if (wixClient.auth.loggedIn()) {
-        setStep(2);
         (async () => {
           try {
             const memberRes: any = await (wixClient as any).members?.getCurrentMember?.({
@@ -141,8 +145,6 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
             console.warn("Could not load current member email:", e);
           }
         })();
-      } else {
-        setStep(1);
       }
     } else {
       document.body.style.overflow = "";
@@ -173,8 +175,8 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
     [lineItems]
   );
 
-  const isPrepaid = paymentMethod !== "COD";
-  
+  const isPrepaid = paymentMethod === "PREPAID";
+
   const wixCouponDiscount = useMemo(() => {
     const appliedDiscounts = (cart as any)?.appliedDiscounts || [];
     return appliedDiscounts.reduce((sum: number, d: any) => {
@@ -192,9 +194,20 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
     }, 0);
   }, [cart, subtotal]);
 
-  // Flat ₹50 off when the customer pays online (prepaid via Razorpay).
+  // Prepaid: flat ₹25 off + free delivery. COD: a ₹49 delivery + handling charge
+  // (this is really added to the Wix order server-side, so the courier collects
+  // it — see /api/wix/checkout). `total` is the real amount charged/collected.
   const prepaidDiscount = isPrepaid ? PREPAID_DISCOUNT : 0;
-  const total = Math.max(0, subtotal - wixCouponDiscount - prepaidDiscount);
+  const codCharge = paymentMethod === "COD" ? COD_CHARGE : 0;
+  const total = Math.max(
+    0,
+    subtotal - wixCouponDiscount - prepaidDiscount + codCharge
+  );
+  // What the customer would pay if they switched to prepaid — used for the
+  // "switch and save" nudge shown on COD.
+  const prepaidTotal = Math.max(0, subtotal - wixCouponDiscount - PREPAID_DISCOUNT);
+  // Difference between COD and prepaid (₹49 charge avoided + ₹25 off gained).
+  const prepaidSaving = COD_CHARGE + PREPAID_DISCOUNT;
 
   const appliedCouponCode = useMemo(() => {
     const appliedDiscounts = (cart as any)?.appliedDiscounts || [];
@@ -219,24 +232,13 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
     setShowCouponInput(false);
   };
 
-  // Display-only inflated subtotal. Frontend optics only. `total`/`subtotal`
-  // (the real cart items total) is what's sent to /api/razorpay and used for
-  // tracking / order amounts.
-  const displaySubtotal = subtotal + 99 + 50;
-
   if (!mounted || !open) return null;
 
-  const goToStep2 = () => {
+  // Single-page form: validate everything (email + delivery + phone) at submit.
+  const validateAll = () => {
     if (!email.trim() || !/^\S+@\S+\.\S+$/.test(email)) {
-      setError("Please enter a valid email address.");
-      return;
+      return "Please enter a valid email address.";
     }
-    setError("");
-    setMetaUserData({ email: email.trim() });
-    setStep(2);
-  };
-
-  const validateDelivery = () => {
     if (!fullName.trim()) return "Please enter your full name.";
     if (!address.trim()) return "Please enter your address.";
     if (!pincode.trim()) return "Please enter your pincode.";
@@ -252,7 +254,8 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   // Convert the current Wix cart into a finalized, approved Wix order via the
   // server route (API-key permissions). Used by both COD and prepaid flows so
   // the order lands in Wix Orders/Payments/analytics identically. For prepaid,
-  // `razorpayPaymentId` is recorded on the order for reconciliation.
+  // `razorpayPaymentId` is recorded on the order for reconciliation. For COD,
+  // `codCharge` is applied server-side so the order total = subtotal + ₹49.
   const finalizeWixOrder = async (
     method: PaymentMethod,
     razorpayPaymentId?: string
@@ -282,9 +285,16 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
           postalCode: pincode.trim(),
           paymentMethod: method,
           razorpayPaymentId,
-          // Actual amount charged via Razorpay (includes the prepaid ₹50 off),
+          // Actual amount charged via Razorpay (includes the prepaid discount),
           // recorded on the Wix order for reconciliation.
           razorpayAmount: method === "PREPAID" ? total.toFixed(2) : undefined,
+          // COD delivery + handling charge to add onto the Wix order so the
+          // courier collects subtotal + ₹49 (matches the total shown here).
+          codCharge: method === "COD" ? COD_CHARGE : undefined,
+          // Final COD amount the courier must collect (subtotal − coupon + ₹49).
+          // Stamped on the order so the CRM/Velocity read it race-proof, exactly
+          // like the prepaid "Amount Paid" field — independent of the draft edit.
+          codAmount: method === "COD" ? total.toFixed(2) : undefined,
         },
       }),
     });
@@ -441,7 +451,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   };
 
   const handlePayment = async () => {
-    const validationError = validateDelivery();
+    const validationError = validateAll();
     if (validationError) {
       setError(validationError);
       return;
@@ -521,8 +531,16 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
     label: string;
     sub?: string;
   }> = [
-    { id: "COD", label: "Cash on Delivery (COD)", sub: "Pay when you receive your order" },
-    { id: "PREPAID", label: "Prepaid (UPI / Cards)", sub: `Pay online & save ₹${PREPAID_DISCOUNT} instantly` },
+    {
+      id: "PREPAID",
+      label: "Pay Online (UPI / Cards)",
+      sub: `FREE delivery + ₹${PREPAID_DISCOUNT} OFF instantly`,
+    },
+    {
+      id: "COD",
+      label: "Cash on Delivery (COD)",
+      sub: `Extra ₹${COD_CHARGE} delivery & handling charge`,
+    },
   ];
 
   const modal = (
@@ -568,329 +586,335 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
         </div>
 
         <div className="bg-green-600 text-white text-center text-sm font-semibold py-2 px-4">
-          Get Extra ₹{PREPAID_DISCOUNT} Off on Prepaid Payments
+          🎉 Pay Online → FREE Delivery + ₹{PREPAID_DISCOUNT} OFF
         </div>
 
         <div className="p-5 space-y-5">
-          {/* Step 1 - Contact */}
-          {step === 1 && (
-            <section className="space-y-2">
-              <h3 className="text-sm font-semibold text-primary uppercase tracking-wider">
-                1. Contact
-              </h3>
-              <label className="block">
-                <span className="text-xs font-medium text-gray-700">Email Address</span>
+          {/* Contact */}
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold text-primary uppercase tracking-wider">
+              1. Contact
+            </h3>
+            <label className="block">
+              <span className="text-xs font-medium text-gray-700">Email Address</span>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Enter your email"
+                className="mt-1 w-full rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
+              />
+              <span className="mt-1 block text-xs text-gray-500">
+                We&apos;ll send your order confirmation here.
+              </span>
+            </label>
+          </section>
+
+          {/* Delivery */}
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold text-primary uppercase tracking-wider">
+              2. Delivery
+            </h3>
+            <div className="grid grid-cols-1 gap-3">
+              <input
+                type="text"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                placeholder="Full Name"
+                maxLength={100}
+                className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
+              />
+              <input
+                type="text"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="Address Line 1 (house, street)"
+                maxLength={120}
+                className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
+              />
+              <input
+                type="text"
+                value={addressLine2}
+                onChange={(e) => setAddressLine2(e.target.value)}
+                placeholder="Address Line 2 (landmark, area) — optional"
+                maxLength={120}
+                className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
+              />
+              <div className="grid grid-cols-2 gap-3">
                 <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Enter your email"
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
+                  type="text"
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  placeholder="City"
+                  maxLength={50}
+                  className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
                 />
-                <span className="mt-1 block text-xs text-gray-500">
-                  We&apos;ll send your order confirmation here.
+                <select
+                  value={state}
+                  onChange={(e) => setState(e.target.value)}
+                  className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20 bg-white"
+                >
+                  <option value="">Select State</option>
+                  {INDIAN_SUBDIVISIONS.map((s) => (
+                    <option key={s.code} value={s.code}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  type="text"
+                  value={pincode}
+                  onChange={(e) => setPincode(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                  placeholder="Pincode"
+                  inputMode="numeric"
+                  maxLength={10}
+                  className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
+                />
+                <input
+                  type="tel"
+                  value={mobile}
+                  onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                  placeholder="Phone (10 digits)"
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  pattern="[0-9]{10}"
+                  maxLength={10}
+                  title="Enter a 10-digit mobile number"
+                  className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
+                />
+              </div>
+            </div>
+          </section>
+
+          {/* Payment Selection */}
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold text-primary uppercase tracking-wider">
+              3. Payment Method
+            </h3>
+            <div className="flex flex-col gap-2">
+              {paymentOptions.map((opt) => {
+                const selected = paymentMethod === opt.id;
+                const optIsPrepaid = opt.id === "PREPAID";
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setPaymentMethod(opt.id)}
+                    className={`flex items-center gap-3 rounded-lg border px-4 py-3 text-left transition-all ${
+                      selected
+                        ? "border-[#9B1B30] bg-[#9B1B30]/5 ring-2 ring-[#9B1B30]/20"
+                        : "border-gray-200 hover:border-gray-300"
+                    }`}
+                  >
+                    <span
+                      className={`w-4 h-4 rounded-full border-2 flex-shrink-0 ${
+                        selected ? "border-[#9B1B30] bg-[#9B1B30]" : "border-gray-300"
+                      }`}
+                    />
+                    <span className="flex-1">
+                      <span className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-sm text-primary">
+                          {opt.label}
+                        </span>
+                        {optIsPrepaid ? (
+                          <span className="text-[10px] font-semibold uppercase tracking-wider bg-green-100 text-green-800 border border-green-200 rounded-full px-2 py-0.5">
+                            Save ₹{prepaidSaving}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-2 py-0.5">
+                            +₹{COD_CHARGE}
+                          </span>
+                        )}
+                      </span>
+                      {opt.sub && (
+                        <span className="block text-xs mt-0.5 text-gray-500">
+                          {opt.sub}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* Total summary */}
+          <section className="rounded-lg bg-gray-50 p-4 space-y-1.5 text-sm border border-gray-100 shadow-sm">
+            <div className="flex justify-between text-gray-600">
+              <span>Subtotal</span>
+              <span>₹{subtotal.toFixed(2)}</span>
+            </div>
+
+            {wixCouponDiscount > 0 && (
+              <div className="flex justify-between text-green-700 font-medium">
+                <span>
+                  Coupon{appliedCouponCode ? ` (${appliedCouponCode})` : ""}
                 </span>
-              </label>
+                <span>- ₹{wixCouponDiscount.toFixed(2)}</span>
+              </div>
+            )}
+
+            {/* Delivery line — FREE for prepaid, a real charge for COD */}
+            <div className="flex justify-between text-gray-600">
+              <span>{isPrepaid ? "Delivery" : "Delivery + COD Charges"}</span>
+              {isPrepaid ? (
+                <span>
+                  <span className="text-gray-400 line-through mr-2">₹99</span>
+                  <span className="text-green-600 font-bold">FREE</span>
+                </span>
+              ) : (
+                <span className="text-amber-700 font-semibold">+ ₹{COD_CHARGE.toFixed(2)}</span>
+              )}
+            </div>
+
+            {isPrepaid && (
+              <div className="flex justify-between text-green-700 font-medium">
+                <span>Prepaid Discount</span>
+                <span>- ₹{PREPAID_DISCOUNT.toFixed(2)}</span>
+              </div>
+            )}
+
+            <div className="flex justify-between text-base font-bold text-primary pt-3 border-t border-gray-200 mt-2">
+              <span>{isPrepaid ? "Total" : "Total (Pay on Delivery)"}</span>
+              <span>₹{total.toFixed(2)}</span>
+            </div>
+
+            {/* Sell callout: reinforce the prepaid win / nudge COD to switch */}
+            {isPrepaid ? (
+              <div className="mt-2 flex items-center gap-1.5 bg-green-50 p-2.5 rounded-md border border-green-100">
+                <svg className="w-4 h-4 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                <p className="text-green-700 text-sm font-medium">
+                  FREE delivery + ₹{PREPAID_DISCOUNT} OFF applied — you save ₹{(99 + PREPAID_DISCOUNT).toFixed(0)}! 🎉
+                </p>
+              </div>
+            ) : (
               <button
                 type="button"
-                onClick={goToStep2}
-                disabled={processing}
-                className="w-full mt-2 rounded-lg bg-[#9B1B30] py-3 text-sm font-semibold uppercase tracking-wider text-white hover:bg-[#7d1527] disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => setPaymentMethod("PREPAID")}
+                className="mt-2 w-full flex items-center gap-2 bg-amber-50 p-2.5 rounded-md border border-amber-200 text-left hover:bg-amber-100 transition-colors"
               >
-                Continue
+                <span className="text-lg leading-none">💡</span>
+                <p className="text-amber-800 text-xs font-medium leading-snug">
+                  Pay online instead → <b>FREE delivery + ₹{PREPAID_DISCOUNT} OFF</b>, pay only ₹{prepaidTotal.toFixed(0)} (save ₹{prepaidSaving}). <span className="underline">Tap to switch.</span>
+                </p>
               </button>
-            </section>
-          )}
+            )}
 
-          {/* Step 2 - Delivery + Payment */}
-          {step === 2 && (
-            <>
-              <section className="space-y-3">
-                <h3 className="text-sm font-semibold text-primary uppercase tracking-wider">
-                  2. Delivery
-                </h3>
-                <div className="grid grid-cols-1 gap-3">
-                  <input
-                    type="text"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    placeholder="Full Name"
-                    maxLength={100}
-                    className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
-                  />
-                  <input
-                    type="text"
-                    value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                    placeholder="Address Line 1 (house, street)"
-                    maxLength={120}
-                    className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
-                  />
-                  <input
-                    type="text"
-                    value={addressLine2}
-                    onChange={(e) => setAddressLine2(e.target.value)}
-                    placeholder="Address Line 2 (landmark, area) — optional"
-                    maxLength={120}
-                    className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
-                  />
-                  <div className="grid grid-cols-2 gap-3">
-                    <input
-                      type="text"
-                      value={city}
-                      onChange={(e) => setCity(e.target.value)}
-                      placeholder="City"
-                      maxLength={50}
-                      className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
-                    />
-                    <select
-                      value={state}
-                      onChange={(e) => setState(e.target.value)}
-                      className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20 bg-white"
-                    >
-                      <option value="">Select State</option>
-                      {INDIAN_SUBDIVISIONS.map((s) => (
-                        <option key={s.code} value={s.code}>
-                          {s.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <input
-                      type="text"
-                      value={pincode}
-                      onChange={(e) => setPincode(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                      placeholder="Pincode"
-                      inputMode="numeric"
-                      maxLength={10}
-                      className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
-                    />
-                    <input
-                      type="tel"
-                      value={mobile}
-                      onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                      placeholder="Phone (10 digits)"
-                      inputMode="numeric"
-                      autoComplete="tel"
-                      pattern="[0-9]{10}"
-                      maxLength={10}
-                      title="Enter a 10-digit mobile number"
-                      className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
-                    />
-                  </div>
-                </div>
-              </section>
-
-              {/* Payment Selection */}
-              <section className="space-y-2">
-                <h3 className="text-sm font-semibold text-primary uppercase tracking-wider">
-                  3. Payment Method
-                </h3>
-                <div className="flex flex-col gap-2">
-                  {paymentOptions.map((opt) => {
-                    const selected = paymentMethod === opt.id;
-                    const isPrepaid = opt.id === "PREPAID";
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => setPaymentMethod(opt.id)}
-                        className={`flex items-center gap-3 rounded-lg border px-4 py-3 text-left transition-all ${
-                          selected
-                            ? "border-[#9B1B30] bg-[#9B1B30]/5 ring-2 ring-[#9B1B30]/20"
-                            : "border-gray-200 hover:border-gray-300"
-                        }`}
-                      >
-                        <span
-                          className={`w-4 h-4 rounded-full border-2 flex-shrink-0 ${
-                            selected ? "border-[#9B1B30] bg-[#9B1B30]" : "border-gray-300"
-                          }`}
-                        />
-                        <span className="flex-1">
-                          <span className="flex items-center gap-2 flex-wrap">
-                            <span className="font-semibold text-sm text-primary">
-                              {opt.label}
-                            </span>
-                            {isPrepaid && (
-                              <span className="text-[10px] font-semibold uppercase tracking-wider bg-green-100 text-green-800 border border-green-200 rounded-full px-2 py-0.5">
-                                ₹{PREPAID_DISCOUNT} OFF
-                              </span>
-                            )}
-                          </span>
-                          {opt.sub && (
-                            <span className="block text-xs mt-0.5 text-gray-500">
-                              {opt.sub}
-                            </span>
-                          )}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-
-              {/* Total summary */}
-              <section className="rounded-lg bg-gray-50 p-4 space-y-1 text-sm border border-gray-100 shadow-sm">
-                <div className="flex justify-between text-gray-600 mb-2">
-                  <span>Subtotal</span>
-                  <span>₹{displaySubtotal.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-gray-600">
-                  <span>Shipping</span>
-                  <span>
-                    <span className="text-gray-400 line-through mr-2">₹99</span>
-                    <span className="text-green-600 font-bold">FREE Shipping!</span>
-                  </span>
-                </div>
-                <div className="flex justify-between text-gray-600 mb-2">
-                  <span>Processing Fee</span>
-                  <span>
-                    <span className="text-gray-400 line-through mr-2">₹50</span>
-                    <span className="text-green-600 font-bold">FREE</span>
-                  </span>
-                </div>
-
-                <div className="mt-3 mb-2 flex items-center gap-1.5 bg-green-50/50 p-2 rounded-md border border-green-100">
-                  <svg className="w-4 h-4 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                  <p className="text-green-600 text-sm font-medium">
-                    You are saving ₹{(149 + wixCouponDiscount + prepaidDiscount).toFixed(0)} on this order!
-                  </p>
-                </div>
-
-                {/* Coupon code */}
-                <div className="pt-2">
-                  {couponApplied && appliedCouponCode ? (
-                    <div className="flex items-start justify-between gap-2 rounded-md border border-green-200 bg-green-50/60 px-3 py-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <svg className="w-4 h-4 text-green-700 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                        </svg>
-                        <div className="min-w-0">
-                          <p className="text-xs font-semibold text-green-800 truncate">
-                            {appliedCouponCode} applied
-                          </p>
-                          {wixCouponDiscount > 0 && (
-                            <p className="text-[11px] text-green-700/80">
-                              You save ₹{wixCouponDiscount.toFixed(0)}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleRemoveCoupon}
-                        disabled={removingCoupon || processing}
-                        className="text-[11px] font-semibold uppercase tracking-wider text-red-600 hover:text-red-700 disabled:opacity-50"
-                      >
-                        {removingCoupon ? "..." : "Remove"}
-                      </button>
+            {/* Coupon code */}
+            <div className="pt-2">
+              {couponApplied && appliedCouponCode ? (
+                <div className="flex items-start justify-between gap-2 rounded-md border border-green-200 bg-green-50/60 px-3 py-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <svg className="w-4 h-4 text-green-700 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-green-800 truncate">
+                        {appliedCouponCode} applied
+                      </p>
+                      {wixCouponDiscount > 0 && (
+                        <p className="text-[11px] text-green-700/80">
+                          You save ₹{wixCouponDiscount.toFixed(0)}
+                        </p>
+                      )}
                     </div>
-                  ) : !showCouponInput ? (
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRemoveCoupon}
+                    disabled={removingCoupon || processing}
+                    className="text-[11px] font-semibold uppercase tracking-wider text-red-600 hover:text-red-700 disabled:opacity-50"
+                  >
+                    {removingCoupon ? "..." : "Remove"}
+                  </button>
+                </div>
+              ) : !showCouponInput ? (
+                <button
+                  type="button"
+                  onClick={() => setShowCouponInput(true)}
+                  className="w-full flex items-center justify-between rounded-md border border-dashed border-gray-300 px-3 py-2 text-xs font-medium text-gray-600 hover:border-[#9B1B30] hover:text-[#9B1B30] transition-colors"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                    Have a coupon code?
+                  </span>
+                  <span aria-hidden>+</span>
+                </button>
+              ) : (
+                <div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={couponCode}
+                      onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleApplyCoupon();
+                        }
+                      }}
+                      placeholder="ENTER CODE"
+                      autoFocus
+                      className="flex-1 min-w-0 rounded-md border border-gray-300 bg-white px-3 py-2 text-xs tracking-wider uppercase outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
+                    />
                     <button
                       type="button"
-                      onClick={() => setShowCouponInput(true)}
-                      className="w-full flex items-center justify-between rounded-md border border-dashed border-gray-300 px-3 py-2 text-xs font-medium text-gray-600 hover:border-[#9B1B30] hover:text-[#9B1B30] transition-colors"
+                      onClick={handleApplyCoupon}
+                      disabled={applyingCoupon || !couponCode.trim() || processing}
+                      className="rounded-md bg-[#9B1B30] px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-white hover:bg-[#7d1527] disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <span className="flex items-center gap-1.5">
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                        </svg>
-                        Have a coupon code?
-                      </span>
-                      <span aria-hidden>+</span>
+                      {applyingCoupon ? "..." : "Apply"}
                     </button>
+                  </div>
+                  {couponError ? (
+                    <p className="mt-1.5 text-[11px] text-red-600">{couponError}</p>
                   ) : (
-                    <div>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={couponCode}
-                          onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              handleApplyCoupon();
-                            }
-                          }}
-                          placeholder="ENTER CODE"
-                          autoFocus
-                          className="flex-1 min-w-0 rounded-md border border-gray-300 bg-white px-3 py-2 text-xs tracking-wider uppercase outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleApplyCoupon}
-                          disabled={applyingCoupon || !couponCode.trim() || processing}
-                          className="rounded-md bg-[#9B1B30] px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-white hover:bg-[#7d1527] disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {applyingCoupon ? "..." : "Apply"}
-                        </button>
-                      </div>
-                      {couponError ? (
-                        <p className="mt-1.5 text-[11px] text-red-600">{couponError}</p>
-                      ) : (
-                        <div className="mt-1.5 space-y-1">
-                          {/* SHINE50 nudge DISABLED 2026-08-17 (deleted from Wix while Rakhi set is live). Re-enable on/after 30 Aug 2026.
-                          <p className={`text-[11px] ${amountToUnlockShine > 0 ? "text-gray-500" : "text-green-600 font-medium"}`}>
-                            {amountToUnlockShine > 0 ? (
-                              <>Add ₹{amountToUnlockShine.toFixed(0)} more to use <span className="font-semibold tracking-wider">{SHINE_50_CODE}</span> (₹{SHINE_50_DISCOUNT} off).</>
-                            ) : (
-                              <>✅ Eligible! Use <span className="font-semibold tracking-wider">{SHINE_50_CODE}</span> for ₹{SHINE_50_DISCOUNT} off.</>
-                            )}
-                          </p>
-                          */}
-                          <p className={`text-[11px] ${amountToUnlockClub > 0 ? "text-gray-500" : "text-green-600 font-medium"}`}>
-                            {amountToUnlockClub > 0 ? (
-                              <>Add ₹{amountToUnlockClub.toFixed(0)} more to use <span className="font-semibold tracking-wider">{CLUB_VIORA_CODE}</span> (10% off).</>
-                            ) : (
-                              <>✅ Eligible! Use <span className="font-semibold tracking-wider">{CLUB_VIORA_CODE}</span> for 10% off.</>
-                            )}
-                          </p>
-                        </div>
-                      )}
+                    <div className="mt-1.5 space-y-1">
+                      {/* SHINE50 nudge DISABLED 2026-08-17 (deleted from Wix while Rakhi set is live). Re-enable on/after 30 Aug 2026.
+                      <p className={`text-[11px] ${amountToUnlockShine > 0 ? "text-gray-500" : "text-green-600 font-medium"}`}>
+                        {amountToUnlockShine > 0 ? (
+                          <>Add ₹{amountToUnlockShine.toFixed(0)} more to use <span className="font-semibold tracking-wider">{SHINE_50_CODE}</span> (₹{SHINE_50_DISCOUNT} off).</>
+                        ) : (
+                          <>✅ Eligible! Use <span className="font-semibold tracking-wider">{SHINE_50_CODE}</span> for ₹{SHINE_50_DISCOUNT} off.</>
+                        )}
+                      </p>
+                      */}
+                      <p className={`text-[11px] ${amountToUnlockClub > 0 ? "text-gray-500" : "text-green-600 font-medium"}`}>
+                        {amountToUnlockClub > 0 ? (
+                          <>Add ₹{amountToUnlockClub.toFixed(0)} more to use <span className="font-semibold tracking-wider">{CLUB_VIORA_CODE}</span> (10% off).</>
+                        ) : (
+                          <>✅ Eligible! Use <span className="font-semibold tracking-wider">{CLUB_VIORA_CODE}</span> for 10% off.</>
+                        )}
+                      </p>
                     </div>
                   )}
                 </div>
+              )}
+            </div>
+          </section>
 
-                {wixCouponDiscount > 0 && (
-                  <div className="flex justify-between text-green-700 font-medium pt-2">
-                    <span>
-                      Coupon{appliedCouponCode ? ` (${appliedCouponCode})` : ""}
-                    </span>
-                    <span>- ₹{wixCouponDiscount.toFixed(2)}</span>
-                  </div>
-                )}
+          <button
+            type="button"
+            onClick={handlePayment}
+            disabled={processing}
+            className="w-full rounded-lg bg-[#9B1B30] py-3.5 text-sm font-bold uppercase tracking-wider text-white hover:bg-[#7d1527] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {processing
+              ? "Processing..."
+              : isPrepaid
+                ? `PAY ₹${total.toFixed(2)} SECURELY`
+                : `PLACE ORDER - ₹${total.toFixed(2)}`}
+          </button>
 
-                {isPrepaid && (
-                  <div className="flex justify-between text-green-700 font-medium">
-                    <span>Prepaid Discount</span>
-                    <span>- ₹{PREPAID_DISCOUNT}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-base font-bold text-primary pt-3 border-t border-gray-200 mt-3">
-                  <span>Estimated Total</span>
-                  <span>₹{total.toFixed(2)}</span>
-                </div>
-              </section>
-
-              <button
-                type="button"
-                onClick={handlePayment}
-                disabled={processing}
-                className="w-full rounded-lg bg-[#9B1B30] py-3.5 text-sm font-bold uppercase tracking-wider text-white hover:bg-[#7d1527] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {processing
-                  ? "Processing..."
-                  : `PLACE ORDER - ₹${total.toFixed(2)}`}
-              </button>
-
-              <p className="text-[11px] text-gray-500 text-center">
-                Payments are 100% secure and encrypted.
-              </p>
-            </>
-          )}
+          <p className="text-[11px] text-gray-500 text-center">
+            Payments are 100% secure and encrypted.
+          </p>
 
           {/* Global Error Display */}
           {error && (
