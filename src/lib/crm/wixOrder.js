@@ -221,16 +221,44 @@ function extractAmount(order = {}, body = {}) {
 }
 
 /**
+ * A NON-PRODUCT line item — i.e. the "Delivery + COD Charges" fee we add to COD
+ * orders via a draft-order edit (a SERVICE-type custom line item, not a shippable
+ * good). It must be excluded from the normalized items list so it NEVER counts as
+ * a second product on Velocity: otherwise Velocity treats it as an extra unit and
+ * inflates totalUnits → volumetric weight/height (0.2→0.4 kg, box 18x12x4→18x12x8)
+ * → higher shipping cost. It also mustn't pollute the WhatsApp product name with a
+ * bogus "(+1 more)". The COD amount is unaffected — it comes from priceSummary.total,
+ * not from summing items. Matched by SERVICE preset OR the fee's name, so it's caught
+ * on both the webhook-body path and the fetched-order path.
+ */
+function isFeeLineItem(li) {
+  if (String(li?.itemType?.preset || "").toUpperCase() === "SERVICE") return true;
+  const nm = String(
+    li?.itemName ||
+      li?.productName?.original ||
+      li?.productName?.translated ||
+      li?.productName ||
+      li?.name ||
+      ""
+  ).toLowerCase();
+  return nm.includes("cod charge") || nm.includes("delivery + cod") || nm.includes("delivery and cod");
+}
+
+/**
  * Normalize the order's line items into a structured list our pipeline can use
  * everywhere (WhatsApp product name/photo, Velocity order_items). Handles the
  * Wix eCom "order_placed" automation shape (itemName, sku, catalogItemId, image,
  * totalPrice{value}) as well as older productName{original} shapes.
  *
+ * The COD delivery/handling fee line is filtered out here (see isFeeLineItem) so
+ * it's never shipped as a product nor counted toward volumetric weight.
+ *
  * @returns {{name,sku,quantity,productId,image,price}[]}
  */
 function extractItems(order = {}, body = {}) {
-  const raw = order.lineItems || order.items || body.lineItems || deepFindItems(body) || [];
-  if (!Array.isArray(raw)) return [];
+  const rawAll = order.lineItems || order.items || body.lineItems || deepFindItems(body) || [];
+  if (!Array.isArray(rawAll)) return [];
+  const raw = rawAll.filter((li) => !isFeeLineItem(li));
   return raw.map((li) => ({
     name:
       li?.itemName || // Wix eCom order_placed automation payload

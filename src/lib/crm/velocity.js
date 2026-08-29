@@ -136,11 +136,22 @@ function buildShipmentPayload(o) {
   const isCOD = o.paymentMode !== "PREPAID";
   const amount = Number(o.amount) || 0;
 
+  // DEFENSE-IN-DEPTH: never let a non-product fee line (our COD "Delivery + COD
+  // Charges" SERVICE line) reach the shipment — it would be counted as an extra
+  // unit and inflate volumetric weight/height (see wixOrder.isFeeLineItem, which
+  // already filters it upstream in extractItems). This second guard catches it
+  // even if a caller ever hands buildShipmentPayload items from another source.
+  const isFeeItem = (it) => {
+    const nm = String(it?.name || "").toLowerCase();
+    return nm.includes("cod charge") || nm.includes("delivery + cod") || nm.includes("delivery and cod");
+  };
+  const productItems = Array.isArray(o.items) ? o.items.filter((it) => !isFeeItem(it)) : [];
+
   // We only carry a single product string on the normalized order, so ship one
   // order item with placeholder SKU/units unless the caller passed real items.
   const items =
-    Array.isArray(o.items) && o.items.length
-      ? o.items.map((it, i) => ({
+    productItems.length
+      ? productItems.map((it, i) => ({
           name: it.name || o.product || "Jewellery",
           sku: it.sku || `SKU-${i + 1}`,
           units: Number(it.quantity) || 1,
