@@ -9,7 +9,7 @@ import {
   savePendingReview,
   removePendingReviewForProduct,
 } from "@/lib/pendingReviews";
-import { trackReviewLoginPrompt } from "@/lib/metaPixel";
+import { trackReviewLoginPrompt, trackReviewSubmitted } from "@/lib/metaPixel";
 import type { PublicReview } from "@/lib/reviewsTypes";
 
 const LoginModal = dynamic(() => import("./LoginModal"), { ssr: false });
@@ -108,8 +108,9 @@ const ReviewModal = ({
   };
 
   // Actually post the review to Wix. Assumes the customer is logged in.
-  // Returns true on success.
-  const doSubmit = async (): Promise<boolean> => {
+  // `recovered` = the review was written while logged out and is being posted
+  // after login. Returns true on success.
+  const doSubmit = async (recovered = false): Promise<boolean> => {
     if (!productId) return false;
     setIsSubmitting(true);
     try {
@@ -144,6 +145,7 @@ const ReviewModal = ({
       }
 
       removePendingReviewForProduct(productId);
+      trackReviewSubmitted([productId], productName, recovered);
       onSubmitted?.(result.review);
       setSubmitted(true);
       setTimeout(() => {
@@ -185,7 +187,7 @@ const ReviewModal = ({
   // so post the review the customer already wrote — no need to type it again.
   const handleLoggedIn = () => {
     setShowLogin(false);
-    doSubmit();
+    doSubmit(true);
   };
 
   return (

@@ -171,3 +171,36 @@ export const trackReviewLoginPrompt = (
     content_name,
   });
 };
+
+/**
+ * A review was successfully posted. `recovered` is true when it came from a
+ * draft saved while logged out and auto-posted after login (this session or a
+ * later visit) — pair it against `review_login_prompt` for the logged-out
+ * review conversion rate. Emitted to Meta Pixel (`ReviewSubmitted`) and GA4
+ * (`review_submitted`).
+ */
+export const trackReviewSubmitted = (
+  content_ids: string[],
+  content_name?: string,
+  recovered = false
+): void => {
+  if (isPixelReady()) {
+    try {
+      window.fbq?.("trackCustom", "ReviewSubmitted", {
+        content_ids,
+        content_name,
+        content_type: "product",
+        recovered,
+      });
+    } catch (err) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("Meta Pixel ReviewSubmitted failed:", err);
+      }
+    }
+  }
+  trackGa4Event("review_submitted", {
+    content_id: content_ids[0],
+    content_name,
+    recovered,
+  });
+};

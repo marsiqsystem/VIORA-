@@ -10,6 +10,7 @@
  */
 
 import { createProductReview } from "@/lib/reviewsActions";
+import { trackReviewSubmitted } from "@/lib/metaPixel";
 import type { PublicReview } from "@/lib/reviewsTypes";
 
 const KEY = "viora_pending_reviews_v1";
@@ -111,6 +112,8 @@ export async function flushPendingReviews(): Promise<PublicReview[]> {
         });
         if (res.ok) {
           posted.push({ productId: p.productId, review: res.review });
+          // Recovered = it was written logged out and is now posting on login.
+          trackReviewSubmitted([p.productId], p.productName, true);
         } else if (res.error === "LOGIN_REQUIRED") {
           // Not actually logged in yet — keep it and stop; nothing else will post.
           remaining.push(p);
