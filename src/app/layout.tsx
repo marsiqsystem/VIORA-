@@ -20,6 +20,9 @@ const ConsentManager = dynamic(() => import("@/components/ConsentManager"));
 import { WixClientContextProvider } from "@/context/wixContext";
 import { ToastProvider } from "@/components/Toast";
 import AnnouncementMarquee from "@/components/AnnouncementMarquee";
+const PendingReviewFlusher = dynamic(
+  () => import("@/components/PendingReviewFlusher")
+);
 
 const SITE_URL = (
   process.env.NEXT_PUBLIC_SITE_URL || "https://www.viorajewel.in"
@@ -208,6 +211,7 @@ export default function RootLayout({
         <SmoothScroll />
         <WixClientContextProvider>
           <ToastProvider>
+            <PendingReviewFlusher />
             <AnnouncementMarquee />
 
             <Navbar />

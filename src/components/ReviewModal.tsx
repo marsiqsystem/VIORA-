@@ -5,6 +5,10 @@ import Image from "next/image";
 import dynamic from "next/dynamic";
 import { useWixClient } from "@/hooks/useWixClient";
 import { createProductReview, getReviewUploadUrl } from "@/lib/reviewsActions";
+import {
+  savePendingReview,
+  removePendingReviewForProduct,
+} from "@/lib/pendingReviews";
 import type { PublicReview } from "@/lib/reviewsTypes";
 
 const LoginModal = dynamic(() => import("./LoginModal"), { ssr: false });
@@ -102,22 +106,10 @@ const ReviewModal = ({
     onClose();
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-
-    if (!productId) {
-      setError("This review form isn't linked to a product. Please open it from a product page.");
-      return;
-    }
-    if (!rating || !body.trim()) return;
-
-    // Client-side login check first for a faster UX. Server re-validates.
-    if (!wixClient.auth.loggedIn()) {
-      setShowLogin(true);
-      return;
-    }
-
+  // Actually post the review to Wix. Assumes the customer is logged in.
+  // Returns true on success.
+  const doSubmit = async (): Promise<boolean> => {
+    if (!productId) return false;
     setIsSubmitting(true);
     try {
       let mediaUrl: string | undefined;
@@ -125,7 +117,7 @@ const ReviewModal = ({
         const uploaded = await uploadPhoto(file);
         if (!uploaded) {
           setIsSubmitting(false);
-          return;
+          return false;
         }
         mediaUrl = uploaded;
       }
@@ -140,23 +132,56 @@ const ReviewModal = ({
 
       if (!result.ok) {
         if (result.error === "LOGIN_REQUIRED") {
+          // Session not ready yet — keep the draft so it posts once logged in.
+          savePendingReview({ productId, productName, rating, title, body });
           setShowLogin(true);
         } else {
           setError(result.message || "Could not submit your review. Please try again.");
         }
         setIsSubmitting(false);
-        return;
+        return false;
       }
 
+      removePendingReviewForProduct(productId);
       onSubmitted?.(result.review);
       setSubmitted(true);
       setTimeout(() => {
         close();
       }, 1400);
+      return true;
     } catch (err: any) {
       setError(err?.message || "Something went wrong.");
+      setIsSubmitting(false);
+      return false;
     }
-    setIsSubmitting(false);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    if (!productId) {
+      setError("This review form isn't linked to a product. Please open it from a product page.");
+      return;
+    }
+    if (!rating || !body.trim()) return;
+
+    // Not logged in → SAVE the review so it's never lost, then prompt login.
+    // It auto-posts the moment they log in (this session or any future visit).
+    if (!wixClient.auth.loggedIn()) {
+      savePendingReview({ productId, productName, rating, title, body });
+      setShowLogin(true);
+      return;
+    }
+
+    await doSubmit();
+  };
+
+  // Fired when the login modal reports success. The session cookie is now set,
+  // so post the review the customer already wrote — no need to type it again.
+  const handleLoggedIn = () => {
+    setShowLogin(false);
+    doSubmit();
   };
 
   return (
@@ -308,7 +333,7 @@ const ReviewModal = ({
       <LoginModal
         open={showLogin}
         onClose={() => setShowLogin(false)}
-        onLoggedIn={() => setShowLogin(false)}
+        onLoggedIn={handleLoggedIn}
       />
     </>
   );

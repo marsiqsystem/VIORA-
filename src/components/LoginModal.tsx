@@ -176,9 +176,29 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
       // LOGIN or REGISTER mode.
       let response;
       if (mode === "LOGIN") {
-        const captchaTokens = (captchaInvisibleSiteKey && !isLocalhost())
-          ? { invisibleRecaptchaToken: await getInvisibleCaptchaToken(captchaInvisibleSiteKey, "login") }
-          : undefined;
+        // Login uses INVISIBLE (score-based) reCAPTCHA. If Google's script
+        // fails to load or rejects the site key, DON'T hard-fail the login —
+        // attempt without a token. If Wix actually enforces CAPTCHA it returns
+        // `missingCaptchaToken`, which the handlers below turn into guidance.
+        // (Without this fallback a flaky reCAPTCHA showed correct credentials
+        // as "Something went wrong.")
+        let captchaTokens;
+        if (captchaInvisibleSiteKey && !isLocalhost()) {
+          try {
+            captchaTokens = {
+              invisibleRecaptchaToken: await getInvisibleCaptchaToken(
+                captchaInvisibleSiteKey,
+                "login"
+              ),
+            };
+          } catch (captchaErr) {
+            console.warn(
+              "[captcha] invisible token unavailable, attempting login without it:",
+              captchaErr
+            );
+            captchaTokens = undefined;
+          }
+        }
         response = await withTimeout(
           wixClient.auth.login({
             email: identifier,
@@ -230,9 +250,11 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
             response.errorCode === "missingCaptchaToken" ||
             response.errorCode === "invalidCaptchaToken"
           ) {
-            if (isLocalhost()) {
+            // LOGIN has no visible checkbox (invisible reCAPTCHA), so requiring
+            // one would leave the user stuck. Point them to the Wix setting.
+            if (isLocalhost() || mode === "LOGIN") {
               setError(
-                "Wix is still requiring reCAPTCHA even though you may have disabled it. This happens when the site hasn't been re-published after changing the setting. Please go to your Wix Dashboard → (1) Settings → Site Member Settings → Signup & Login Security → make sure reCAPTCHA is OFF, (2) click Save, (3) then click the Publish button at the top of the dashboard. After publishing, come back and try registering again."
+                "Login is blocked by reCAPTCHA. In your Wix Dashboard go to Settings → Site Member Settings → Signup & Login Security → turn reCAPTCHA OFF (or re-check it), click Save, then click Publish at the top. After publishing, try again."
               );
             } else if (!isCaptchaRequired) {
               setIsCaptchaRequired(true);
@@ -243,7 +265,9 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
               );
             }
           } else {
-            setError("Something went wrong. Please try again.");
+            setError(
+              `Login failed (${response.errorCode || "unknown error"}). Please try again.`
+            );
           }
           break;
         case LoginState.EMAIL_VERIFICATION_REQUIRED:
@@ -282,9 +306,9 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
         return;
       }
       if (isCaptchaError) {
-        if (isLocalhost()) {
+        if (isLocalhost() || mode === "LOGIN") {
           setError(
-            "Wix is still requiring reCAPTCHA even though you may have disabled it. This happens when the site hasn't been re-published after changing the setting. Please go to your Wix Dashboard → (1) Settings → Site Member Settings → Signup & Login Security → make sure reCAPTCHA is OFF, (2) click Save, (3) then click the Publish button at the top of the dashboard. After publishing, come back and try registering again."
+            "Login is blocked by reCAPTCHA. In your Wix Dashboard go to Settings → Site Member Settings → Signup & Login Security → turn reCAPTCHA OFF (or re-check it), click Save, then click Publish at the top. After publishing, try again."
           );
         } else if (!isCaptchaRequired) {
           setIsCaptchaRequired(true);
@@ -313,7 +337,12 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
           "Login is unavailable — the Wix site needs to be Published from the Wix dashboard before authentication will work."
         );
       } else {
-        setError("Something went wrong. Please try again.");
+        const detail = code || raw || appDesc;
+        setError(
+          detail
+            ? `Something went wrong (${detail}). Please try again.`
+            : "Something went wrong. Please try again."
+        );
       }
     } finally {
       setIsLoading(false);

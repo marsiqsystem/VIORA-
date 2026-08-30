@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { format } from "timeago.js";
 import ReviewModal from "./ReviewModal";
 import type { PublicReview } from "@/lib/reviewsTypes";
@@ -34,6 +34,22 @@ const ReviewsSection = ({ productId, productName, reviews = [] }: Props) => {
   const handleAdded = (review: PublicReview) => {
     setLocalReviews((prev) => [review, ...prev]);
   };
+
+  // A logged-out draft for THIS product may get auto-posted elsewhere (on the
+  // next login). Splice it in live so the customer sees it without a reload.
+  useEffect(() => {
+    if (!productId) return;
+    const handler = (e: Event) => {
+      const posted = (e as CustomEvent).detail?.posted as
+        | { productId: string; review: PublicReview }[]
+        | undefined;
+      if (!posted) return;
+      const mine = posted.filter((p) => p.productId === productId).map((p) => p.review);
+      if (mine.length) setLocalReviews((prev) => [...mine, ...prev]);
+    };
+    window.addEventListener("viora:pending-reviews-flushed", handler);
+    return () => window.removeEventListener("viora:pending-reviews-flushed", handler);
+  }, [productId]);
 
   return (
     <div className="border-t border-gray-100 pt-6">
