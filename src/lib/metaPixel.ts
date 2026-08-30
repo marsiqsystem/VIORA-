@@ -1,6 +1,7 @@
 "use client";
 
 import { trackMetaEvent, type MetaEventName, type TrackOpts } from "@/lib/metaEvents";
+import { trackGa4Event } from "@/lib/ga4";
 
 export interface ContentParams {
   content_ids?: string[];
@@ -140,4 +141,33 @@ export const trackContact = (): void => {
 
 export const trackLead = (): void => {
   safeTrackMeta("Lead");
+};
+
+/**
+ * A logged-out visitor finished writing a review and was shown the login
+ * prompt. Fired so the team can measure how many review attempts happen while
+ * logged out — the same signal that used to silently lose reviews. Emitted to
+ * both Meta Pixel (custom event) and GA4 (`review_login_prompt`).
+ */
+export const trackReviewLoginPrompt = (
+  content_ids: string[],
+  content_name?: string
+): void => {
+  if (isPixelReady()) {
+    try {
+      window.fbq?.("trackCustom", "ReviewLoginPrompt", {
+        content_ids,
+        content_name,
+        content_type: "product",
+      });
+    } catch (err) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("Meta Pixel ReviewLoginPrompt failed:", err);
+      }
+    }
+  }
+  trackGa4Event("review_login_prompt", {
+    content_id: content_ids[0],
+    content_name,
+  });
 };

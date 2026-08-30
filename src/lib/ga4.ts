@@ -99,6 +99,24 @@ export function trackGa4FromMeta(
 }
 
 /**
+ * Emit an arbitrary GA4 custom event to every GA4 property. For funnel/UX
+ * signals that don't map to a recommended ecommerce event (e.g. a logged-out
+ * visitor being shown the review login prompt). No-op on the server or before
+ * gtag has loaded.
+ */
+export function trackGa4Event(
+  eventName: string,
+  params?: Record<string, unknown>
+) {
+  if (typeof window === "undefined" || !eventName) return;
+  const gtag = (window as unknown as { gtag?: (...args: unknown[]) => void }).gtag;
+  if (typeof gtag !== "function") return;
+  for (const id of GA4_IDS) {
+    gtag("event", eventName, { send_to: id, ...(params || {}) });
+  }
+}
+
+/**
  * Emit the GA4 `purchase` recommended event to every GA4 property. Called once
  * from the success page. GA4 de-duplicates purchase by `transaction_id`, so
  * passing the order id makes a repeat (reload, or a GTM-side purchase) harmless.

@@ -9,6 +9,7 @@ import {
   savePendingReview,
   removePendingReviewForProduct,
 } from "@/lib/pendingReviews";
+import { trackReviewLoginPrompt } from "@/lib/metaPixel";
 import type { PublicReview } from "@/lib/reviewsTypes";
 
 const LoginModal = dynamic(() => import("./LoginModal"), { ssr: false });
@@ -170,6 +171,9 @@ const ReviewModal = ({
     // It auto-posts the moment they log in (this session or any future visit).
     if (!wixClient.auth.loggedIn()) {
       savePendingReview({ productId, productName, rating, title, body });
+      // Measure how often a review is written while logged out (the attempts
+      // that used to be silently lost). Shows up in GA4 / Meta as a funnel step.
+      trackReviewLoginPrompt([productId], productName);
       setShowLogin(true);
       return;
     }
