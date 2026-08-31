@@ -252,7 +252,7 @@ export default function DashboardPage() {
         {error && <div style={{ background: "#FBE3E1", color: C.bad, padding: "10px 14px", borderRadius: 10, marginBottom: 12, fontSize: 14 }}>{error}</div>}
 
         {tab === "summary" && <SummaryTab kpi={kpi} monthly={monthly} byProduct={byProduct} statusBreakdown={statusBreakdown} />}
-        {tab === "orders" && <OrdersTab orders={orders} loading={loading} />}
+        {tab === "orders" && <OrdersTab orders={orders} loading={loading} apiKey={key} onChanged={() => load(key)} />}
         {tab === "rto" && <RtoTab kpi={kpi} byProduct={byProduct} rtoByCourier={rtoByCourier} rtoByPayment={rtoByPayment} />}
         {tab === "products" && <ProductsTab byProduct={byProduct} />}
         {tab === "inventory" && <InventoryTab inventory={meta.inventory} />}
@@ -365,23 +365,83 @@ function SummaryTab({ kpi, monthly, byProduct, statusBreakdown }: any) {
 }
 
 // ============================ Orders ======================================
-function OrdersTab({ orders, loading }: { orders: Order[]; loading: boolean }) {
+// An order is still "pickable" (needs a courier chosen) when no courier has been
+// assigned yet and it isn't already shipped/closed. In HOLD mode new orders land
+// here and wait for the operator to pick Velocity or Shiprocket.
+const PICKABLE_STATUS = new Set(["new", "on_hold", "not_shipped", "created", "hold", ""]);
+function isPickable(o: Order) {
+  return !o.courier && PICKABLE_STATUS.has((o.status || "").toLowerCase());
+}
+
+// Couriers the picker offers. Adding a new one (e.g. iThink) later = one line here
+// AND a real branch in /api/dashboard/assign-courier (until then an unknown courier
+// is only RECORDED, to be shipped in that courier's own dashboard).
+const PICKER_COURIERS: { id: string; label: string; color: string }[] = [
+  { id: "velocity", label: "Velocity", color: "#6b4a8f" },
+  { id: "shiprocket", label: "Shiprocket", color: "#5b3bd4" },
+  // { id: "ithink", label: "iThink", color: "#0a7d5a" },  // <- future
+];
+
+// Per-row courier picker: creates the order in the chosen courier (create-only —
+// lands in that courier's "New Orders", operator generates the AWB there).
+function AssignCell({ order, apiKey, onChanged }: { order: Order; apiKey: string; onChanged: () => void }) {
+  const [busy, setBusy] = useState("");
+  const [err, setErr] = useState("");
+
+  const assign = async (courier: string, label: string) => {
+    if (!window.confirm(`Create order #${order.orderId} on ${label}?`)) return;
+    setBusy(courier); setErr("");
+    try {
+      const res = await fetch(`/api/dashboard/assign-courier?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-inbox-key": apiKey },
+        body: JSON.stringify({ orderId: order.orderId, courier, ship: false }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) { setErr(typeof data.error === "string" ? data.error : `Error ${res.status}`); return; }
+      onChanged();
+    } catch (e: any) { setErr(e?.message || "Failed"); }
+    finally { setBusy(""); }
+  };
+
+  if (!isPickable(order)) return <span style={{ color: C.sub }}>—</span>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 160 }}>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {PICKER_COURIERS.map((c) => (
+          <button key={c.id} disabled={!!busy} onClick={() => assign(c.id, c.label)} style={assignBtn(c.color)}>
+            {busy === c.id ? "…" : `→ ${c.label}`}
+          </button>
+        ))}
+      </div>
+      {err && <div style={{ color: C.bad, fontSize: 11 }}>{err}</div>}
+    </div>
+  );
+}
+function assignBtn(bg: string): React.CSSProperties {
+  return { padding: "5px 9px", borderRadius: 7, border: "none", background: bg, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" };
+}
+
+function OrdersTab({ orders, loading, apiKey, onChanged }: { orders: Order[]; loading: boolean; apiKey: string; onChanged: () => void }) {
   const [q, setQ] = useState("");
   const [month, setMonth] = useState("all");
+  const [needsCourier, setNeedsCourier] = useState(false);
   const months = useMemo(() => {
     const s = new Set<string>();
     orders.forEach((o) => { const m = o.month || (o.createdAt ? new Date(o.createdAt).toISOString().slice(0, 7) : ""); if (m) s.add(m); });
     return Array.from(s).sort().reverse();
   }, [orders]);
+  const pendingCount = useMemo(() => orders.filter(isPickable).length, [orders]);
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     return orders.filter((o) => {
+      if (needsCourier && !isPickable(o)) return false;
       const m = o.month || (o.createdAt ? new Date(o.createdAt).toISOString().slice(0, 7) : "");
       if (month !== "all" && m !== month) return false;
       if (!s) return true;
       return [o.orderId, o.name, o.phone, o.product, o.dCode, o.courier, o.status].join(" ").toLowerCase().includes(s);
     });
-  }, [orders, q, month]);
+  }, [orders, q, month, needsCourier]);
 
   return (
     <div>
@@ -391,12 +451,15 @@ function OrdersTab({ orders, loading }: { orders: Order[]; loading: boolean }) {
           {months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
         </select>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search order / name / phone / product…" style={{ padding: "9px 12px", borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 14, minWidth: 260, background: C.card, flex: "1 1 260px" }} />
+        <button onClick={() => setNeedsCourier((v) => !v)} style={{ padding: "9px 12px", borderRadius: 10, border: `1px solid ${needsCourier ? C.plum : C.border}`, background: needsCourier ? C.plum : C.card, color: needsCourier ? "#fff" : C.text, fontSize: 13.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+          {needsCourier ? "✓ " : ""}Needs courier{pendingCount ? ` (${pendingCount})` : ""}
+        </button>
         <div style={{ color: C.sub, fontSize: 13, alignSelf: "center" }}>{filtered.length} orders</div>
       </div>
       <TableWrap>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
           <thead><tr>
-            {["Date", "Order ID", "Product", "Customer", "Qty", "Selling ₹", "Payment", "Courier", "Status", "Freight ₹", "Cost ₹", "Profit ₹"].map((h) => (
+            {["Date", "Order ID", "Product", "Customer", "Qty", "Selling ₹", "Payment", "Courier", "Status", "Freight ₹", "Cost ₹", "Profit ₹", "Assign"].map((h) => (
               <th key={h} style={{ ...th, textAlign: ["Qty", "Selling ₹", "Freight ₹", "Cost ₹", "Profit ₹"].includes(h) ? "right" : "left" }}>{h}</th>
             ))}
           </tr></thead>
@@ -417,9 +480,10 @@ function OrdersTab({ orders, loading }: { orders: Order[]; loading: boolean }) {
                 <td style={tnum}>{rupee2(o.freight)}</td>
                 <td style={tnum}>{rupee2(o.goodsCost)}</td>
                 <td style={{ ...tnum, fontWeight: 700, color: o.profit == null ? C.sub : o.profit >= 0 ? C.ok : C.bad }}>{rupee2(o.profit)}</td>
+                <td style={td}><AssignCell order={o} apiKey={apiKey} onChanged={onChanged} /></td>
               </tr>
             ))}
-            {!loading && filtered.length === 0 && <tr><td colSpan={12} style={{ ...td, textAlign: "center", color: C.sub, padding: 40 }}>No orders.</td></tr>}
+            {!loading && filtered.length === 0 && <tr><td colSpan={13} style={{ ...td, textAlign: "center", color: C.sub, padding: 40 }}>No orders.</td></tr>}
           </tbody>
         </table>
       </TableWrap>
