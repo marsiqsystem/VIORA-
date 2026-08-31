@@ -52,9 +52,15 @@ async function dispatchOnce(order: any, flagKey: string, sendFn: (o: any) => Pro
 }
 
 export async function handleCourierWebhook(req: NextRequest) {
+  // OPEN ACCESS: Shiprocket requires the webhook endpoint to be "open access", and
+  // its Save/Test validation probe may reach us WITHOUT the configured token. So we
+  // ALWAYS answer 200 (never 401) — but only PROCESS a request whose x-api-key
+  // matches SHIPROCKET_WEBHOOK_SECRET. An unauthenticated/probe request is simply
+  // acknowledged and ignored (no WhatsApp/Wix side effects), so returning 200 here
+  // costs nothing security-wise: the token still gates every real action below.
   if (!shiprocket.verifyWebhook(req.headers.get("x-api-key"))) {
-    console.warn("[courier-webhook] rejected: failed secret check.");
-    return new NextResponse(null, { status: 401 });
+    console.log("[courier-webhook] acked (no/invalid token) — not processed.");
+    return new NextResponse(null, { status: 200 });
   }
 
   let body: any = {};
