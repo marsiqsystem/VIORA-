@@ -379,16 +379,33 @@ function normalizeStatus(raw) {
 }
 
 /**
- * Pull { reference, awb, status } out of a Shiprocket status webhook body.
- * Shiprocket echoes the channel `order_id` we sent at creation ("VJ-#10312") and
- * the AWB in `awb`; `current_status` (or `shipment_status`) is the state string.
+ * Pull { references[], awb, status } out of a Shiprocket status webhook body.
+ *
+ * Correlation is the tricky part. In Shiprocket's webhook, `order_id` is
+ * Shiprocket's OWN (numeric) order id, while the order_id WE sent at creation
+ * ("VJ-#10312") comes back in `channel_order_id`. So we return an ORDERED list of
+ * candidate references — channel_order_id FIRST (our VJ-# reference), then the
+ * numeric order_id / sr_order_id as fallbacks — and the caller tries each against
+ * Wix (findOrderByNumber strips "VJ-#"), then the AWB. Shiprocket's doc
+ * placeholders ("enter your channel order id") are filtered out.
  */
 function parseStatusWebhook(body) {
   const b = body || {};
   const data = b.data || b;
+  const clean = (v) => {
+    const s = v == null ? "" : String(v).trim();
+    return !s || /^enter your/i.test(s) ? "" : s; // drop empty + doc placeholders
+  };
+  const references = [
+    clean(data.channel_order_id), // our "VJ-#<number>" (preferred)
+    clean(data.order_id),
+    clean(data.sr_order_id),
+  ].filter(Boolean);
+  const awb = data.awb || data.awb_code;
   return {
-    reference: data.order_id || data.channel_order_id || data.sr_order_id || null,
-    awb: data.awb || data.awb_code || null,
+    references,
+    reference: references[0] || null, // back-compat (first candidate)
+    awb: awb != null && awb !== "" ? String(awb) : null,
     trackingUrl: data.tracking_url || data.track_url || null,
     rawStatus: data.current_status || data.shipment_status || data.status || null,
     status: normalizeStatus(data.current_status || data.shipment_status || data.status),

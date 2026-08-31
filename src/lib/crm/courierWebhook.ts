@@ -71,19 +71,22 @@ export async function handleCourierWebhook(req: NextRequest) {
   }
 
   try {
-    const { reference, awb, status, rawStatus, trackingUrl } = shiprocket.parseStatusWebhook(body);
+    const { references, awb, status, rawStatus, trackingUrl } = shiprocket.parseStatusWebhook(body);
     console.log(
-      `[courier-webhook] status=${rawStatus} -> ${status} ref=${reference || "-"} awb=${awb || "-"}`
+      `[courier-webhook] status=${rawStatus} -> ${status} refs=[${references.join(",") || "-"}] awb=${awb || "-"}`
     );
     if (status === "OTHER") return new NextResponse(null, { status: 200 });
 
-    const order =
-      (reference && (await wix.findOrderByNumber(reference))) ||
-      (reference && (await wix.getOrder(reference))) ||
-      (awb && (await wix.findOrderByAwb(awb))) ||
-      null;
+    // Try each candidate reference (channel_order_id first, then the numeric
+    // order_id) via number/GUID lookup, then fall back to the AWB.
+    let order: any = null;
+    for (const ref of references) {
+      order = (await wix.findOrderByNumber(ref)) || (await wix.getOrder(ref));
+      if (order) break;
+    }
+    if (!order && awb) order = await wix.findOrderByAwb(awb);
     if (!order) {
-      console.warn(`[courier-webhook] no Wix order (ref=${reference}, awb=${awb}) — cannot message.`);
+      console.warn(`[courier-webhook] no Wix order (refs=[${references.join(",")}], awb=${awb}) — cannot message.`);
       return new NextResponse(null, { status: 200 });
     }
     if (awb && !order.awb) order.awb = awb;
