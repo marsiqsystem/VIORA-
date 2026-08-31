@@ -1,0 +1,103 @@
+// Shared courier status-webhook handler (Shiprocket). Both /api/courier-webhook
+// (the neutral URL Shiprocket accepts — its config UI rejects URLs containing the
+// words "shiprocket", "kartrocket", "sr", "kr") and the legacy /api/shiprocket-
+// webhook alias delegate here, so there is exactly one implementation.
+//
+//   OUT_FOR_DELIVERY -> out_for_delivery_v1  (WF2)
+//   DELIVERED        -> order_delivered_v1   (WF3)  [+ markDelivered on Wix]
+//
+// The customer (name/phone/product) is NOT in the webhook — we recover it from
+// Wix by the order_id Shiprocket echoes back ("VJ-#<number>", stripped by
+// wix.findOrderByNumber), or by AWB as a fallback. Verified with the token set in
+// Shiprocket's webhook config (sent as the x-api-key header) vs SHIPROCKET_WEBHOOK_SECRET.
+
+import { NextRequest, NextResponse } from "next/server";
+import * as shiprocket from "@/lib/crm/shiprocket";
+import * as wix from "@/lib/crm/wix";
+import * as notify from "@/lib/crm/notify";
+import * as idempotency from "@/lib/crm/idempotency";
+import * as reviewQueue from "@/lib/crm/reviewQueue";
+import { dispatchCancellationOnce } from "@/lib/crm/cancel";
+
+export function courierWebhookInfo() {
+  return NextResponse.json({
+    ok: true,
+    endpoint: "courier-webhook",
+    method: "POST",
+    message: "Shiprocket status webhook is live. Send status updates via POST.",
+  });
+}
+
+// Send a template AT MOST ONCE per (order, flag). Atomic-KV dedupe — couriers
+// fire multiple events per milestone.
+async function dispatchOnce(order: any, flagKey: string, sendFn: (o: any) => Promise<any>) {
+  const orderId = order.orderId || order.orderGuid;
+  const key = `${flagKey}:${orderId}`;
+  const claim = await idempotency.claimOnce(key);
+  if (!claim.claimed) {
+    console.log(`[courier-webhook] ${flagKey} already sent for ${orderId} — skip (idempotent).`);
+    return;
+  }
+  const result = await sendFn(order);
+  if (result.ok && !result.dryRun) {
+    console.log(`[courier-webhook] ${flagKey} sent for ${orderId}.`);
+    return;
+  }
+  await idempotency.release(key);
+  if (!result.ok) {
+    console.error(`[courier-webhook] ${flagKey} FAILED:`, result.error);
+  } else {
+    console.log(`[courier-webhook] ${flagKey} DRY RUN for ${orderId} (claim released).`);
+  }
+}
+
+export async function handleCourierWebhook(req: NextRequest) {
+  if (!shiprocket.verifyWebhook(req.headers.get("x-api-key"))) {
+    console.warn("[courier-webhook] rejected: failed secret check.");
+    return new NextResponse(null, { status: 401 });
+  }
+
+  let body: any = {};
+  try {
+    body = await req.json();
+  } catch {
+    /* empty body */
+  }
+
+  try {
+    const { reference, awb, status, rawStatus, trackingUrl } = shiprocket.parseStatusWebhook(body);
+    console.log(
+      `[courier-webhook] status=${rawStatus} -> ${status} ref=${reference || "-"} awb=${awb || "-"}`
+    );
+    if (status === "OTHER") return new NextResponse(null, { status: 200 });
+
+    const order =
+      (reference && (await wix.findOrderByNumber(reference))) ||
+      (reference && (await wix.getOrder(reference))) ||
+      (awb && (await wix.findOrderByAwb(awb))) ||
+      null;
+    if (!order) {
+      console.warn(`[courier-webhook] no Wix order (ref=${reference}, awb=${awb}) — cannot message.`);
+      return new NextResponse(null, { status: 200 });
+    }
+    if (awb && !order.awb) order.awb = awb;
+    if (trackingUrl && !order.trackingUrl) order.trackingUrl = trackingUrl;
+
+    if (status === "DISPATCHED") {
+      await dispatchOnce(order, "wa_dispatched_sent", notify.sendDispatched);
+    } else if (status === "OUT_FOR_DELIVERY") {
+      await dispatchOnce(order, "wa_wf2_sent", notify.sendOutForDelivery);
+    } else if (status === "DELIVERED") {
+      await wix.markDelivered(order.orderGuid || order.orderId, Date.now());
+      await dispatchOnce(order, "wa_wf3_sent", notify.sendDelivered);
+      await reviewQueue.enqueueDelivered(order, Date.now());
+    } else if (status === "RTO") {
+      await reviewQueue.dequeue(order.orderId);
+    } else if (status === "CANCELLED") {
+      await dispatchCancellationOnce(order);
+    }
+  } catch (err) {
+    console.error("[courier-webhook] processing error:", err);
+  }
+  return new NextResponse(null, { status: 200 });
+}
