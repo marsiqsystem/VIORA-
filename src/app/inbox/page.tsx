@@ -237,6 +237,7 @@ export default function InboxPage() {
   activeRef.current = active;
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const videoRef = useRef<HTMLInputElement | null>(null);
   const docRef = useRef<HTMLInputElement | null>(null);
 
   // This inbox is a position:fixed full-screen overlay on top of the storefront
@@ -352,12 +353,12 @@ export default function InboxPage() {
         setSendError(typeof upData.error === "string" ? upData.error : "Upload failed.");
         return;
       }
-      const kind = upData.kind === "document" ? "document" : "image";
+      const kind = upData.kind === "document" ? "document" : upData.kind === "video" ? "video" : "image";
       const fname = upData.filename || file.name || "";
       // optimistic bubble
       const optimistic: Message = {
         id: `tmp_${Date.now()}`, dir: "out",
-        text: caption || (kind === "document" ? `📄 ${fname || "Document"}` : "📷 Photo"),
+        text: caption || (kind === "document" ? `📄 ${fname || "Document"}` : kind === "video" ? "🎥 Video" : "📷 Photo"),
         ts: Date.now(), status: "pending", type: kind, mediaId: upData.mediaId,
         filename: kind === "document" ? fname : undefined,
         ...(rt ? { quoted: { id: rt.id, text: String(rt.text || "").slice(0, 140), dir: rt.dir } } : {}),
@@ -957,6 +958,8 @@ export default function InboxPage() {
               {/* hidden pickers — available whether or not the window is open */}
               <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" style={{ display: "none" }}
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) sendAttachment(f); e.target.value = ""; }} />
+              <input ref={videoRef} type="file" accept="video/mp4,video/3gpp" style={{ display: "none" }}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) sendAttachment(f); e.target.value = ""; }} />
               <input ref={docRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,application/pdf" style={{ display: "none" }}
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) sendAttachment(f); e.target.value = ""; }} />
 
@@ -995,6 +998,7 @@ export default function InboxPage() {
                   {attachOpen && (
                     <div style={{ position: "absolute", bottom: "100%", left: 74, marginBottom: 8, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 12, boxShadow: "0 6px 24px rgba(0,0,0,.12)", padding: 6, zIndex: 5, minWidth: 150 }}>
                       <button onClick={() => { setAttachOpen(false); fileRef.current?.click(); }} style={menuItem}>🖼️ Photo</button>
+                      <button onClick={() => { setAttachOpen(false); videoRef.current?.click(); }} style={menuItem}>🎥 Video</button>
                       <button onClick={() => { setAttachOpen(false); docRef.current?.click(); }} style={menuItem}>📄 Document</button>
                     </div>
                   )}

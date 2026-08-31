@@ -15,11 +15,14 @@ import { authOk, authConfigured, keyFromRequest } from "@/lib/crm/inbox-store";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// WhatsApp caps: images 5MB, documents 100MB (we cap docs at 16MB to stay well
-// under the serverless request limit). Reject early with a clear message.
+// WhatsApp caps: images 5MB, video 16MB, documents 100MB (we cap docs at 16MB to
+// stay well under the serverless request limit). Reject early with a clear message.
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 16 * 1024 * 1024;
 const MAX_DOC_BYTES = 16 * 1024 * 1024;
 const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
+// WhatsApp only accepts mp4 / 3gpp video (H.264 video + AAC audio).
+const VIDEO_MIMES = new Set(["video/mp4", "video/3gpp"]);
 const DOC_MIMES = new Set([
   "application/pdf",
   "application/msword",
@@ -52,14 +55,15 @@ export async function POST(req: NextRequest) {
 
   const mime = file.type || "application/octet-stream";
   const isImage = IMAGE_MIMES.has(mime);
+  const isVideo = VIDEO_MIMES.has(mime);
   const isDoc = DOC_MIMES.has(mime);
-  if (!isImage && !isDoc) {
+  if (!isImage && !isVideo && !isDoc) {
     return NextResponse.json(
-      { ok: false, error: "Unsupported file type (images: JPG/PNG/WebP; docs: PDF/Word/Excel/CSV/TXT)." },
+      { ok: false, error: "Unsupported file type (images: JPG/PNG/WebP; video: MP4/3GP; docs: PDF/Word/Excel/CSV/TXT)." },
       { status: 415 }
     );
   }
-  const cap = isImage ? MAX_IMAGE_BYTES : MAX_DOC_BYTES;
+  const cap = isImage ? MAX_IMAGE_BYTES : isVideo ? MAX_VIDEO_BYTES : MAX_DOC_BYTES;
   if (file.size > cap) {
     return NextResponse.json(
       { ok: false, error: `File too large (max ${isImage ? "5MB" : "16MB"}).` },
@@ -68,7 +72,11 @@ export async function POST(req: NextRequest) {
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  const up = await uploadMedia({ buffer, mime, filename: file.name || (isImage ? "photo" : "document") });
+  const up = await uploadMedia({
+    buffer,
+    mime,
+    filename: file.name || (isImage ? "photo" : isVideo ? "video" : "document"),
+  });
   if (!up.ok || !up.id) {
     return NextResponse.json(
       { ok: false, error: typeof up.error === "string" ? up.error : "Upload failed." },
@@ -80,7 +88,7 @@ export async function POST(req: NextRequest) {
     ok: true,
     mediaId: up.id,
     mime,
-    kind: isImage ? "image" : "document",
+    kind: isImage ? "image" : isVideo ? "video" : "document",
     filename: file.name || "",
     dryRun: !!up.dryRun,
   });

@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authOk, authConfigured, keyFromRequest } from "@/lib/crm/inbox-store";
 import * as ordersStore from "@/lib/crm/orders-store";
 import * as velocity from "@/lib/crm/velocity";
+import * as shiprocket from "@/lib/crm/shiprocket";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,14 +34,18 @@ export async function POST(req: NextRequest) {
   const order = await ordersStore.getOrder(orderId);
   if (!order) return NextResponse.json({ ok: false, error: "order not found in store" }, { status: 404 });
 
-  // Non-Velocity couriers: link pending — just record the choice.
-  if (courier !== "velocity") {
+  // Couriers with a real API link: velocity and shiprocket.
+  const KNOWN = new Set(["velocity", "shiprocket"]);
+
+  // Unknown couriers (e.g. a future one before its API is wired): just record
+  // the choice so the operator can ship it in that courier's own dashboard.
+  if (!KNOWN.has(courier)) {
     await ordersStore.updateOrder(orderId, { courier, status: "created", statusAt: Date.now() });
     const updated = await ordersStore.getOrder(orderId);
     return NextResponse.json({ ok: true, order: updated, note: `${courier} API link pending — order marked, ship it in ${courier} for now.` });
   }
 
-  // Velocity: build the shipment input from the stored order and create it.
+  // Build the shipment input from the stored order (same shape for both couriers).
   const input = {
     orderId: order.orderId,
     orderGuid: order.orderGuid,
@@ -53,11 +58,16 @@ export async function POST(req: NextRequest) {
     items: undefined as any,
   };
 
+  const carrier = courier === "shiprocket" ? shiprocket : velocity;
+  // Velocity's create-only returns `velocityOrderId`; Shiprocket's `courierOrderId`.
+  const orderIdOf = (r: any) => r?.courierOrderId ?? r?.velocityOrderId ?? "";
+
   if (body?.ship === true) {
-    const res: any = await velocity.createShipment(input);
-    if (!res.ok) return NextResponse.json({ ok: false, error: res.error || "velocity ship failed", raw: res.raw }, { status: 502 });
+    const res: any = await carrier.createShipment(input);
+    if (!res.ok) return NextResponse.json({ ok: false, error: res.error || `${courier} ship failed`, raw: res.raw }, { status: 502 });
     await ordersStore.updateOrder(orderId, {
-      courier: "velocity",
+      courier,
+      courierOrderId: orderIdOf(res),
       awb: res.awb || "",
       trackingUrl: res.trackingUrl || "",
       status: "dispatched",
@@ -66,11 +76,11 @@ export async function POST(req: NextRequest) {
       freight: pickFreight(res.raw) ?? order.freight ?? null,
     });
   } else {
-    const res: any = await velocity.createOrderOnly(input);
-    if (!res.ok) return NextResponse.json({ ok: false, error: res.error || "velocity create failed", raw: res.raw }, { status: 502 });
+    const res: any = await carrier.createOrderOnly(input);
+    if (!res.ok) return NextResponse.json({ ok: false, error: res.error || `${courier} create failed`, raw: res.raw }, { status: 502 });
     await ordersStore.updateOrder(orderId, {
-      courier: "velocity",
-      courierOrderId: res.velocityOrderId || "",
+      courier,
+      courierOrderId: orderIdOf(res),
       status: "created",
       statusAt: Date.now(),
     });

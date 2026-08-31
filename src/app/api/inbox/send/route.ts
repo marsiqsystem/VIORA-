@@ -14,7 +14,7 @@
 // as "pending" and dryRun:true is returned. Protected by INBOX_SECRET.
 
 import { NextRequest, NextResponse } from "next/server";
-import { sendText, sendImage, sendDocument } from "@/lib/crm/whatsapp";
+import { sendText, sendImage, sendVideo, sendDocument } from "@/lib/crm/whatsapp";
 import {
   getMessages,
   recordOutbound,
@@ -48,11 +48,12 @@ export async function POST(req: NextRequest) {
 
   const to = normPhone(body?.to);
   const text = String(body?.text ?? "").trim();
-  const mediaId = String(body?.mediaId ?? "").trim(); // set for an image/document send
-  const kind = String(body?.kind ?? (mediaId ? "image" : "text")); // "image" | "document" | "text"
+  const mediaId = String(body?.mediaId ?? "").trim(); // set for an image/video/document send
+  const kind = String(body?.kind ?? (mediaId ? "image" : "text")); // "image" | "video" | "document" | "text"
   const filename = String(body?.filename ?? "").trim();
   const replyTo = String(body?.replyTo ?? "").trim(); // wamid this reply quotes
   const isImage = !!mediaId && kind === "image";
+  const isVideo = !!mediaId && kind === "video";
   const isDoc = !!mediaId && kind === "document";
   if (!to || (!text && !mediaId)) {
     return NextResponse.json({ ok: false, error: "Missing `to` or message content." }, { status: 400 });
@@ -85,6 +86,8 @@ export async function POST(req: NextRequest) {
 
   const sent: any = isImage
     ? await sendImage({ to, mediaId, caption: text || undefined, replyTo: quoteRemote })
+    : isVideo
+    ? await sendVideo({ to, mediaId, caption: text || undefined, replyTo: quoteRemote })
     : isDoc
     ? await sendDocument({ to, mediaId, filename: filename || undefined, caption: text || undefined, replyTo: quoteRemote })
     : await sendText({ to, body: text, replyTo: quoteRemote });
@@ -95,10 +98,16 @@ export async function POST(req: NextRequest) {
   // renders the image via the media proxy / the document as a download link.
   const rec = await recordOutbound({
     to,
-    text: isImage ? text || "📷 Photo" : isDoc ? text || `📄 ${filename || "Document"}` : text,
+    text: isImage
+      ? text || "📷 Photo"
+      : isVideo
+      ? text || "🎥 Video"
+      : isDoc
+      ? text || `📄 ${filename || "Document"}`
+      : text,
     wamid,
     status: sent?.dryRun ? "pending" : "sent",
-    type: isImage ? "image" : isDoc ? "document" : "text",
+    type: isImage ? "image" : isVideo ? "video" : isDoc ? "document" : "text",
     mediaId: mediaId || undefined,
     filename: isDoc ? filename || undefined : undefined,
     quoted,

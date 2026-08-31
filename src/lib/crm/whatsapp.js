@@ -257,6 +257,24 @@ function sendDocument({ to, mediaId, filename, caption, replyTo }, opts) {
 }
 
 /**
+ * Send a video message by Meta media id (uploaded via uploadMedia) or a public
+ * link. 24-hour-window only, like sendText/sendImage/sendDocument. Used by the
+ * inbox composer's video attachment. WhatsApp caps video at 16 MB and accepts
+ * mp4/3gpp (H.264 + AAC) — larger/other formats are rejected by Meta (error
+ * 131052/131053), which surfaces to the operator via sendRaw's error.
+ *
+ * @param {{to:string, mediaId?:string, link?:string, caption?:string, replyTo?:string}} p
+ * @param {object} [opts]
+ */
+function sendVideo({ to, mediaId, link, caption, replyTo }, opts) {
+  const video = mediaId ? { id: mediaId } : { link };
+  if (caption) video.caption = caption;
+  const payload = { messaging_product: "whatsapp", recipient_type: "individual", to, type: "video", video };
+  if (replyTo) payload.context = { message_id: replyTo };
+  return sendRaw(payload, opts);
+}
+
+/**
  * Upload a media file to Meta and return its media id (reusable for ~30 days).
  * The inbox uploads the operator's attachment here, then sends it by id so no
  * public hosting is needed. Never throws.
@@ -361,6 +379,7 @@ export {
   sendText,
   sendTemplate,
   sendImage,
+  sendVideo,
   sendDocument,
   uploadMedia,
   fetchMediaBytes,
