@@ -90,7 +90,12 @@ export async function handleCourierWebhook(req: NextRequest) {
       return new NextResponse(null, { status: 200 });
     }
     if (awb && !order.awb) order.awb = awb;
+    // Tracking link for the dispatched WhatsApp ({{3}}). Prefer the URL in the
+    // webhook; otherwise build Shiprocket's OWN public tracking page from the AWB.
+    // We must NOT let notify.js fall back to its default TRACK_BASE — that's the
+    // Velocity-branded host, which would produce a dead link for a Shiprocket AWB.
     if (trackingUrl && !order.trackingUrl) order.trackingUrl = trackingUrl;
+    else if (!order.trackingUrl && awb) order.trackingUrl = `https://shiprocket.co/tracking/${awb}`;
 
     if (status === "DISPATCHED") {
       await dispatchOnce(order, "wa_dispatched_sent", notify.sendDispatched);
