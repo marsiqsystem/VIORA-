@@ -11,6 +11,10 @@
 //   { "numbers": [...], "send": true }        -> actually create on Shiprocket.
 //   { "mode": "ship" | "create-only" }        -> ship = create + assign AWB now;
 //                                               create-only (default) = New Orders.
+//   { "addressOverrides": { "10317": {         -> optional per-order address patch
+//        line1, line2, city, state, postalCode, country } } }  merged over the Wix
+//                                               address before building the payload
+//                                               (for hand-corrected shipping addresses).
 //
 // On failure the route returns Shiprocket's raw error, so this doubles as the
 // diagnosis for WHY a create failed. Protected by INBOX_SECRET.
@@ -40,6 +44,8 @@ export async function POST(req: NextRequest) {
 
   const doSend = body?.send === true;
   const ship = String(body?.mode ?? "").trim().toLowerCase() === "ship";
+  const addressOverrides: Record<string, any> =
+    body?.addressOverrides && typeof body.addressOverrides === "object" ? body.addressOverrides : {};
 
   const numbers: string[] = Array.isArray(body?.numbers)
     ? body.numbers.map((n: any) => String(n).trim()).filter(Boolean)
@@ -66,6 +72,12 @@ export async function POST(req: NextRequest) {
         /* keep the search result */
       }
     }
+    // Optional hand-correction of the shipping address (e.g. a remote BSF address
+    // that Wix stored messily). Merge only the provided fields over the Wix address.
+    const override = addressOverrides[number] || addressOverrides[String(number)];
+    if (override && typeof override === "object") {
+      order = { ...order, address: { ...(order.address || {}), ...override } };
+    }
     const addr = order.address || {};
 
     if (!doSend) {
@@ -76,7 +88,13 @@ export async function POST(req: NextRequest) {
         product: order.product,
         amount: order.amount,
         paymentMode: order.paymentMode,
-        address: { city: addr.city || "", state: addr.state || "", postalCode: addr.postalCode || "" },
+        address: {
+          line1: addr.line1 || "",
+          line2: addr.line2 || "",
+          city: addr.city || "",
+          state: addr.state || "",
+          postalCode: addr.postalCode || "",
+        },
         wouldCreate: ship ? "ship (courier + AWB)" : "create-only (New Orders)",
       });
       continue;
