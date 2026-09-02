@@ -1,9 +1,14 @@
 // Admin BACKFILL / RESEND for order-status WhatsApp messages.
 //
 //   POST /api/admin/resend-status   (x-inbox-key: INBOX_SECRET)
-//   { "items": [ { "number": "10216", "awb": "I81031938", "status": "dispatched" } ],
+//   { "items": [ { "number": "10216", "awb": "I81031938", "status": "dispatched",
+//                  "courier": "shiprocket", "trackingUrl": "https://..." } ],
 //     "force": true }
 //   -> { ok, results: [{ number, sent, reason }] }
+//
+//   `courier: "shiprocket"` (or an explicit `trackingUrl`) makes the dispatched
+//   message use Shiprocket's own tracking page instead of the Velocity-branded
+//   host (which would be a dead link for a Shiprocket AWB).
 //
 // Recovers each customer from Wix by order number (same as the Velocity webhook),
 // then sends the dispatched / out-for-delivery / delivered template. Used to
@@ -65,6 +70,17 @@ export async function POST(req: NextRequest) {
       continue;
     }
     if (awb && !order.awb) order.awb = awb;
+
+    // Tracking link for the dispatched WhatsApp ({{3}}). notify.trackingLink()'s
+    // AWB fallback builds the Velocity-branded host — a DEAD link for a Shiprocket
+    // AWB. Mirror the courier webhook: prefer an explicit trackingUrl, else build
+    // Shiprocket's own public tracking page when this is a Shiprocket order.
+    const explicitTrackingUrl = it?.trackingUrl ? String(it.trackingUrl).trim() : "";
+    const isShiprocket = String(it?.courier ?? "").trim().toLowerCase() === "shiprocket";
+    if (explicitTrackingUrl && !order.trackingUrl) order.trackingUrl = explicitTrackingUrl;
+    else if (isShiprocket && !order.trackingUrl && (order.awb || awb)) {
+      order.trackingUrl = `https://shiprocket.co/tracking/${order.awb || awb}`;
+    }
 
     const key = `${sender.flag}:${order.orderId || order.orderGuid}`;
     if (!force) {
