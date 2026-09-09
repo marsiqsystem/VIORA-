@@ -74,4 +74,14 @@ export default {
     headerImageUrl: HEADER_IMAGE_URL, // template has an IMAGE header (product photo / logo)
     // body {{1}} name, {{2}} order id, {{3}} product, {{4}} amount, {{5}} payment mode
   },
+  // Delivery re-attempt (fires on every failed COD delivery attempt / NDR). This is
+  // the COD-specific template — its body tells the customer to keep the COD amount
+  // ready so the courier's next attempt succeeds. We ONLY send it for COD orders
+  // (see reattempt.js); a prepaid NDR gets nothing here.
+  deliveryReattempt: {
+    name: process.env.TPL_DELIVERY_REATTEMPT || "delivery_reattempt_cod_v1",
+    lang: process.env.TPL_DELIVERY_REATTEMPT_LANG || LANG,
+    headerImageUrl: HEADER_IMAGE_URL, // template has an IMAGE header (product photo / logo)
+    // body {{1}} name, {{2}} order id, {{3}} product, {{4}} COD amount ; static Track button
+  },
 };

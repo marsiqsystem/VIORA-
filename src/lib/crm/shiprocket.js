@@ -356,11 +356,21 @@ function firstError(data) {
  * Map a raw Shiprocket status string to our internal status enum. Same mapping
  * as velocity.normalizeStatus — Shiprocket phrases are a superset that this
  * already covers ("RTO INITIATED", "OUT FOR DELIVERY", "PICKED UP", …).
- * @returns {"DISPATCHED"|"OUT_FOR_DELIVERY"|"DELIVERED"|"RTO"|"CANCELLED"|"OTHER"}
+ * @returns {"DISPATCHED"|"OUT_FOR_DELIVERY"|"DELIVERED"|"UNDELIVERED"|"RTO"|"CANCELLED"|"OTHER"}
  */
 function normalizeStatus(raw) {
   const s = String(raw || "").toUpperCase().replace(/[\s-]+/g, "_");
   if (s.startsWith("RTO") || s.startsWith("RETURN")) return "RTO";
+  // Failed delivery attempt (NDR) — matched before OUT_FOR_DELIVERY/DELIVERED so a
+  // "undelivered" / "delivery failed" scan is never read as a success. Shiprocket
+  // phrases NDRs as "UNDELIVERED" / "DELIVERY ATTEMPTED" / "NDR".
+  if (
+    s.includes("NDR") ||
+    s.includes("UNDELIVER") ||
+    s === "NOT_DELIVERED" ||
+    (s.includes("DELIVER") && (s.includes("FAIL") || s.includes("ATTEMPT")))
+  )
+    return "UNDELIVERED";
   if (["OUT_FOR_DELIVERY", "OFD", "OUT_FOR_DELIVER"].includes(s)) return "OUT_FOR_DELIVERY";
   if (["DELIVERED", "DELIVER", "COMPLETED"].includes(s)) return "DELIVERED";
   if (
@@ -407,6 +417,16 @@ function parseStatusWebhook(body) {
     reference: references[0] || null, // back-compat (first candidate)
     awb: awb != null && awb !== "" ? String(awb) : null,
     trackingUrl: data.tracking_url || data.track_url || null,
+    // Delivery-attempt count when present — dedupes the NDR re-attempt message per
+    // attempt (null falls back to a per-day bucket in reattempt.js).
+    attempt:
+      data.attempt ??
+      data.attempts ??
+      data.attempt_count ??
+      data.delivery_attempt ??
+      data.no_of_attempts ??
+      data.ndr_attempt ??
+      null,
     rawStatus: data.current_status || data.shipment_status || data.status || null,
     status: normalizeStatus(data.current_status || data.shipment_status || data.status),
   };

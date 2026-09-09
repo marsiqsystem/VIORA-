@@ -384,13 +384,25 @@ async function createOrderOnly(o) {
  * Map a raw Velocity status webhook to our internal status enum. We only act on
  * the two states that trigger a customer message (WF2/WF3); everything else is
  * OTHER and acknowledged with a 200.
- * @returns {"DISPATCHED"|"OUT_FOR_DELIVERY"|"DELIVERED"|"RTO"|"CANCELLED"|"OTHER"}
+ * @returns {"DISPATCHED"|"OUT_FOR_DELIVERY"|"DELIVERED"|"UNDELIVERED"|"RTO"|"CANCELLED"|"OTHER"}
  */
 function normalizeStatus(raw) {
   const s = String(raw || "").toUpperCase().replace(/[\s-]+/g, "_");
   // RTO / returned FIRST — a returned shipment must never be mistaken for a
   // delivery/dispatch (any "RTO_*" or "RETURN*" state). It suppresses the review.
   if (s.startsWith("RTO") || s.startsWith("RETURN")) return "RTO";
+  // Failed delivery attempt (NDR) — the courier tried but couldn't deliver. Fires
+  // the COD re-attempt message. Matched BEFORE OUT_FOR_DELIVERY/DELIVERED so an
+  // "undelivered" / "delivery failed" / "delivery attempted" scan is never misread
+  // as a successful delivery. (OUT_FOR_DELIVERY carries no FAIL/ATTEMPT token, so
+  // it is untouched.)
+  if (
+    s.includes("NDR") ||
+    s.includes("UNDELIVER") ||
+    s === "NOT_DELIVERED" ||
+    (s.includes("DELIVER") && (s.includes("FAIL") || s.includes("ATTEMPT")))
+  )
+    return "UNDELIVERED";
   // Check OUT_FOR_DELIVERY before the dispatched synonyms so an "out for
   // delivery" scan is never misread as a first dispatch.
   if (["OUT_FOR_DELIVERY", "OFD", "OUT_FOR_DELIVER"].includes(s)) return "OUT_FOR_DELIVERY";
@@ -444,6 +456,16 @@ function parseStatusWebhook(body) {
     reference: data.order_external_id || data.order_id || data.reference || null,
     awb: data.tracking_number || data.awb || data.awb_code || null,
     trackingUrl: brandTrackUrl(data.tracking_url),
+    // Courier's delivery-attempt count when present — used to dedupe the NDR
+    // re-attempt message per attempt (null falls back to a per-day bucket).
+    attempt:
+      data.attempt ??
+      data.attempts ??
+      data.attempt_count ??
+      data.delivery_attempt ??
+      data.no_of_attempts ??
+      data.ndr_attempt ??
+      null,
     rawStatus: data.status || data.current_status || null,
     status: normalizeStatus(data.status || data.current_status),
   };

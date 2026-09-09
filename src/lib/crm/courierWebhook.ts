@@ -18,6 +18,7 @@ import * as notify from "@/lib/crm/notify";
 import * as idempotency from "@/lib/crm/idempotency";
 import * as reviewQueue from "@/lib/crm/reviewQueue";
 import { dispatchCancellationOnce } from "@/lib/crm/cancel";
+import { dispatchReattemptOnce } from "@/lib/crm/reattempt";
 
 export function courierWebhookInfo() {
   return NextResponse.json({
@@ -71,7 +72,7 @@ export async function handleCourierWebhook(req: NextRequest) {
   }
 
   try {
-    const { references, awb, status, rawStatus, trackingUrl } = shiprocket.parseStatusWebhook(body);
+    const { references, awb, status, rawStatus, trackingUrl, attempt } = shiprocket.parseStatusWebhook(body);
     console.log(
       `[courier-webhook] status=${rawStatus} -> ${status} refs=[${references.join(",") || "-"}] awb=${awb || "-"}`
     );
@@ -105,8 +106,15 @@ export async function handleCourierWebhook(req: NextRequest) {
       await wix.markDelivered(order.orderGuid || order.orderId, Date.now());
       await dispatchOnce(order, "wa_wf3_sent", notify.sendDelivered);
       await reviewQueue.enqueueDelivered(order, Date.now());
+    } else if (status === "UNDELIVERED") {
+      // Failed delivery attempt (NDR) — COD re-attempt message, once per attempt.
+      // Prepaid orders are skipped inside dispatchReattemptOnce.
+      await dispatchReattemptOnce(order, attempt);
     } else if (status === "RTO") {
       await reviewQueue.dequeue(order.orderId);
+      // Max attempts done — send the cancelled message. Shares the KV key with the
+      // refusal cancellation so the customer is never messaged twice.
+      await dispatchCancellationOnce(order);
     } else if (status === "CANCELLED") {
       await dispatchCancellationOnce(order);
     }

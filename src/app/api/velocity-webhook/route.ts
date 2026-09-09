@@ -21,6 +21,7 @@ import * as notify from "@/lib/crm/notify";
 import * as idempotency from "@/lib/crm/idempotency";
 import * as reviewQueue from "@/lib/crm/reviewQueue";
 import { dispatchCancellationOnce } from "@/lib/crm/cancel";
+import { dispatchReattemptOnce } from "@/lib/crm/reattempt";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -83,7 +84,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { reference, awb, status, rawStatus, trackingUrl } = velocity.parseStatusWebhook(body);
+    const { reference, awb, status, rawStatus, trackingUrl, attempt } = velocity.parseStatusWebhook(body);
     console.log(
       `[velocity-webhook] status=${rawStatus} -> ${status} ref=${reference || "-"} awb=${awb || "-"}`
     );
@@ -121,10 +122,21 @@ export async function POST(req: NextRequest) {
       // … and queue the WF4 review for 3 days later. ONLY a real DELIVERED gets
       // here, so in-transit orders are never queued for a review.
       await reviewQueue.enqueueDelivered(order, Date.now());
+    } else if (status === "UNDELIVERED") {
+      // Failed delivery attempt (NDR). Tell the (COD) customer to keep the amount
+      // ready for the next attempt. Fires once per attempt; prepaid orders skip
+      // (handled inside dispatchReattemptOnce).
+      await dispatchReattemptOnce(order, attempt);
     } else if (status === "RTO") {
-      // Returned to origin — never send a review. Remove it from the review
-      // queue in case it was briefly marked delivered before the return.
+      // Returned to origin — max attempts exhausted, the order can no longer be
+      // delivered. Never send a review; remove it from the review queue in case it
+      // was briefly marked delivered before the return.
       await reviewQueue.dequeue(order.orderId);
+      // Tell the customer the order is cancelled. This shares the SAME KV key as
+      // the code-verified refusal cancellation (wa_cancelled_sent:<order>), so a
+      // customer who already got the cancelled message on refusal will NOT get a
+      // second one when that same shipment later reaches RTO — and vice versa.
+      await dispatchCancellationOnce(order);
     } else if (status === "CANCELLED") {
       // Cancellation can also be triggered from Wix (see /api/wix-cancel-webhook).
       // Dedupe on a SHARED KV key so cancelling in one system that syncs to the

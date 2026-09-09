@@ -85,6 +85,8 @@ const render = {
     `🛍️ Hi ${o.name}, you left *${o.product}* (${money(o.amount)}) in your cart. Complete your order before it's gone — tap below to check out!`,
   orderCancelled: (o) =>
     `❌ Hi ${o.name}, your order #${o.orderId} (${o.product}, ${money(o.amount)}, ${prettyPayment(o.paymentMode)}) has been cancelled. If this was a mistake, just reply here and we'll help. 💛`,
+  deliveryReattempt: (o) =>
+    `📦 Hi ${o.name}, our courier tried to deliver your Viora order #${o.orderId} (${o.product}) today but couldn't reach you. Don't worry — a re-attempt will be made tomorrow. Please keep ${money(o.amount)} ready for Cash on Delivery. 💛`,
 };
 
 /**
@@ -282,6 +284,26 @@ async function sendOrderCancelled(o) {
   return res;
 }
 
+// --- Delivery re-attempt (fires on each failed COD delivery attempt / NDR) -----
+// IMAGE header ; body {{1}} name, {{2}} order id, {{3}} product, {{4}} COD amount.
+// Static Track quick-reply button (no send-time param). COD-ONLY — the caller
+// (reattempt.js) gates on payment mode, since the body says "keep COD ready".
+async function sendReattempt(o) {
+  await applyOverride(o);
+  const bodyParams = [o.name, o.orderId, o.product, o.amount];
+  const headerImageUrl = o.productImage || T.deliveryReattempt.headerImageUrl;
+  const res = await sendTemplate({
+    to: o.phone,
+    templateName: T.deliveryReattempt.name,
+    languageCode: T.deliveryReattempt.lang,
+    headerImageUrl,
+    bodyParams,
+  });
+  const text = await realText(T.deliveryReattempt.name, T.deliveryReattempt.lang, bodyParams, render.deliveryReattempt(o));
+  await logOutbound(o.phone, text, res, o.name, headerImageUrl);
+  return res;
+}
+
 export {
   fromRow,
   slugify,
@@ -293,4 +315,5 @@ export {
   sendReviewRequest,
   sendAbandonedCart,
   sendOrderCancelled,
+  sendReattempt,
 };
