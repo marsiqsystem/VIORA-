@@ -30,7 +30,8 @@ const config: Config = {
         platinum: {
           // Off-white (was the warm "beach" cream #F5F1EA) — brand request 2026-09-11.
           DEFAULT: "#FCFBF8",
-          warm: "#F5E8E2",
+          // Was pinkish champagne #F5E8E2 — also off-white per brand request.
+          warm: "#FCFBF8",
         },
         accent: {
           DEFAULT: "#9B1B30",
