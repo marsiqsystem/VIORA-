@@ -37,7 +37,7 @@
   --color-silver-light: #EFE4CE;
   --color-silver-dark: #A9844C;
   --color-silver-muted: #F5E8E2;
-  --color-platinum: #FAF8F4; /* off-white (was beach cream #F5F1EA) */
+  --color-platinum: #FCFBF8; /* off-white (was beach cream #F5F1EA) */
   --color-platinum-warm: #F5E8E2;
   --color-smoke: #5C5450;
 
@@ -48,7 +48,7 @@
   --color-info: #3b82f6;
 
   /* Neutral Colors */
-  --color-bg: #FAF8F4; /* off-white (was beach cream #F5F1EA) */
+  --color-bg: #FCFBF8; /* off-white (was beach cream #F5F1EA) */
   --color-bg-secondary: #EFE4CE;
   --color-card: #FFFDF8;
   --color-border: #D8C8B3;
@@ -57,8 +57,8 @@
   --color-text-light: #7A716C;
 
   /* Gradients */
-  --gradient-viora: linear-gradient(135deg, #FAF8F4 0%, #EFE4CE 55%, #F5E8E2 100%);
-  --gradient-viora-subtle: linear-gradient(135deg, #FFFDF8 0%, #FAF8F4 50%, #EFE4CE 100%);
+  --gradient-viora: linear-gradient(135deg, #FCFBF8 0%, #EFE4CE 55%, #F5E8E2 100%);
+  --gradient-viora-subtle: linear-gradient(135deg, #FFFDF8 0%, #FCFBF8 50%, #EFE4CE 100%);
   --gradient-dark: linear-gradient(135deg, #1A1410 0%, #2B211B 50%, #5A0A18 100%);
 
   /* Shadows */
