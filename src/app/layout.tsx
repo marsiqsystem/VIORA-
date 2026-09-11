@@ -1,12 +1,10 @@
 import type { Metadata } from "next";
 import { Montserrat, Cormorant_Garamond } from "next/font/google";
-import "lenis/dist/lenis.css";
 import "./globals.css";
 import dynamic from "next/dynamic";
 import Script from "next/script";
 import { GoogleTagManager } from "@next/third-parties/google";
 import Navbar from "@/components/Navbar";
-import SmoothScroll from "@/components/SmoothScroll";
 
 const GTAG_ID = "GT-T8ZJVVT9";
 const GOOGLE_ADS_ID = "AW-18325090177";
@@ -226,7 +224,6 @@ export default function RootLayout({
         </Script>
       </head>
       <body className={`${montserrat.className} w-full max-w-[100vw]`}>
-        <SmoothScroll />
         <WixClientContextProvider>
           <ToastProvider>
             <PendingReviewFlusher />
