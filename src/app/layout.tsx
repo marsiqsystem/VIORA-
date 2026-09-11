@@ -201,6 +201,24 @@ export default function RootLayout({
             window.dataLayer = window.dataLayer || [];
             function gtag(){dataLayer.push(arguments);}
             gtag('js', new Date());
+            // Consent Mode v2 default — read any previously saved choice so a
+            // returning visitor's decision applies BEFORE tags fire. Fresh
+            // visitors default to granted (matches our opt-out model); the
+            // consent banner lets them dial it back, which pushes an update.
+            var __vc = { analytics: true, marketing: true };
+            try {
+              var __vr = localStorage.getItem('viora_consent_v1');
+              if (__vr) {
+                var __vp = JSON.parse(__vr);
+                __vc = { analytics: __vp.analytics !== false, marketing: __vp.marketing !== false };
+              }
+            } catch (e) {}
+            gtag('consent', 'default', {
+              ad_storage: __vc.marketing ? 'granted' : 'denied',
+              ad_user_data: __vc.marketing ? 'granted' : 'denied',
+              ad_personalization: __vc.marketing ? 'granted' : 'denied',
+              analytics_storage: __vc.analytics ? 'granted' : 'denied',
+            });
             gtag('config', '${GTAG_ID}');
             gtag('config', '${GOOGLE_ADS_ID}');
             gtag('config', '${GA4_ID}');
