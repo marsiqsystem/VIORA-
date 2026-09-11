@@ -7,6 +7,10 @@ import MetaPixel from "./MetaPixel";
 
 type Consent = { analytics: boolean; marketing: boolean };
 const STORAGE_KEY = "viora_consent_v1";
+// Session-only "dismissed via ✕" marker. Hides the banner for the current
+// session but is gone next visit, so a dismisser is asked again next time
+// (and, because we default to opt-out, tracking keeps running meanwhile).
+const DISMISS_KEY = "viora_consent_dismissed";
 const REOPEN_EVENT = "viora:reopen-consent";
 
 export const reopenConsentBanner = () => {
@@ -25,9 +29,12 @@ const ConsentManager = () => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
+        // A saved choice (Accept all / Only essential) is permanent — never ask again.
         const parsed = JSON.parse(raw) as Consent;
         setConsent(parsed);
         setDraft(parsed);
+      } else if (sessionStorage.getItem(DISMISS_KEY)) {
+        // Dismissed with the ✕ earlier this session — stay hidden until next visit.
       } else {
         setShowBanner(true);
       }
@@ -43,6 +50,18 @@ const ConsentManager = () => {
     return () => window.removeEventListener(REOPEN_EVENT, onReopen);
   }, []);
 
+  // Lock page scroll while the banner is up, so a visitor can't just scroll
+  // past it — they have to click Accept all / Only essential / ✕ first.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (!showBanner) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [showBanner]);
+
   const persist = (next: Consent) => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
@@ -54,8 +73,21 @@ const ConsentManager = () => {
   };
 
   const acceptAll = () => persist({ analytics: true, marketing: true });
-  const rejectAll = () => persist({ analytics: false, marketing: false });
+  // "Only essential cookies" — the genuine, legal opt-out path (no analytics,
+  // no marketing). Positively framed instead of a scary "Reject" button.
+  const essentialOnly = () => persist({ analytics: false, marketing: false });
   const saveCustom = () => persist(draft);
+
+  // ✕ = dismiss/close, NOT reject. It saves no consent choice, so under our
+  // opt-out default trackers keep running; the banner just hides for this
+  // session and returns next visit.
+  const dismiss = () => {
+    try {
+      sessionStorage.setItem(DISMISS_KEY, "1");
+    } catch {}
+    setShowBanner(false);
+    setShowCustomize(false);
+  };
 
   const gaId = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
 
@@ -72,12 +104,40 @@ const ConsentManager = () => {
       {analyticsOn && gaId && <GoogleAnalytics gaId={gaId} />}
 
       {showBanner && (
+        <>
+        {/* Dimming backdrop: blocks scrolling/clicking the page until the
+            visitor makes a choice. Sits just below the banner. */}
+        <div
+          aria-hidden="true"
+          className="fixed inset-0 z-[199] bg-black/40 backdrop-blur-[1px]"
+        />
         <div
           role="dialog"
+          aria-modal="true"
           aria-label="Cookie consent"
           className="fixed inset-x-0 bottom-0 z-[200] border-t border-primary/10 bg-white shadow-2xl max-md:bottom-[64px]"
         >
-          <div className="mx-auto max-w-6xl px-4 py-4 md:px-8 md:py-5">
+          {/* Small corner ✕ = dismiss/close (not a reject). Discreet but
+              visible & accessible, so a visitor can always get past the banner. */}
+          <button
+            onClick={dismiss}
+            aria-label="Close"
+            title="Close"
+            className="absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            >
+              <path d="M1 1l10 10M11 1L1 11" />
+            </svg>
+          </button>
+          <div className="mx-auto max-w-6xl px-4 py-4 pr-8 md:px-8 md:py-5">
             {!showCustomize ? (
               <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div className="text-sm text-gray-700 md:max-w-3xl">
@@ -94,26 +154,20 @@ const ConsentManager = () => {
                   .
                 </div>
                 <div className="flex flex-wrap items-center gap-3 md:flex-nowrap">
-                  {/* Accept is the primary, most prominent choice. Reject &
-                      Customize stay clearly available (honest consent) but are
-                      styled as lighter secondary actions. */}
+                  {/* Accept is the primary, most prominent choice. "Only
+                      essential" is the genuine (legal) opt-out, styled as a
+                      quiet secondary action. No "Reject" label. */}
                   <button
                     onClick={acceptAll}
-                    className="order-1 rounded-full bg-accent px-7 py-2.5 text-sm font-bold text-white shadow-md transition-colors hover:bg-primary md:order-3"
+                    className="order-1 rounded-full bg-accent px-7 py-2.5 text-sm font-bold text-white shadow-md transition-colors hover:bg-primary md:order-2"
                   >
                     Accept all
                   </button>
                   <button
-                    onClick={() => setShowCustomize(true)}
-                    className="order-2 text-sm font-semibold text-primary underline-offset-2 hover:underline"
+                    onClick={essentialOnly}
+                    className="order-2 text-sm font-medium text-gray-500 underline-offset-2 hover:underline md:order-1"
                   >
-                    Customize
-                  </button>
-                  <button
-                    onClick={rejectAll}
-                    className="order-3 text-sm font-medium text-gray-500 underline-offset-2 hover:underline md:order-1"
-                  >
-                    Reject all
+                    Only essential cookies
                   </button>
                 </div>
               </div>
@@ -188,6 +242,7 @@ const ConsentManager = () => {
             )}
           </div>
         </div>
+        </>
       )}
     </>
   );
