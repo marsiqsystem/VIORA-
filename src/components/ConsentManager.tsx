@@ -160,7 +160,28 @@ const ConsentManager = () => {
               aria-label="Cookie settings"
               className="fixed inset-0 z-[200] flex items-center justify-center p-4"
             >
-              <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+              <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+                {/* ✕ closes ONLY this settings modal and returns to the bottom
+                    banner. The banner itself has no ✕ — it stays until the
+                    visitor chooses (Accept all, or saves a choice here). */}
+                <button
+                  onClick={() => setShowSettings(false)}
+                  aria-label="Close settings"
+                  title="Close"
+                  className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+                >
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 12 12"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                  >
+                    <path d="M1 1l10 10M11 1L1 11" />
+                  </svg>
+                </button>
                 <h3 className="font-playfair text-xl font-semibold text-primary">
                   Cookie settings
                 </h3>
