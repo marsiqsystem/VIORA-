@@ -12,7 +12,7 @@ const config: Config = {
         "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
         "gradient-conic":
           "conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))",
-        "viora-gradient": "linear-gradient(135deg, #F5F1EA 0%, #EFE4CE 55%, #F5E8E2 100%)",
+        "viora-gradient": "linear-gradient(135deg, #FAF8F4 0%, #EFE4CE 55%, #F5E8E2 100%)",
         "viora-gradient-dark": "linear-gradient(135deg, #1A1410 0%, #5A0A18 100%)",
       },
       colors: {
@@ -28,7 +28,8 @@ const config: Config = {
           muted: "#F5E8E2",
         },
         platinum: {
-          DEFAULT: "#F5F1EA",
+          // Off-white (was the warm "beach" cream #F5F1EA) — brand request 2026-09-11.
+          DEFAULT: "#FAF8F4",
           warm: "#F5E8E2",
         },
         accent: {

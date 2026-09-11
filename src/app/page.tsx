@@ -74,6 +74,25 @@ const HomePage = async () => {
           context — so it flows naturally in the document. */}
       <Slider />
 
+      {/* Categories — moved directly below the landing hero (before the product
+          rails) per brand request 2026-09-11. */}
+      <section className="bg-platinum px-4 pb-8 pt-10 md:px-8 md:pb-10 md:pt-12 lg:px-12 xl:px-16 2xl:px-24">
+        <div className="mb-5 flex items-center justify-between">
+          <div>
+            <h2 className="font-playfair text-2xl font-bold text-primary">
+              Categories
+            </h2>
+            <p className="mt-1 text-sm text-gray-600">
+              Browse every Viora collection.
+            </p>
+          </div>
+          <Link href="/list" className="text-sm font-semibold text-accent hover:text-primary">
+            View all
+          </Link>
+        </div>
+        <CategoryStrip imageBySlug={categoryImageBySlug} />
+      </section>
+
       {/*
         Offer banner — sibling of <Slider />, NOT a child of the hero.
         - Desktop (md+): static block in normal document flow, sits in the
@@ -131,23 +150,6 @@ const HomePage = async () => {
             featuredNames={["Noble Teardrop Harmony Set", "Rosa Blush Set", "Scarlet Bloom Set", "Crystal Wings Set", "Zara Crystal Set"]}
           />
         </Suspense>
-      </section>
-
-      <section className="bg-platinum px-4 pb-10 pt-4 md:px-8 md:pt-5 lg:px-12 xl:px-16 2xl:px-24">
-        <div className="mb-5 flex items-center justify-between">
-          <div>
-            <h2 className="font-playfair text-2xl font-bold text-primary">
-              Categories
-            </h2>
-            <p className="mt-1 text-sm text-gray-600">
-              Browse every Viora collection.
-            </p>
-          </div>
-          <Link href="/list" className="text-sm font-semibold text-accent hover:text-primary">
-            View all
-          </Link>
-        </div>
-        <CategoryStrip imageBySlug={categoryImageBySlug} />
       </section>
 
       <section className="relative w-full h-[60vh] md:h-[80vh] min-h-[420px] overflow-hidden flex items-center">
