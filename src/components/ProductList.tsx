@@ -36,12 +36,16 @@ const ProductList = async ({
     // so searching "blue" would never match "Eternal Shine ... - Blue".
     let productQuery = wixClient.products
       .queryProducts()
-      .hasSome(
-        "productType",
-        searchParams?.type ? [searchParams.type] : ["physical", "digital"]
-      )
       .gt("priceData.price", searchParams?.min || 0)
       .lt("priceData.price", searchParams?.max || 999999);
+
+    // productType is a single-value enum — Wix now rejects `hasSome` on it
+    // (SE-1105 "Invalid string filter"), which was silently emptying every
+    // product grid. Only constrain by type when one is explicitly requested;
+    // the default (all products) needs no productType filter at all.
+    if (searchParams?.type) {
+      productQuery = productQuery.eq("productType", searchParams.type);
+    }
 
     if (categoryId) {
       productQuery = productQuery.hasSome("collectionIds", [categoryId]);
