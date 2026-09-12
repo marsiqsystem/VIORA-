@@ -27,6 +27,13 @@ export const middleware = async (request: NextRequest) => {
 
     res.cookies.set("refreshToken", JSON.stringify(tokens.refreshToken), {
       maxAge: 60 * 60 * 24 * 30,
+      path: "/",
+      // HTTPS-only in production (skip on http://localhost so dev still works).
+      secure: process.env.NODE_ENV === "production",
+      // Lax = sent on top-level navigations (needed for the Wix client to
+      // rehydrate on first load) but not on cross-site subrequests. NOT
+      // HttpOnly: the Wix browser SDK reads this cookie to restore the session.
+      sameSite: "lax",
     });
   } catch (err) {
     console.error("Middleware visitor-token generation failed:", err);

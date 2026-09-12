@@ -602,6 +602,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="Enter your email"
+                autoComplete="email"
                 className="mt-1 w-full rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
               />
               <span className="mt-1 block text-xs text-gray-500">
@@ -621,6 +622,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 placeholder="Full Name"
+                autoComplete="name"
                 maxLength={100}
                 className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
               />
@@ -629,6 +631,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
                 placeholder="Address Line 1 (house, street)"
+                autoComplete="address-line1"
                 maxLength={120}
                 className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
               />
@@ -637,6 +640,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                 value={addressLine2}
                 onChange={(e) => setAddressLine2(e.target.value)}
                 placeholder="Address Line 2 (landmark, area) — optional"
+                autoComplete="address-line2"
                 maxLength={120}
                 className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
               />
@@ -646,12 +650,14 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                   value={city}
                   onChange={(e) => setCity(e.target.value)}
                   placeholder="City"
+                  autoComplete="address-level2"
                   maxLength={50}
                   className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
                 />
                 <select
                   value={state}
                   onChange={(e) => setState(e.target.value)}
+                  autoComplete="address-level1"
                   className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20 bg-white"
                 >
                   <option value="">Select State</option>
@@ -669,6 +675,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                   onChange={(e) => setPincode(e.target.value.replace(/\D/g, "").slice(0, 10))}
                   placeholder="Pincode"
                   inputMode="numeric"
+                  autoComplete="postal-code"
                   maxLength={10}
                   className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
                 />

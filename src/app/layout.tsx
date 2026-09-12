@@ -44,11 +44,15 @@ const cormorant = Cormorant_Garamond({
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "Viora Jewel — Artificial Jewellery, Necklace Sets & Earrings Online",
+    // Kept under 60 chars so Google doesn't truncate it, with the primary
+    // keyword ("Artificial Jewellery") inside the first 30 characters.
+    default: "Artificial Jewellery & Necklace Sets Online | Viora Jewel",
     template: "%s | Viora Jewel",
   },
+  // ~150 chars: fits Google's snippet without truncation, leads with a CTA and
+  // the core keywords, keeps the free-shipping + exchange hooks.
   description:
-    "Shop premium artificial & fashion jewellery online at Viora Jewel — necklace sets for women, earrings, long & stone necklace sets, bridal jewellery sets and Rakhi gifts. Free shipping across India, easy 48-hour exchange.",
+    "Shop premium artificial & fashion jewellery online — necklace sets, earrings & bridal sets for women. Free shipping across India, easy 48-hour exchange.",
   applicationName: "Viora Jewel",
   keywords: [
     "Viora Jewel",
@@ -100,6 +104,12 @@ export const metadata: Metadata = {
   robots: {
     index: true,
     follow: true,
+    // Also declared on the generic robots tag (not just googleBot) so every
+    // crawler + Google Discover can show large image previews — worth it for a
+    // visual jewellery catalogue.
+    "max-image-preview": "large",
+    "max-snippet": -1,
+    "max-video-preview": -1,
     googleBot: {
       index: true,
       follow: true,
@@ -186,6 +196,27 @@ export default function RootLayout({
     >
       {GTM_ID && <GoogleTagManager gtmId={GTM_ID} />}
       <head>
+        {/* Committed light design (off-white #F8F8F8). Declaring the scheme
+            stops browsers/OS dark mode from auto-darkening native form controls,
+            selects and scrollbars, which otherwise clash with the light UI. */}
+        <meta name="color-scheme" content="light" />
+        {/* Brand plum in the mobile browser UI (address bar / task switcher);
+            mirrors the Web App Manifest theme_color. */}
+        <meta name="theme-color" content="#9B1B30" />
+
+        {/* Warm up connections to the third-party origins we hit on nearly every
+            page, so the TLS/DNS handshake is already done when the request fires.
+            static.wixstatic.com serves the product imagery (helps LCP); the other
+            two are the analytics/pixel scripts. Fonts are self-hosted by
+            next/font, so no Google Fonts preconnect is needed. */}
+        <link
+          rel="preconnect"
+          href="https://static.wixstatic.com"
+          crossOrigin="anonymous"
+        />
+        <link rel="dns-prefetch" href="https://static.wixstatic.com" />
+        <link rel="preconnect" href="https://www.googletagmanager.com" />
+        <link rel="dns-prefetch" href="https://connect.facebook.net" />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(globalSchema) }}
@@ -224,13 +255,22 @@ export default function RootLayout({
         </Script>
       </head>
       <body className={`${montserrat.className} w-full max-w-[100vw]`}>
+        {/* Skip link: first focusable element, lets keyboard/screen-reader
+            users jump past the nav straight to page content. Hidden until
+            focused via Tab. */}
+        <a
+          href="#main"
+          className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:top-3 focus:left-3 focus:rounded-md focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-[#9B1B30] focus:shadow-lg focus:ring-2 focus:ring-[#9B1B30]"
+        >
+          Skip to content
+        </a>
         <WixClientContextProvider>
           <ToastProvider>
             <PendingReviewFlusher />
             <AnnouncementMarquee />
 
             <Navbar />
-            <main className="w-full max-w-[100vw] pb-20 md:pb-0">
+            <main id="main" className="w-full max-w-[100vw] pb-20 md:pb-0">
               {children}
             </main>
             <Footer />

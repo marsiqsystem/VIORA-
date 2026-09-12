@@ -38,7 +38,37 @@ const nextConfig = {
   // Long-cache the static assets in /public (Next emits them under /_next/static
   // with hashed names already; this covers raw /public/* requests).
   async headers() {
+    // Security headers applied to every response. Deliberately excludes a strict
+    // Content-Security-Policy: this app loads Wix, Razorpay, Meta Pixel and GA
+    // from many origins, and a wrong CSP silently breaks checkout/tracking. The
+    // headers below are safe with zero breakage risk.
+    //   - X-Frame-Options / frame-ancestors: block clickjacking (our pages can't
+    //     be framed by other sites; Razorpay/Wix widgets WE embed are unaffected).
+    //   - X-Content-Type-Options: stop MIME sniffing.
+    //   - Referrer-Policy: send origin only cross-site (keeps UTM on same-site).
+    //   - Permissions-Policy: disable camera/mic/geolocation we never use. Note
+    //     'payment' is intentionally NOT disabled so Razorpay keeps working.
+    //   - HSTS: force HTTPS for a year.
+    const securityHeaders = [
+      { key: "X-Frame-Options", value: "SAMEORIGIN" },
+      { key: "X-Content-Type-Options", value: "nosniff" },
+      { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+      {
+        key: "Permissions-Policy",
+        value: "camera=(), microphone=(), geolocation=(), browsing-topics=()",
+      },
+      {
+        key: "Strict-Transport-Security",
+        value: "max-age=31536000; includeSubDomains",
+      },
+    ];
+
     return [
+      {
+        // Every route gets the security headers.
+        source: "/:path*",
+        headers: securityHeaders,
+      },
       {
         source: "/:all*(svg|jpg|jpeg|png|webp|avif|gif|ico|woff|woff2)",
         locale: false,
