@@ -27,7 +27,10 @@ import { withRetry } from "./reliability";
 
 function cfg() {
   return {
-    baseUrl: (process.env.ITHINK_BASE_URL || "https://api.ithinklogistics.com/api_v2").replace(/\/$/, ""),
+    // Verified working host+version for this account: my.ithinklogistics.com/api_v3
+    // (api.ithinklogistics.com and /api_v2 return 404 for order/add). The v3
+    // endpoint accepts the same data.shipments[...] body shape as the v2 docs.
+    baseUrl: (process.env.ITHINK_BASE_URL || "https://my.ithinklogistics.com/api_v3").replace(/\/$/, ""),
     // .trim() every credential — a stray space/newline pasted into the Vercel
     // dashboard would otherwise silently fail auth.
     accessToken: (process.env.ITHINK_ACCESS_TOKEN || "").trim(),
@@ -36,10 +39,14 @@ function cfg() {
     // Required by add.json. Return defaults to the pickup id when unset.
     pickupAddressId: (process.env.ITHINK_PICKUP_ADDRESS_ID || "").trim(),
     returnAddressId: (process.env.ITHINK_RETURN_ADDRESS_ID || process.env.ITHINK_PICKUP_ADDRESS_ID || "").trim(),
-    // Which carrier + service iThink should book through. add.json requires a
-    // logistics partner; auto-cheapest can be added later via iThink's rate API.
-    logistics: (process.env.ITHINK_LOGISTICS || "").trim(),
-    serviceType: (process.env.ITHINK_SERVICE_TYPE || "ground").trim(),
+    // Which carrier + service iThink should book through. Verified allowed
+    // `logistics` values for this account (via rate/check): delhivery, xpressbees,
+    // dtdc, bluedart, shadowfax. `s_type` for delhivery/bluedart is air|surface.
+    // Auto-cheapest can be added later via iThink's rate/check.json API.
+    logistics: (process.env.ITHINK_LOGISTICS || "delhivery").trim(),
+    serviceType: (process.env.ITHINK_SERVICE_TYPE || "surface").trim(),
+    // iThink store/channel id (from the panel); sent as store_id on each shipment.
+    storeId: (process.env.ITHINK_STORE_ID || "").trim(),
     // Customer-facing tracking page. Set a branded URL later (as we did for
     // Velocity); default to iThink's public tracker.
     trackBase: (process.env.ITHINK_TRACK_URL_BASE || "https://ithinklogistics.com/track").replace(/\/$/, ""),
@@ -116,6 +123,10 @@ function buildOrderPayload(o) {
   // back to the GUID if no number is available.
   const orderRef = o.orderId ? `VJ-#${o.orderId}` : o.orderGuid;
 
+  // v3 shipment object. Every field below must be PRESENT (the API rejects a
+  // missing key with "… field must be present"), even when empty. `products` is
+  // an ARRAY of objects in v3 (v2 used flat strings); numeric charge fields are
+  // "0", not "". Verified end-to-end against my.ithinklogistics.com/api_v3.
   const shipment = {
     waybill: "", // blank -> iThink auto-generates the AWB
     order: orderRef,
@@ -123,6 +134,7 @@ function buildOrderPayload(o) {
     order_date: formatOrderDate(new Date()),
     total_amount: String(amount),
     name: (o.name || "Customer").trim(),
+    company_name: "",
     add: address.line1 || "",
     add2: address.line2 || "",
     add3: "",
@@ -135,31 +147,46 @@ function buildOrderPayload(o) {
     email: o.email || "",
     is_billing_same_as_shipping: "yes",
     billing_name: "",
+    billing_company_name: "",
     billing_add: "",
+    billing_add2: "",
+    billing_add3: "",
     billing_pin: "",
+    billing_city: "",
+    billing_state: "",
+    billing_country: "",
     billing_phone: "",
-    products: productName,
-    products_desc: productName,
-    product_sku: productSku,
-    product_quantity: String(totalUnits),
-    product_price: String(productPrice),
-    product_tax_rate: "",
-    product_hsn_code: "",
-    product_discount: "",
+    billing_alt_phone: "",
+    billing_email: "",
+    products: [
+      {
+        product_name: productName,
+        product_sku: productSku,
+        product_quantity: String(totalUnits),
+        product_price: String(productPrice),
+      },
+    ],
     shipment_length: String(c.dims.length),
     shipment_width: String(c.dims.breadth),
     shipment_height: String(c.dims.height * totalUnits),
     weight: String(Number((c.dims.weight * totalUnits).toFixed(3))),
-    shipping_charges: "",
-    giftwrap_charges: "",
-    transaction_charges: "",
-    total_discount: "",
+    shipping_charges: "0",
+    giftwrap_charges: "0",
+    transaction_charges: "0",
+    total_discount: "0",
+    first_attemp_discount: "0",
+    cod_charges: "0",
+    advance_amount: "0",
     // COD collects the order total; Prepaid collects nothing.
     cod_amount: isCOD ? String(amount) : "0",
     payment_mode: isCOD ? "COD" : "Prepaid",
-    cod_charges: "",
-    advance_amount: "",
+    reseller_name: "",
+    eway_bill_number: "",
+    gst_number: "",
+    what3words: "",
     return_address_id: c.returnAddressId,
+    api_source: "0",
+    store_id: c.storeId,
   };
 
   return {
@@ -224,8 +251,8 @@ async function createShipment(o) {
     return { ok: true, dryRun: true, awb, trackingUrl: `${c.trackBase}/${awb}`, raw: { mock: true } };
   }
 
-  if (!c.accessToken || !c.secretKey || !c.pickupAddressId || !c.logistics) {
-    console.error("[ithink] ITHINK_ACCESS_TOKEN / SECRET_KEY / PICKUP_ADDRESS_ID / LOGISTICS not fully set.");
+  if (!c.accessToken || !c.secretKey || !c.pickupAddressId) {
+    console.error("[ithink] ITHINK_ACCESS_TOKEN / SECRET_KEY / PICKUP_ADDRESS_ID not fully set.");
     return { ok: false, dryRun: false, error: "ithink not configured" };
   }
 
