@@ -316,6 +316,7 @@ const SinglePage = async ({ params }: { params: { slug: string } }) => {
         <RelatedProducts
           currentProductId={product._id || ""}
           currentName={product.name || ""}
+          currentColor={currentColor}
           collectionIds={product.collectionIds || []}
         />
       </Suspense>

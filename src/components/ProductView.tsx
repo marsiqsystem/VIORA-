@@ -136,7 +136,54 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
     const filledStars = hasRealReviews ? Math.round(realAvgRating) : 0;
 
     return (
-        <div className="flex flex-col lg:flex-row lg:items-start gap-8 lg:gap-16">
+        <>
+            {/* Top trust strip — the three promises that matter most, up front.
+                Kept quiet and premium (hairline card, no loud colour) so it
+                reassures without shouting. */}
+            <div className="mb-6 grid grid-cols-3 divide-x divide-gray-200 overflow-hidden rounded-lg border border-gray-200 bg-white/70">
+                {[
+                    {
+                        t: "Free Shipping",
+                        s: "On prepaid orders",
+                        d: "M3 7h11v10H3zM14 10h4l3 3v4h-7M7.5 19.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM17.5 19.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z",
+                    },
+                    {
+                        t: "48-Hr Exchange",
+                        s: "Damaged / wrong item",
+                        d: "M3 12a9 9 0 019-9 9 9 0 018 5M21 12a9 9 0 01-9 9 9 9 0 01-8-5M3 4v4h4M21 20v-4h-4",
+                    },
+                    {
+                        t: "100% Secure",
+                        s: "Safe checkout",
+                        d: "M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3zM9.5 12l1.8 1.8L15 10",
+                    },
+                ].map((x) => (
+                    <div
+                        key={x.t}
+                        className="flex flex-col items-center gap-1 px-2 py-3 text-center"
+                    >
+                        <svg
+                            className="h-5 w-5 text-primary"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={1.5}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                        >
+                            <path d={x.d} />
+                        </svg>
+                        <span className="text-[11px] font-semibold leading-tight text-primary sm:text-xs">
+                            {x.t}
+                        </span>
+                        <span className="text-[10px] leading-tight text-gray-500">
+                            {x.s}
+                        </span>
+                    </div>
+                ))}
+            </div>
+
+            <div className="flex flex-col lg:flex-row lg:items-start gap-8 lg:gap-16">
             {/* Images — pins to viewport while right column (details/reviews) scrolls.
                 `lg:self-start lg:h-fit` keeps the column from stretching to the full
                 grid height (which is what previously broke the sticky lock and left
@@ -165,6 +212,12 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                         {displayName || (product.name || "").split(" - ")[0].trim()}
                     </h1>
 
+                    {/* Brand tagline — a soft value line under the name, styled to
+                        read as elegant, not as an ad. */}
+                    <p className="mt-1.5 font-playfair text-sm italic text-gray-500">
+                        Everyday elegance, crafted to be kind to your skin.
+                    </p>
+
                     {/* Social Proof Text — rating shown only when real reviews exist */}
                     {hasRealReviews ? (
                         <p className="mt-2 text-sm text-gray-600 font-medium">
@@ -177,16 +230,70 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                     )}
                 </div>
 
-                {/* Highlight Pills */}
-                <div className="flex flex-wrap gap-2">
-                    {["Premium Polish", "Hypoallergenic", "Cash on Delivery"].map((pill) => (
-                        <span
-                            key={pill}
-                            className="bg-gray-100 text-gray-800 text-xs px-2.5 py-1 rounded-full border border-gray-200 font-medium"
+                {/* Benefit trio — the three reasons this piece is worth it, as
+                    icon cards. Replaces the old flat text pills; claims are the
+                    real material story (brass + rhodium + glass stones). */}
+                <div className="grid grid-cols-3 gap-2">
+                    {[
+                        {
+                            label: "Skin-Friendly",
+                            sub: "Hypoallergenic",
+                            d: "M12 21c-4-1.5-7-4.8-7-9V6l7-3 7 3v6c0 4.2-3 7.5-7 9z",
+                        },
+                        {
+                            label: "Rhodium Plated",
+                            sub: "Lasting shine",
+                            d: "M12 3l2.5 5 5.5.8-4 3.9.9 5.5L12 21l-4.9-2.3.9-5.5-4-3.9 5.5-.8L12 3z",
+                        },
+                        {
+                            label: "Original Stones",
+                            sub: "Premium glass",
+                            d: "M6 3h12l3 6-9 12L3 9l3-6zM3 9h18M12 21L8 9l2-6M12 21l4-12-2-6",
+                        },
+                    ].map((b) => (
+                        <div
+                            key={b.label}
+                            className="flex flex-col items-center gap-1 rounded-lg border border-gray-200 bg-gray-50/60 px-2 py-3 text-center"
                         >
-                            {pill}
-                        </span>
+                            <svg
+                                className="h-5 w-5 text-primary"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                strokeWidth={1.5}
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                            >
+                                <path d={b.d} />
+                            </svg>
+                            <span className="text-[11px] font-semibold leading-tight text-gray-800 sm:text-xs">
+                                {b.label}
+                            </span>
+                            <span className="text-[10px] leading-tight text-gray-500">
+                                {b.sub}
+                            </span>
+                        </div>
                     ))}
+                </div>
+
+                {/* Honest trust line — no invented customer counts or stock
+                    faces; "Verified reviews" only appears once real reviews exist. */}
+                <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                    <svg
+                        className="h-4 w-4 flex-shrink-0 text-primary"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={1.5}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                    >
+                        <path d="M9 12l2 2 4-4M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z" />
+                    </svg>
+                    <span>
+                        Trusted by shoppers across India
+                        {hasRealReviews ? " · Verified reviews" : ""}
+                    </span>
                 </div>
 
                 {/* Rating — shown only when real reviews exist */}
@@ -327,6 +434,40 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                             COD Available
                         </div>
                     </div>
+                </div>
+
+                {/* Why Viora? — the buying rationale as a scannable checklist.
+                    Uses the genuine product story; keep it factual, not hype. */}
+                <div className="rounded-lg border border-gray-100 bg-white p-4">
+                    <h3 className="mb-3 font-playfair text-lg font-semibold text-primary">
+                        Why Viora?
+                    </h3>
+                    <ul className="space-y-2.5">
+                        {[
+                            "Premium brass with rhodium plating for a lasting, bright finish",
+                            "Skin-friendly & hypoallergenic — comfortable for daily wear",
+                            "Tarnish-resistant so it keeps its shine longer",
+                            "Arrives gift-ready in premium packaging",
+                        ].map((point) => (
+                            <li
+                                key={point}
+                                className="flex items-start gap-2.5 text-sm text-gray-700"
+                            >
+                                <svg
+                                    className="mt-0.5 h-4 w-4 flex-shrink-0 text-green-600"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    strokeWidth={2}
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                >
+                                    <path d="M20 6L9 17l-5-5" />
+                                </svg>
+                                <span>{point}</span>
+                            </li>
+                        ))}
+                    </ul>
                 </div>
 
                 {/* Additional Info (Care Instructions etc. from Wix) */}
@@ -489,7 +630,8 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                 selectedOptions={selectedOptions}
                 triggerSelector={`#${STICKY_TRIGGER_ID}`}
             />
-        </div>
+            </div>
+        </>
     );
 };
 

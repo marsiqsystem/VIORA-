@@ -61,6 +61,12 @@ const ProductCard = ({
   const currentSellingPrice = hasDiscount ? discountedPrice : actualPrice;
 
   const isLowStock = product.stock?.quantity && product.stock.quantity < 5;
+  const discountPercent = hasDiscount
+    ? Math.round(((actualPrice - currentSellingPrice) / actualPrice) * 100)
+    : 0;
+  const saveAmount = hasDiscount ? actualPrice - currentSellingPrice : 0;
+  // Optional merchandising ribbon set in Wix (e.g. "Bestseller", "New").
+  const ribbon = (product.ribbon || "").trim();
   const href = "/" + product.slug;
 
   // Strip color suffix: "Base Name - Color" → "Base Name"
@@ -94,6 +100,23 @@ const ProductCard = ({
           />
         </div>
       </Link>
+
+      {/* Merchandising badges — top-left. Ribbon (Wix) sits above the discount
+          chip. Kept small and on-brand so cards feel alive, not loud. */}
+      {(ribbon || discountPercent > 0) && (
+        <div className="pointer-events-none absolute top-3 left-3 z-20 flex flex-col items-start gap-1.5">
+          {ribbon && (
+            <span className="rounded-full bg-[#9B1B30] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm">
+              {ribbon}
+            </span>
+          )}
+          {discountPercent > 0 && (
+            <span className="rounded-full bg-[#1A1410] px-2.5 py-1 text-[10px] font-bold text-white shadow-sm">
+              {discountPercent}% OFF
+            </span>
+          )}
+        </div>
+      )}
 
       <button
         type="button"
@@ -138,13 +161,18 @@ const ProductCard = ({
           </p>
         )}
 
-        <div className="flex items-center gap-2 mt-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-2">
           <span className="font-bold text-sm md:text-lg text-accent">
             ₹{currentSellingPrice}
           </span>
           {hasDiscount && (
             <span className="text-xs md:text-sm text-gray-400 line-through">
               ₹{actualPrice}
+            </span>
+          )}
+          {saveAmount > 0 && (
+            <span className="rounded border border-green-200 bg-green-50 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">
+              Save ₹{saveAmount}
             </span>
           )}
         </div>
