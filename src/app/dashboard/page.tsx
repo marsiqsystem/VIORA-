@@ -379,8 +379,16 @@ function isPickable(o: Order) {
 const PICKER_COURIERS: { id: string; label: string; color: string }[] = [
   { id: "velocity", label: "Velocity", color: "#6b4a8f" },
   { id: "shiprocket", label: "Shiprocket", color: "#5b3bd4" },
-  // { id: "ithink", label: "iThink", color: "#0a7d5a" },  // <- future
+  { id: "ithink", label: "iThink", color: "#0a7d5a" },
 ];
+
+// The picker stays available while an order is still pre-shipment, EVEN if a
+// courier was already chosen — so an order created on one courier (e.g. Velocity
+// with poor rates) can be re-created on another. Truly shipped statuses
+// (dispatched/delivered/rto/cancelled) fall out of PICKABLE_STATUS and lock.
+function canAssign(o: Order) {
+  return PICKABLE_STATUS.has((o.status || "").toLowerCase());
+}
 
 // Per-row courier picker: creates the order in the chosen courier (create-only —
 // lands in that courier's "New Orders", operator generates the AWB there).
@@ -389,7 +397,12 @@ function AssignCell({ order, apiKey, onChanged }: { order: Order; apiKey: string
   const [err, setErr] = useState("");
 
   const assign = async (courier: string, label: string) => {
-    if (!window.confirm(`Create order #${order.orderId} on ${label}?`)) return;
+    // If a courier is already recorded, this is a RE-create on a different one —
+    // warn so the operator cancels the old shipment and avoids a double booking.
+    const msg = order.courier
+      ? `Order #${order.orderId} is already on ${order.courier}.\n\nAlso create it on ${label}? Cancel the ${order.courier} one to avoid a double shipment.`
+      : `Create order #${order.orderId} on ${label}?`;
+    if (!window.confirm(msg)) return;
     setBusy(courier); setErr("");
     try {
       const res = await fetch(`/api/dashboard/assign-courier?key=${encodeURIComponent(apiKey)}`, {
@@ -404,9 +417,14 @@ function AssignCell({ order, apiKey, onChanged }: { order: Order; apiKey: string
     finally { setBusy(""); }
   };
 
-  if (!isPickable(order)) return <span style={{ color: C.sub }}>—</span>;
+  if (!canAssign(order)) return <span style={{ color: C.sub }}>—</span>;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 160 }}>
+      {order.courier && (
+        <div style={{ fontSize: 11, color: C.sub }}>
+          On <b style={{ textTransform: "capitalize", color: C.text }}>{order.courier}</b> — re-create elsewhere:
+        </div>
+      )}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {PICKER_COURIERS.map((c) => (
           <button key={c.id} disabled={!!busy} onClick={() => assign(c.id, c.label)} style={assignBtn(c.color)}>

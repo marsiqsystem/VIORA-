@@ -16,6 +16,7 @@ import { authOk, authConfigured, keyFromRequest } from "@/lib/crm/inbox-store";
 import * as ordersStore from "@/lib/crm/orders-store";
 import * as velocity from "@/lib/crm/velocity";
 import * as shiprocket from "@/lib/crm/shiprocket";
+import * as ithink from "@/lib/crm/ithink";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,8 +35,8 @@ export async function POST(req: NextRequest) {
   const order = await ordersStore.getOrder(orderId);
   if (!order) return NextResponse.json({ ok: false, error: "order not found in store" }, { status: 404 });
 
-  // Couriers with a real API link: velocity and shiprocket.
-  const KNOWN = new Set(["velocity", "shiprocket"]);
+  // Couriers with a real API link: velocity, shiprocket and ithink.
+  const KNOWN = new Set(["velocity", "shiprocket", "ithink"]);
 
   // Unknown couriers (e.g. a future one before its API is wired): just record
   // the choice so the operator can ship it in that courier's own dashboard.
@@ -58,8 +59,9 @@ export async function POST(req: NextRequest) {
     items: undefined as any,
   };
 
-  const carrier = courier === "shiprocket" ? shiprocket : velocity;
-  // Velocity's create-only returns `velocityOrderId`; Shiprocket's `courierOrderId`.
+  const carrier =
+    courier === "shiprocket" ? shiprocket : courier === "ithink" ? ithink : velocity;
+  // Velocity's create-only returns `velocityOrderId`; Shiprocket/iThink `courierOrderId`.
   const orderIdOf = (r: any) => r?.courierOrderId ?? r?.velocityOrderId ?? "";
 
   if (body?.ship === true) {
@@ -81,7 +83,11 @@ export async function POST(req: NextRequest) {
     await ordersStore.updateOrder(orderId, {
       courier,
       courierOrderId: orderIdOf(res),
-      status: "created",
+      // iThink's create-only already generates an AWB (no "New Orders" state), so
+      // capture it here; Velocity/Shiprocket create-only leave these blank.
+      awb: res.awb || "",
+      trackingUrl: res.trackingUrl || "",
+      status: res.awb ? "dispatched" : "created",
       statusAt: Date.now(),
     });
   }
