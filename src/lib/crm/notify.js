@@ -186,7 +186,12 @@ async function sendDispatched(o) {
 // IMAGE header ; body {{1}} name, {{2}} order id, {{3}} product, {{4}} amount. NO button.
 async function sendOutForDelivery(o) {
   await applyOverride(o);
-  const bodyParams = [o.name, o.orderId, o.product, o.amount];
+  // {{4}} is the amount to collect on delivery. For PREPAID the customer has
+  // already paid online, so there is nothing to collect — show ₹0 instead of
+  // the order value (which looked like a second charge / caused confusion).
+  const isPrepaid = String(o.paymentMode || "").toUpperCase() === "PREPAID";
+  const amountParam = isPrepaid ? "₹0 — already paid online ✅" : o.amount;
+  const bodyParams = [o.name, o.orderId, o.product, amountParam];
   const headerImageUrl = o.productImage || T.outForDelivery.headerImageUrl;
   const res = await sendTemplate({
     to: o.phone,

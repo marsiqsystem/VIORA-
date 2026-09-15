@@ -35,9 +35,13 @@ interface LoginModalProps {
   open: boolean;
   onClose: () => void;
   onLoggedIn?: () => void;
+  // Optional copy overrides so the same modal can be reused in different
+  // contexts (wishlist, order tracking, etc.) with context-appropriate wording.
+  noteTitle?: string;
+  noteBody?: string;
 }
 
-const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
+const LoginModal = ({ open, onClose, onLoggedIn, noteTitle, noteBody }: LoginModalProps) => {
   const wixClient = useWixClient();
   const [mode, setMode] = useState<Mode>("LOGIN");
   const [username, setUsername] = useState("");
@@ -132,7 +136,9 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
     const tokens = await withTimeout(
       wixClient.auth.getMemberTokensForDirectLogin(sessionToken)
     );
-    Cookies.set("refreshToken", JSON.stringify(tokens.refreshToken), { expires: 2 });
+    // Keep members signed in for 30 days so they don't have to log in again to
+    // leave a review, track an order, or request an exchange.
+    Cookies.set("refreshToken", JSON.stringify(tokens.refreshToken), { expires: 30 });
     wixClient.auth.setTokens(tokens);
     if (justRegistered) trackCompleteRegistration("email");
     onLoggedIn?.();
@@ -253,20 +259,24 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
             // LOGIN has no visible checkbox (invisible reCAPTCHA), so requiring
             // one would leave the user stuck. Point them to the Wix setting.
             if (isLocalhost() || mode === "LOGIN") {
+              console.warn(
+                "[auth] reCAPTCHA blocked login — review reCAPTCHA setting in Wix Dashboard (Settings → Site Member Settings)."
+              );
               setError(
-                "Login is blocked by reCAPTCHA. In your Wix Dashboard go to Settings → Site Member Settings → Signup & Login Security → turn reCAPTCHA OFF (or re-check it), click Save, then click Publish at the top. After publishing, try again."
+                "We couldn't complete the security check. Please refresh the page and try again, or turn off any ad-blocker. Still stuck? Message us on WhatsApp and we'll sign you in."
               );
             } else if (!isCaptchaRequired) {
               setIsCaptchaRequired(true);
-              setError("Security check required. Please complete the checkbox below and click Create Account again.");
+              setError("Quick security check — please tick the box below, then tap Create Account again.");
             } else {
               setError(
-                "Security check failed. Please try again or contact support."
+                "The security check didn't go through. Please try once more, or message us on WhatsApp for help."
               );
             }
           } else {
+            console.warn("[auth] login failed:", response.errorCode, response);
             setError(
-              `Login failed (${response.errorCode || "unknown error"}). Please try again.`
+              "We couldn't sign you in. Please double-check your email and password and try again."
             );
           }
           break;
@@ -307,15 +317,18 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
       }
       if (isCaptchaError) {
         if (isLocalhost() || mode === "LOGIN") {
+          console.warn(
+            "[auth] reCAPTCHA blocked login — review reCAPTCHA setting in Wix Dashboard (Settings → Site Member Settings)."
+          );
           setError(
-            "Login is blocked by reCAPTCHA. In your Wix Dashboard go to Settings → Site Member Settings → Signup & Login Security → turn reCAPTCHA OFF (or re-check it), click Save, then click Publish at the top. After publishing, try again."
+            "We couldn't complete the security check. Please refresh the page and try again, or turn off any ad-blocker. Still stuck? Message us on WhatsApp and we'll sign you in."
           );
         } else if (!isCaptchaRequired) {
           setIsCaptchaRequired(true);
-          setError("Security check required. Please complete the checkbox below and click Create Account again.");
+          setError("Quick security check — please tick the box below, then tap Create Account again.");
         } else {
           setError(
-            "Security check failed. Please try again or contact support."
+            "The security check didn't go through. Please try once more, or message us on WhatsApp for help."
           );
         }
         return;
@@ -326,6 +339,20 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
         );
         return;
       }
+      // OTP step: Wix rejects the code with a raw INVALID_ARGUMENT / MIN_LENGTH
+      // validation error. Show friendly guidance instead of the JSON blob.
+      const blob = `${raw} ${appDesc} ${code}`;
+      if (
+        mode === "VERIFY" &&
+        /INVALID_ARGUMENT|MIN_LENGTH|fieldViolations|VALIDATION|'code'|verificationCode/i.test(
+          blob
+        )
+      ) {
+        setError(
+          "That code didn't work — it may have expired or been entered incorrectly. Tap “Resend code” to get a fresh one, then enter it here."
+        );
+        return;
+      }
       const isUnpublishedSite =
         code === "ASSERTION_FAILED" ||
         /No Public URL Found/i.test(raw) ||
@@ -333,15 +360,14 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
         /site is published/i.test(raw) ||
         /site is published/i.test(appDesc);
       if (isUnpublishedSite) {
+        console.warn("[auth] Wix site appears unpublished — publish it from the Wix dashboard.");
         setError(
-          "Login is unavailable — the Wix site needs to be Published from the Wix dashboard before authentication will work."
+          "Sign-in is temporarily unavailable. Please try again in a few minutes, or message us on WhatsApp and we'll help you."
         );
       } else {
-        const detail = code || raw || appDesc;
+        console.warn("[auth] unexpected auth error:", code || raw || appDesc);
         setError(
-          detail
-            ? `Something went wrong (${detail}). Please try again.`
-            : "Something went wrong. Please try again."
+          "Something went wrong on our side. Please try again in a moment, or message us on WhatsApp for help."
         );
       }
     } finally {
@@ -434,12 +460,11 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
             style={{ borderColor: "#9B1B30" }}
           >
             <p className="font-playfair text-base font-semibold text-[#9B1B30] mb-1">
-              ✨ Save Your Spark! ✨
+              {noteTitle ?? "✨ Save Your Spark! ✨"}
             </p>
             <p>
-              Please log in to add these beautiful pieces to your Wishlist. This
-              ensures your curated dream jewels are saved forever, even after
-              you close the website. Don&rsquo;t lose your favorites! ❤️
+              {noteBody ??
+                "Please log in to add these beautiful pieces to your Wishlist. This ensures your curated dream jewels are saved forever, even after you close the website. Don’t lose your favorites! ❤️"}
             </p>
           </div>
 

@@ -301,10 +301,16 @@ export async function POST(req: Request) {
     let discountApplied = false;
     let codChargeApplied = false;
 
-    // For COD orders, add the delivery + handling charge as a custom line item
-    // via a draft-order edit so the Wix order TOTAL — and therefore the amount
-    // the courier collects — becomes subtotal + ₹49. Mirrors the prepaid
-    // draft-edit below (which subtracts) but this one ADDS a charge.
+    // For COD orders, add the delivery + handling charge as an ADDITIONAL FEE
+    // (not a line item) via a draft-order edit, so the Wix order TOTAL — and
+    // therefore the amount the courier collects — becomes subtotal + ₹49.
+    //
+    // Why a fee and not a custom line item: a second line item made the order
+    // show "2 items" and get stuck on "Partially fulfilled" (the service item
+    // never ships) and threw off the invoice quantity. An additional fee raises
+    // the total without touching the product line items, so quantity/fulfilment
+    // stay correct. Mirrors the prepaid draft-edit below (which subtracts via a
+    // custom discount) — this one ADDS a fee.
     //
     // Best-effort: if the edit fails the underlying order is untouched. We still
     // record the intended total so the email/tracking match what the customer
@@ -319,13 +325,12 @@ export async function POST(req: Request) {
           draftRes?.draftOrder?._id;
         if (!draftId) throw new Error("Draft order id missing from response.");
 
-        await (wixClient.draftOrders as any).addLineItemsToDraftOrder(draftId, {
-          customLineItems: [
+        await (wixClient.draftOrders as any).createCustomAdditionalFees(draftId, {
+          customAdditionalFees: [
             {
-              quantity: 1,
+              name: "Delivery + COD Charges",
               price: { amount: codCharge.toFixed(2) },
-              productName: { original: "Delivery + COD Charges" },
-              itemType: { preset: "SERVICE" },
+              applyToDraftOrder: true,
             },
           ],
         });
