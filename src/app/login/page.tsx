@@ -7,6 +7,7 @@ import Cookies from "js-cookie";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { trackCompleteRegistration } from "@/lib/metaPixel";
 import BackButton from "@/components/BackButton";
+import GoogleSignInButton from "@/components/GoogleSignInButton";
 import {
   getInvisibleCaptchaToken,
   getVisibleCaptchaResponse,
@@ -501,7 +502,20 @@ const LoginContent = () => {
         className="flex flex-col gap-6 w-full max-w-md bg-white rounded-xl p-8 shadow-premium"
         onSubmit={handleSubmit}
       >
-        <h1 className="text-2xl font-playfair font-bold text-primary">{formTitle}</h1>
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-playfair font-bold text-primary">{formTitle}</h1>
+          {(mode === MODE.LOGIN || mode === MODE.REGISTER) && (
+            <p className="text-sm text-gray-500">
+              {mode === MODE.LOGIN
+                ? "Welcome back to Viora."
+                : "Join Viora — it only takes a moment."}
+            </p>
+          )}
+        </div>
+
+        {(mode === MODE.LOGIN || mode === MODE.REGISTER) && (
+          <GoogleSignInButton redirectTo={redirectTo} onError={setError} />
+        )}
 
         {mode === MODE.RESET_PASSWORD && (
           <p className="-mt-3 text-sm text-gray-600 leading-relaxed">
