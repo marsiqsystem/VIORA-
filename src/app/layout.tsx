@@ -15,6 +15,7 @@ const GTM_ID = process.env.NEXT_PUBLIC_GTM_ID;
 const Footer = dynamic(() => import("@/components/Footer"));
 const MobileBottomNav = dynamic(() => import("@/components/MobileBottomNav"));
 const ConsentManager = dynamic(() => import("@/components/ConsentManager"));
+const GoogleOneTap = dynamic(() => import("@/components/GoogleOneTap"));
 import { WixClientContextProvider } from "@/context/wixContext";
 import { ToastProvider } from "@/components/Toast";
 import AnnouncementMarquee from "@/components/AnnouncementMarquee";
@@ -276,6 +277,7 @@ export default function RootLayout({
             <Footer />
             <MobileBottomNav />
           </ToastProvider>
+          <GoogleOneTap />
         </WixClientContextProvider>
         <ConsentManager />
       </body>
