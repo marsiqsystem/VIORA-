@@ -6,6 +6,7 @@ import Cookies from "js-cookie";
 import { useEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { trackCompleteRegistration } from "@/lib/metaPixel";
+import GoogleSignInButton from "@/components/GoogleSignInButton";
 import {
   getInvisibleCaptchaToken,
   getVisibleCaptchaResponse,
@@ -482,6 +483,20 @@ const LoginModal = ({ open, onClose, onLoggedIn, noteTitle, noteBody }: LoginMod
                 ? "Join Viora to save your wishlist across devices."
                 : "Enter the verification code we just sent to your inbox."}
           </p>
+
+          {/* Continue with Google — fastest path; on success close the modal
+              and let the caller (wishlist/review/order-tracking) continue. */}
+          {mode !== "VERIFY" && (
+            <div className="mb-4">
+              <GoogleSignInButton
+                onError={setError}
+                onSuccess={() => {
+                  onLoggedIn?.();
+                  onClose();
+                }}
+              />
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             {/* REGISTER-only username */}

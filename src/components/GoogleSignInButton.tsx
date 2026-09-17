@@ -30,9 +30,14 @@ const GSI_SRC = "https://accounts.google.com/gsi/client";
 export default function GoogleSignInButton({
   redirectTo = "/",
   onError,
+  onSuccess,
 }: {
   redirectTo?: string;
   onError?: (message: string) => void;
+  // When provided (e.g. inside the login modal), called after a successful
+  // sign-in instead of navigating to `redirectTo`, so the caller can close
+  // the modal and refresh in place.
+  onSuccess?: () => void;
 }) {
   const wixClient = useWixClient();
   const router = useRouter();
@@ -62,7 +67,11 @@ export default function GoogleSignInButton({
         } catch {
           /* analytics is best-effort */
         }
-        router.push(redirectTo);
+        if (onSuccess) {
+          onSuccess();
+        } else {
+          router.push(redirectTo);
+        }
       } catch (err) {
         console.warn("[google-signin] sign-in failed:", err);
         setBusy(false);
@@ -71,7 +80,7 @@ export default function GoogleSignInButton({
         );
       }
     },
-    [wixClient, router, redirectTo, onError]
+    [wixClient, router, redirectTo, onError, onSuccess]
   );
 
   useEffect(() => {
