@@ -409,6 +409,13 @@ async function trackShipment(awb) {
           status: rec.current_status || rec.last_scan_details?.status || null,
           activities: rec.scan_details || [],
           trackUrl: `${c.trackBase}/${awb}`,
+          // Estimated delivery date, if iThink exposes one (best-effort).
+          edd:
+            rec.expected_delivery_date ||
+            rec.edd ||
+            rec.expected_date ||
+            rec.edd_date ||
+            null,
           raw: data,
         };
       },

@@ -8,8 +8,31 @@ import OrderTimeline, {
   OrderStageKey,
 } from "@/components/OrderTimeline";
 import * as velocity from "@/lib/crm/velocity";
+import * as shiprocket from "@/lib/crm/shiprocket";
+import * as ithink from "@/lib/crm/ithink";
+import * as ordersStore from "@/lib/crm/orders-store";
 
 export const dynamic = "force-dynamic";
+
+// Pick the courier module for a given courier id. Every courier exposes the same
+// trackShipment(awb) + normalizeStatus(raw) contract, so the timeline logic below
+// is courier-agnostic. Defaults to Velocity (our first/most common carrier).
+function courierModule(courier: string | null | undefined) {
+  const c = String(courier || "").toLowerCase();
+  if (c === "shiprocket") return shiprocket;
+  if (c === "ithink") return ithink;
+  return velocity;
+}
+
+// If the store has no courier recorded, infer it from the tracking link domain
+// (belt-and-braces for older orders written only to the Wix fulfillment).
+function inferCourierFromUrl(url?: string): string | null {
+  const u = String(url || "").toLowerCase();
+  if (u.includes("shiprocket")) return "shiprocket";
+  if (u.includes("ithink")) return "ithink";
+  if (u.includes("velocity")) return "velocity";
+  return null;
+}
 
 const formatINR = (n: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -47,24 +70,42 @@ async function getTracking(
   return null;
 }
 
-// --- Map a LIVE Velocity shipment status to our 4-step timeline stage. The
-// storefront asks Velocity's order-tracking API for the AWB's real status, so the
-// timeline reflects the courier truth (not the Wix fulfillment flag, which flips
-// to FULFILLED the moment we attach an AWB and would falsely read as delivered).
-function stageFromVelocity(
-  status: string | null | undefined,
+// --- Map a courier's CANONICAL status (velocity/shiprocket/ithink all share the
+// same normalizeStatus vocabulary) to our 4-step timeline stage. The storefront
+// asks the courier's own tracking API for the AWB's real status, so the timeline
+// reflects courier truth (not the Wix fulfillment flag, which flips to FULFILLED
+// the moment we attach an AWB and would falsely read as delivered).
+//   Canonical values: DELIVERED | OUT_FOR_DELIVERY | DISPATCHED | UNDELIVERED |
+//                     RTO | CANCELLED | OTHER
+function stageFromCanonical(
+  canonical: string | null | undefined,
   hasTracking: boolean
 ): { index: number; canceled: boolean } {
-  const s = String(status || "").toLowerCase();
-  if (["cancelled", "canceled", "rejected", "lost", "return_cancelled", "return_rejected"].includes(s))
-    return { index: 1, canceled: true };
-  if (["delivered", "rto_delivered", "return_delivered"].includes(s))
-    return { index: 3, canceled: false }; // Delivered
-  if (s === "out_for_delivery") return { index: 2, canceled: false }; // Out for Delivery
-  // Any other live status (in_transit, pickup_scheduled, ndr_raised, …) with an
-  // AWB present = at least Shipped.
-  if (hasTracking) return { index: 1, canceled: false };
-  return { index: 0, canceled: false }; // Confirmed — no shipment yet
+  switch (String(canonical || "").toUpperCase()) {
+    case "DELIVERED":
+      return { index: 3, canceled: false };
+    case "OUT_FOR_DELIVERY":
+      return { index: 2, canceled: false };
+    case "CANCELLED":
+      return { index: 1, canceled: true };
+    // Handed to courier / a failed attempt / returned — all "at least shipped".
+    case "DISPATCHED":
+    case "UNDELIVERED":
+    case "RTO":
+      return { index: 1, canceled: false };
+    default:
+      // No live status yet: Shipped if an AWB exists, else just Confirmed.
+      return { index: hasTracking ? 1 : 0, canceled: false };
+  }
+}
+
+// Pretty-print an estimated delivery date the courier gave us. Accepts an ISO
+// string or a already-human string; returns null if it can't be parsed.
+function formatEdd(edd: string | null | undefined): string | null {
+  if (!edd) return null;
+  const d = new Date(edd);
+  if (isNaN(d.getTime())) return typeof edd === "string" ? edd : null;
+  return d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
 }
 
 const OrderPage = async ({ params }: { params: { id: string } }) => {
@@ -103,30 +144,63 @@ const OrderPage = async ({ params }: { params: { id: string } }) => {
 
   const tracking = await getTracking(wixClient, id);
 
-  // Ask Velocity for the AWB's live status so the timeline shows the courier's
-  // real progress (Shipped -> Out for Delivery -> Delivered).
-  let liveStatus: string | null = null;
-  let liveTrackUrl: string | undefined = tracking?.trackingLink;
+  // The dashboard store is the source of truth for WHICH courier shipped this
+  // order (+ its AWB/status), since the operator assigns it there. Fall back to
+  // the Wix fulfillment record for older orders. Keyed by the human order number.
+  const storeRec = await ordersStore.getOrder(String(order.number)).catch(() => null);
+
+  const courierId =
+    (storeRec?.courier && String(storeRec.courier)) ||
+    inferCourierFromUrl(storeRec?.trackingUrl || tracking?.trackingLink) ||
+    "velocity";
+  const awb = storeRec?.awb || tracking?.trackingNumber || "";
+  const hasTracking = Boolean(awb || tracking?.trackingNumber);
+  const mod = courierModule(courierId);
+
+  // Ask the RIGHT courier for the AWB's live status so the timeline shows the
+  // courier's real progress (Shipped -> Out for Delivery -> Delivered) + ETA.
+  let canonical: string | null = null;
+  let liveTrackUrl: string | undefined = storeRec?.trackingUrl || tracking?.trackingLink;
   let liveActivities: { date?: string; activity?: string; location?: string }[] = [];
-  if (tracking?.trackingNumber) {
+  let eddRaw: string | null = null;
+  if (awb) {
     try {
-      const t: any = await velocity.trackShipment(tracking.trackingNumber);
+      const t: any = await mod.trackShipment(awb);
       if (t?.ok) {
-        liveStatus = t.status || null;
+        canonical = t.status ? mod.normalizeStatus(t.status) : null;
         if (t.trackUrl) liveTrackUrl = t.trackUrl;
         liveActivities = Array.isArray(t.activities) ? t.activities : [];
+        eddRaw = t.edd || null;
       }
     } catch {
-      /* tracking is best-effort — fall back to "Shipped" if AWB exists */
+      /* tracking is best-effort — fall back to the stored status below */
     }
+  }
+
+  // If the courier API gave us nothing, fall back to the status our webhooks
+  // already recorded on the store (dispatched / out_for_delivery / delivered / …).
+  if (!canonical && storeRec?.status) {
+    const map: Record<string, string> = {
+      dispatched: "DISPATCHED",
+      out_for_delivery: "OUT_FOR_DELIVERY",
+      delivered: "DELIVERED",
+      rto: "RTO",
+      cancelled: "CANCELLED",
+      canceled: "CANCELLED",
+    };
+    canonical = map[String(storeRec.status).toLowerCase()] || null;
   }
 
   const wixCanceled = ["CANCELED", "CANCELLED"].includes(
     String(order?.status || "").toUpperCase()
   );
-  const stage = stageFromVelocity(liveStatus, Boolean(tracking));
+  const storeCanceled = ["cancelled", "canceled"].includes(
+    String(storeRec?.status || "").toLowerCase()
+  );
+  const stage = stageFromCanonical(canonical, hasTracking);
   const stageIndex = stage.index;
-  const canceled = wixCanceled || stage.canceled;
+  const canceled = wixCanceled || storeCanceled || stage.canceled;
+  const eddLabel = !canceled && stageIndex < 3 ? formatEdd(eddRaw) : null;
 
   const receiverName =
     [
@@ -206,7 +280,19 @@ const OrderPage = async ({ params }: { params: { id: string } }) => {
               <OrderTimeline currentIndex={stageIndex} timestamps={timestamps} canceled={canceled} />
             </div>
 
-            {/* Latest courier update (from Velocity's live tracking) */}
+            {/* Expected delivery date (from the courier's live tracking) */}
+            {eddLabel && (
+              <div className="mt-4 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                <svg className="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <span>
+                  Expected delivery by <span className="font-semibold">{eddLabel}</span>
+                </span>
+              </div>
+            )}
+
+            {/* Latest courier update (from the courier's live tracking) */}
             {liveActivities.length > 0 && (
               <div className="mt-4 rounded-xl bg-platinum/60 px-4 py-3 text-xs text-gray-600">
                 <span className="font-semibold text-[#1A1410]">Latest update: </span>
@@ -233,9 +319,9 @@ const OrderPage = async ({ params }: { params: { id: string } }) => {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
                 </svg>
                 Live Track on Courier
-                {tracking?.trackingNumber && (
+                {awb && (
                   <span className="ml-1 rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-medium">
-                    AWB {tracking.trackingNumber}
+                    AWB {awb}
                   </span>
                 )}
               </a>

@@ -470,6 +470,13 @@ async function trackShipment(awb) {
           status: rec.shipment_status || rec.shipment_track?.[0]?.current_status || null,
           activities: rec.shipment_track_activities || [],
           trackUrl: rec.track_url || `${c.trackBase}/${awb}`,
+          // Estimated delivery date, if Shiprocket exposes one (best-effort).
+          edd:
+            rec.etd ||
+            rec.expected_delivery_date ||
+            rec.edd ||
+            rec.shipment_track?.[0]?.edd ||
+            null,
           raw: data,
         };
       },
