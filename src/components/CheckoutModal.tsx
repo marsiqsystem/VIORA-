@@ -692,6 +692,19 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                   className="rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
                 />
               </div>
+              {/* Delivery depends on a reachable phone — the courier calls this
+                  number before delivery, so a wrong number means a failed/RTO'd
+                  order. Nudge the customer to double-check it. */}
+              <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-800">
+                <svg className="mt-0.5 h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.01M10.29 3.86 1.82 18a1.5 1.5 0 0 0 1.29 2.25h17.78A1.5 1.5 0 0 0 22.18 18L13.71 3.86a1.5 1.5 0 0 0-2.42 0Z" />
+                </svg>
+                <span>
+                  Please double-check your phone number — our courier calls this
+                  number before delivery. If it&apos;s wrong or unreachable, we
+                  won&apos;t be able to deliver your order.
+                </span>
+              </div>
             </div>
           </section>
 

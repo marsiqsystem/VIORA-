@@ -476,6 +476,7 @@ const CheckoutPage = () => {
                   pattern="[0-9]{10}"
                   maxLength={10}
                   value={billing.phone}
+                  autoComplete="tel"
                   onChange={(e) =>
                     updateBilling("phone", e.target.value.replace(/\D/g, ""))
                   }
@@ -483,6 +484,16 @@ const CheckoutPage = () => {
                   placeholder="10-digit mobile number"
                   title="Enter a 10-digit mobile number"
                 />
+                <span className="mt-1.5 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
+                  <svg className="mt-0.5 h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.01M10.29 3.86 1.82 18a1.5 1.5 0 0 0 1.29 2.25h17.78A1.5 1.5 0 0 0 22.18 18L13.71 3.86a1.5 1.5 0 0 0-2.42 0Z" />
+                  </svg>
+                  <span>
+                    Please double-check your phone number — our courier calls it
+                    before delivery. A wrong or unreachable number means we
+                    won&apos;t be able to deliver your order.
+                  </span>
+                </span>
               </label>
               <label className="block md:col-span-2">
                 <span className="mb-2 block text-sm font-medium text-gray-700">
