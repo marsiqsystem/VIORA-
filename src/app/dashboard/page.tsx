@@ -390,6 +390,14 @@ function canAssign(o: Order) {
   return PICKABLE_STATUS.has((o.status || "").toLowerCase());
 }
 
+// An order can be cancelled from the dashboard until it reaches a terminal state
+// (already cancelled, delivered, or returned). This lets the operator cancel a
+// NEW order directly — no need to push it to a courier first.
+const CANCEL_TERMINAL = new Set(["cancelled", "canceled", "delivered", "rto"]);
+function canCancel(o: Order) {
+  return !CANCEL_TERMINAL.has((o.status || "").toLowerCase());
+}
+
 // Per-row courier picker: creates the order in the chosen courier (create-only —
 // lands in that courier's "New Orders", operator generates the AWB there).
 function AssignCell({ order, apiKey, onChanged }: { order: Order; apiKey: string; onChanged: () => void }) {
@@ -417,25 +425,56 @@ function AssignCell({ order, apiKey, onChanged }: { order: Order; apiKey: string
     finally { setBusy(""); }
   };
 
-  if (!canAssign(order)) return <span style={{ color: C.sub }}>—</span>;
+  const cancel = async () => {
+    const warn = order.awb
+      ? `Cancel order #${order.orderId}?\n\n⚠️ It's already on ${order.courier || "a courier"} (AWB ${order.awb}) — you'll still need to cancel that shipment in the courier dashboard.\n\nThe customer WILL be sent a cancellation WhatsApp. Continue?`
+      : `Cancel order #${order.orderId}?\n\nThe customer WILL be sent a cancellation WhatsApp. Continue?`;
+    if (!window.confirm(warn)) return;
+    setBusy("cancel"); setErr("");
+    try {
+      const res = await fetch(`/api/dashboard/cancel-order?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-inbox-key": apiKey },
+        body: JSON.stringify({ orderId: order.orderId }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) { setErr(typeof data.error === "string" ? data.error : `Error ${res.status}`); return; }
+      if (data.note) window.alert(data.note);
+      else if (!data.messaged) window.alert("Order cancelled, but the WhatsApp message did not send (" + (data.messageNote || "unknown") + "). Message the customer manually.");
+      onChanged();
+    } catch (e: any) { setErr(e?.message || "Failed"); }
+    finally { setBusy(""); }
+  };
+
+  const showAssign = canAssign(order);
+  const showCancel = canCancel(order);
+  if (!showAssign && !showCancel) return <span style={{ color: C.sub }}>—</span>;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 160 }}>
-      {order.courier && (
+      {showAssign && order.courier && (
         <div style={{ fontSize: 11, color: C.sub }}>
           On <b style={{ textTransform: "capitalize", color: C.text }}>{order.courier}</b> — re-create elsewhere:
         </div>
       )}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {PICKER_COURIERS.map((c) => (
-          <button key={c.id} disabled={!!busy} onClick={() => assign(c.id, c.label)} style={assignBtn(c.color)}>
-            {busy === c.id ? "…" : `→ ${c.label}`}
-          </button>
-        ))}
-      </div>
+      {showAssign && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {PICKER_COURIERS.map((c) => (
+            <button key={c.id} disabled={!!busy} onClick={() => assign(c.id, c.label)} style={assignBtn(c.color)}>
+              {busy === c.id ? "…" : `→ ${c.label}`}
+            </button>
+          ))}
+        </div>
+      )}
+      {showCancel && (
+        <button disabled={!!busy} onClick={cancel} style={cancelBtn} title="Cancel this order and message the customer">
+          {busy === "cancel" ? "Cancelling…" : "✕ Cancel order"}
+        </button>
+      )}
       {err && <div style={{ color: C.bad, fontSize: 11 }}>{err}</div>}
     </div>
   );
 }
+const cancelBtn: React.CSSProperties = { padding: "5px 9px", borderRadius: 7, border: "1px solid #d9534f", background: "#fff", color: "#c9302c", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", alignSelf: "flex-start" };
 function assignBtn(bg: string): React.CSSProperties {
   return { padding: "5px 9px", borderRadius: 7, border: "none", background: bg, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" };
 }
