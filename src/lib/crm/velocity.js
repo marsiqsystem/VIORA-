@@ -155,7 +155,14 @@ function buildShipmentPayload(o) {
           name: it.name || o.product || "Jewellery",
           sku: it.sku || `SKU-${i + 1}`,
           units: Number(it.quantity) || 1,
-          selling_price: Number(it.price) || Number(o.amount) || 0,
+          // Respect an EXPLICIT price — including 0 (e.g. a combined shipment where
+          // the already-paid/prepaid item rides along at ₹0). Only fall back to the
+          // order amount when no price was supplied at all (`0 || amount` would
+          // wrongly turn a real ₹0 into the full amount).
+          selling_price:
+            it.price != null && it.price !== ""
+              ? Number(it.price) || 0
+              : Number(o.amount) || 0,
         }))
       : [{ name: o.product || "Jewellery", sku: "SKU-1", units: 1, selling_price: amount }];
 
