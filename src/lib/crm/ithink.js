@@ -325,6 +325,107 @@ async function createOrderOnly(o) {
 }
 
 // ===========================================================================
+// RATE CHECK  (rate/check.json — read-only, NO booking, NO wallet charge)
+// ===========================================================================
+
+// The pickup pincode drives rate quotes. It isn't in the shipment payload (that
+// uses the numeric pickup_address_id), so resolve it once from warehouse/get.json
+// (or ITHINK_PICKUP_PINCODE if set) and cache it in-module.
+let _pickupPincode = null;
+async function getPickupPincode() {
+  const envPin = (process.env.ITHINK_PICKUP_PINCODE || "").trim();
+  if (envPin) return envPin;
+  if (_pickupPincode) return _pickupPincode;
+  const c = cfg();
+  if (!c.accessToken || !c.secretKey) return null;
+  try {
+    const { res, data } = await post("/warehouse/get.json", {
+      data: { access_token: c.accessToken, secret_key: c.secretKey },
+    });
+    if (!res.ok) return null;
+    const list = Array.isArray(data?.data)
+      ? data.data
+      : data?.data && typeof data.data === "object"
+        ? Object.values(data.data)
+        : [];
+    const match =
+      list.find(
+        (w) => String(w?.id ?? w?.address_id ?? w?.warehouse_id ?? "") === String(c.pickupAddressId)
+      ) || list[0];
+    const pin = match?.pincode || match?.pin || match?.postal_code || match?.zip || null;
+    if (pin) _pickupPincode = String(pin).replace(/\D/g, "");
+    return _pickupPincode;
+  } catch (e) {
+    console.warn("[ithink] getPickupPincode failed:", e?.message || e);
+    return null;
+  }
+}
+
+/**
+ * Get per-courier freight quotes for a shipment WITHOUT booking anything. Calls
+ * rate/check.json — read-only, does NOT touch the wallet. Never throws.
+ * @param {{toPincode, weightKg, dims?, paymentMode, amount, fromPincode?}} o
+ * @returns {Promise<{ok, rates?:Array<{courier,serviceType,rate,cod,prepaid,tat,zone}>, zone?, edd?, error?}>}
+ */
+async function checkRate({ toPincode, weightKg, dims, paymentMode, amount, fromPincode }) {
+  const c = cfg();
+  if (c.mock || !c.enabled) {
+    return {
+      ok: true,
+      dryRun: true,
+      rates: [{ courier: c.logistics, serviceType: c.serviceType, rate: 0, cod: "Y", prepaid: "Y", tat: "-" }],
+    };
+  }
+  if (!c.accessToken || !c.secretKey) return { ok: false, error: "ithink not configured" };
+  const to = String(toPincode || "").replace(/\D/g, "");
+  if (!to) return { ok: false, error: "destination pincode required" };
+  const from = String(fromPincode || (await getPickupPincode()) || "").replace(/\D/g, "");
+  if (!from) return { ok: false, error: "pickup pincode unknown (set ITHINK_PICKUP_PINCODE)" };
+
+  const d = dims || c.dims;
+  const isCOD = paymentMode !== "PREPAID";
+  const body = {
+    data: {
+      from_pincode: from,
+      to_pincode: to,
+      shipping_length_cms: String(d.length),
+      shipping_width_cms: String(d.breadth),
+      shipping_height_cms: String(d.height),
+      shipping_weight_kg: String(weightKg || d.weight || 0.5),
+      order_type: "forward",
+      payment_method: isCOD ? "COD" : "Prepaid",
+      product_mrp: String(Number(amount) || 0),
+      access_token: c.accessToken,
+      secret_key: c.secretKey,
+    },
+  };
+
+  try {
+    const { res, data } = await post("/rate/check.json", body);
+    if (!res.ok) return { ok: false, error: `ithink rate HTTP ${res.status}`, raw: data };
+    const arr = Array.isArray(data?.data) ? data.data : [];
+    if (!arr.length) {
+      return { ok: false, error: data?.message || "no rates (unserviceable pincode?)", raw: data };
+    }
+    const rates = arr
+      .map((r) => ({
+        courier: r.logistic_name || "?",
+        serviceType: r.logistic_service_type || "",
+        rate: Number(r.rate) || 0,
+        cod: r.cod,
+        prepaid: r.prepaid,
+        tat: r.delivery_tat || null,
+        zone: r.logistics_zone || null,
+      }))
+      .sort((a, b) => a.rate - b.rate);
+    return { ok: true, rates, zone: data?.zone || null, edd: data?.expected_delivery_date || null, raw: data };
+  } catch (e) {
+    console.error("[ithink] checkRate failed:", e?.message || e);
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
+// ===========================================================================
 // STATUS MAPPING + WEBHOOK
 // ===========================================================================
 
@@ -464,6 +565,8 @@ export {
   createOrderOnly,
   createShipment,
   buildOrderPayload,
+  checkRate,
+  getPickupPincode,
   trackShipment,
   normalizeStatus,
   parseStatusWebhook,
