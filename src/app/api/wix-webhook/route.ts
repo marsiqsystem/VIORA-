@@ -171,6 +171,9 @@ async function processOrder(body: any, trace: any = { steps: [] }) {
       product: order.product,
       productId: order.productId,
       qty,
+      // Persist the full line-item list so the dashboard courier-assign ships every
+      // product with its real quantity (scales parcel weight/dimensions correctly).
+      items: order.items,
       sellingPrice: order.amount,
       paymentMode: order.paymentMode,
       address: order.address,

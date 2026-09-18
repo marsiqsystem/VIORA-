@@ -46,7 +46,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, order: updated, note: `${courier} API link pending — order marked, ship it in ${courier} for now.` });
   }
 
-  // Build the shipment input from the stored order (same shape for both couriers).
+  // The line items to ship. Prefer the REAL breakdown persisted from the Wix
+  // webhook (each product + its quantity) so the courier scales parcel weight and
+  // dimensions correctly and shows every product with its price. Excel-backfilled
+  // orders have no per-item data, so fall back to a single line reconstructed from
+  // product + qty + total (still carries the right quantity for weight scaling).
+  // Without this the assign path used to send items:undefined → every courier
+  // treated it as 1 unit: weight/dims never scaled and multi-product orders
+  // collapsed to a single line. This bug hit Velocity/Shiprocket too, not just iThink.
+  const items =
+    Array.isArray(order.items) && order.items.length
+      ? order.items
+      : [
+          {
+            name: order.product || order.dCode || "Jewellery",
+            sku: order.dCode || undefined,
+            quantity: Number(order.qty) || 1,
+            price: Number(order.sellingPrice) || 0,
+          },
+        ];
+
+  // Build the shipment input from the stored order (same shape for all couriers).
   const input = {
     orderId: order.orderId,
     orderGuid: order.orderGuid,
@@ -56,7 +76,7 @@ export async function POST(req: NextRequest) {
     paymentMode: order.paymentMode,
     product: order.product || order.dCode,
     address: order.address,
-    items: undefined as any,
+    items,
   };
 
   const carrier =

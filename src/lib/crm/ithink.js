@@ -4,9 +4,12 @@
 // are interchangeable behind the dashboard picker / assign-courier route:
 //   - createShipment(o)   -> create the order AND generate a waybill (AWB) in one
 //                            call (iThink's order/add.json does both — there is no
-//                            "New Orders without AWB" state like Shiprocket's, so
-//                            createOrderOnly delegates here for interface parity).
-//   - createOrderOnly(o)  -> alias of createShipment (see above).
+//                            "New Orders without AWB" state like Shiprocket's). THIS
+//                            is the call that debits the iThink wallet.
+//   - createOrderOnly(o)  -> SAFE, NON-CHARGING no-op: iThink can't hold a draft, so
+//                            create-only records the choice WITHOUT calling the API,
+//                            and the order is booked later via createShipment. This
+//                            is what keeps courier selection from charging the wallet.
 //   - trackShipment(awb)  -> live tracking for the storefront timeline.
 //   - parseStatusWebhook  -> map iThink's status webhook to our internal enum.
 //
@@ -105,17 +108,28 @@ function buildOrderPayload(o) {
   };
   const productItems = Array.isArray(o.items) ? o.items.filter((it) => !isFeeItem(it)) : [];
 
-  // iThink add.json takes ONE product summary per shipment (products / _sku /
-  // _quantity / _price). Collapse our line items into a single representative
-  // product + total quantity so the box + weight math still scales.
-  const firstItem = productItems[0] || null;
+  // v3 `products` is an ARRAY — send EVERY product with its own quantity + price so
+  // a multi-product order shows each item (not just the first) and the totals add
+  // up. Total units drives the parcel weight/height below.
   const totalUnits =
     (productItems.length
       ? productItems.reduce((sum, it) => sum + (Number(it.quantity) || 1), 0)
       : 1) || 1;
-  const productName = firstItem?.name || o.product || "Jewellery";
-  const productSku = firstItem?.sku || "SKU-1";
-  const productPrice = Number(firstItem?.price) || amount || 0;
+  const products = productItems.length
+    ? productItems.map((it, i) => ({
+        product_name: it.name || o.product || "Jewellery",
+        product_sku: it.sku || `SKU-${i + 1}`,
+        product_quantity: String(Number(it.quantity) || 1),
+        product_price: String(Number(it.price) || 0),
+      }))
+    : [
+        {
+          product_name: o.product || "Jewellery",
+          product_sku: "SKU-1",
+          product_quantity: String(totalUnits),
+          product_price: String(amount || 0),
+        },
+      ];
 
   // order = "VJ-#<Wix number>" (same convention as Velocity/Shiprocket) so the
   // courier dashboard id matches the Wix/site/email order and the status webhook
@@ -158,14 +172,7 @@ function buildOrderPayload(o) {
     billing_phone: "",
     billing_alt_phone: "",
     billing_email: "",
-    products: [
-      {
-        product_name: productName,
-        product_sku: productSku,
-        product_quantity: String(totalUnits),
-        product_price: String(productPrice),
-      },
-    ],
+    products,
     shipment_length: String(c.dims.length),
     shipment_width: String(c.dims.breadth),
     shipment_height: String(c.dims.height * totalUnits),
@@ -295,11 +302,26 @@ async function createShipment(o) {
 }
 
 /**
- * Interface parity with velocity/shiprocket. iThink's add.json always generates
- * an AWB (there is no create-without-AWB state), so this is an alias.
+ * CREATE-ONLY — the safe, NON-CHARGING action behind the dashboard picker.
+ *
+ * iThink's add.json has NO draft state: it books the shipment AND debits the
+ * wallet the instant it runs (unlike Velocity/Shiprocket, whose create-only leaves
+ * the order in "New Orders" with no charge). So to give iThink the SAME safe
+ * "create the order, decide the courier + pay later" behaviour the operator wants,
+ * create-only here deliberately does NOT touch the iThink API at all — it just
+ * confirms the choice. The order is recorded on our side (dashboard) with no AWB;
+ * the operator books + charges it later with the explicit createShipment() action
+ * (the "Book on iThink" button), after checking rates. This is what stops the
+ * accidental wallet charge on courier selection.
+ *
+ * Returns a benign success with `deferred:true` and NO awb, so the caller records
+ * status "created" (not "dispatched") without a network call.
  */
 async function createOrderOnly(o) {
-  return createShipment(o);
+  console.log(
+    `[ithink] createOrderOnly is a NO-OP by design (no draft state) — order ${o?.orderId} recorded, NOT booked/charged. Use createShipment to book.`
+  );
+  return { ok: true, dryRun: false, deferred: true, awb: null };
 }
 
 // ===========================================================================

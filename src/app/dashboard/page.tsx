@@ -373,9 +373,15 @@ function isPickable(o: Order) {
   return !o.courier && PICKABLE_STATUS.has((o.status || "").toLowerCase());
 }
 
-// Couriers the picker offers. Adding a new one (e.g. iThink) later = one line here
-// AND a real branch in /api/dashboard/assign-courier (until then an unknown courier
-// is only RECORDED, to be shipped in that courier's own dashboard).
+// Couriers the picker offers. Adding a new one later = one line here AND a real
+// branch in /api/dashboard/assign-courier (until then an unknown courier is only
+// RECORDED, to be shipped in that courier's own dashboard).
+//
+// ALL three buttons are now CREATE-ONLY and SAFE: they record the order + chosen
+// courier WITHOUT booking or charging. Velocity/Shiprocket land the order in their
+// "New Orders"; iThink (whose API has no draft state) is recorded on our side only,
+// then booked + charged later with the explicit "💸 Book on iThink" button. So
+// picking a courier here never debits a wallet — exactly what the operator asked.
 const PICKER_COURIERS: { id: string; label: string; color: string }[] = [
   { id: "velocity", label: "Velocity", color: "#6b4a8f" },
   { id: "shiprocket", label: "Shiprocket", color: "#5b3bd4" },
@@ -404,12 +410,19 @@ function AssignCell({ order, apiKey, onChanged }: { order: Order; apiKey: string
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
 
+  // CREATE-ONLY: records the order + chosen courier without booking or charging.
+  // Safe for all three couriers (iThink included — it no longer books/charges on
+  // selection; it's booked later with bookIthink()).
   const assign = async (courier: string, label: string) => {
+    const note =
+      courier === "ithink"
+        ? `\n\n(Nothing is booked or charged yet — you'll book & pay for iThink with the "💸 Book" button after checking rates.)`
+        : `\n\n(Lands in ${label}'s New Orders — no charge; ship it there or later.)`;
     // If a courier is already recorded, this is a RE-create on a different one —
-    // warn so the operator cancels the old shipment and avoids a double booking.
+    // warn so the operator cancels the old one and avoids a double shipment.
     const msg = order.courier
-      ? `Order #${order.orderId} is already on ${order.courier}.\n\nAlso create it on ${label}? Cancel the ${order.courier} one to avoid a double shipment.`
-      : `Create order #${order.orderId} on ${label}?`;
+      ? `Order #${order.orderId} is already on ${order.courier}.\n\nAlso record it on ${label}? Cancel the ${order.courier} one to avoid a double shipment.${note}`
+      : `Create order #${order.orderId} on ${label}?${note}`;
     if (!window.confirm(msg)) return;
     setBusy(courier); setErr("");
     try {
@@ -417,6 +430,29 @@ function AssignCell({ order, apiKey, onChanged }: { order: Order; apiKey: string
         method: "POST",
         headers: { "Content-Type": "application/json", "x-inbox-key": apiKey },
         body: JSON.stringify({ orderId: order.orderId, courier, ship: false }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) { setErr(typeof data.error === "string" ? data.error : `Error ${res.status}`); return; }
+      onChanged();
+    } catch (e: any) { setErr(e?.message || "Failed"); }
+    finally { setBusy(""); }
+  };
+
+  // BOOK on iThink — the ONLY action that actually generates the AWB and debits the
+  // iThink wallet. Behind an explicit, spelled-out double confirm so it can never be
+  // a reflex/"just checking rates" click. iThink has no draft state, so this is how
+  // an iThink-assigned order is shipped (there's no New Orders panel to ship from).
+  const bookIthink = async () => {
+    const warn1 =
+      `💸 BOOK #${order.orderId} on iThink now?\n\nThis GENERATES the AWB and DEBITS your iThink wallet immediately — there is no undo from here (cancel in the iThink panel to refund). Only do this after you've checked the rate.`;
+    if (!window.confirm(warn1)) return;
+    if (!window.confirm(`Last check: #${order.orderId} will be charged to your iThink wallet the moment you press OK.`)) return;
+    setBusy("book-ithink"); setErr("");
+    try {
+      const res = await fetch(`/api/dashboard/assign-courier?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-inbox-key": apiKey },
+        body: JSON.stringify({ orderId: order.orderId, courier: "ithink", ship: true }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) { setErr(typeof data.error === "string" ? data.error : `Error ${res.status}`); return; }
@@ -459,11 +495,21 @@ function AssignCell({ order, apiKey, onChanged }: { order: Order; apiKey: string
       {showAssign && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {PICKER_COURIERS.map((c) => (
-            <button key={c.id} disabled={!!busy} onClick={() => assign(c.id, c.label)} style={assignBtn(c.color)}>
+            <button key={c.id} disabled={!!busy} onClick={() => assign(c.id, c.label)} style={assignBtn(c.color)}
+              title={`Record order on ${c.label} — no charge`}>
               {busy === c.id ? "…" : `→ ${c.label}`}
             </button>
           ))}
         </div>
+      )}
+      {/* iThink is booked from HERE (no draft-state panel to ship from). Only shows
+          once the order is on iThink but not yet booked (no AWB). This is the ONLY
+          button that charges the iThink wallet. */}
+      {showAssign && order.courier === "ithink" && !order.awb && (
+        <button disabled={!!busy} onClick={bookIthink} style={assignBtn("#B8860B")}
+          title="Generates the AWB and charges your iThink wallet — do this after checking the rate">
+          {busy === "book-ithink" ? "Booking…" : "💸 Book on iThink"}
+        </button>
       )}
       {showCancel && (
         <button disabled={!!busy} onClick={cancel} style={cancelBtn} title="Cancel this order and message the customer">

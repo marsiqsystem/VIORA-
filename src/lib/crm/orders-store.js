@@ -80,6 +80,12 @@ function blankRecord() {
     dCode: "", // internal D-00x code (resolved from product; editable)
     colour: "",
     qty: 1,
+    // Full line-item breakdown [{name, sku, quantity, price, image, productId}] —
+    // kept so the dashboard courier-assign can ship the REAL items (each product +
+    // its quantity), which scales the parcel weight/dimensions correctly. Empty on
+    // Excel-backfilled orders (no per-item data) — the assign route then falls back
+    // to reconstructing a single line from product + qty + sellingPrice.
+    items: [],
     sellingPrice: 0, // per-order total selling value
     paymentMode: "", // PREPAID | COD
     address: null, // { line1, city, state, postalCode, country }
@@ -146,6 +152,13 @@ async function recordOrder(order) {
       dCode: order.dCode || base.dCode || "",
       colour: order.colour || base.colour || "",
       qty: Number(order.qty ?? order.quantity ?? base.qty) || 1,
+      // Keep the real line items so a later courier-assign ships every product with
+      // its quantity (correct weight/box). Don't let a duplicate webhook wipe items
+      // we already stored — fall back to the existing ones if this call has none.
+      items:
+        Array.isArray(order.items) && order.items.length
+          ? order.items
+          : base.items || [],
       sellingPrice: Number(order.sellingPrice ?? order.amount ?? base.sellingPrice) || 0,
       paymentMode: order.paymentMode || base.paymentMode || "",
       address: order.address || base.address || null,
