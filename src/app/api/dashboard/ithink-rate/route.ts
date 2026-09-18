@@ -31,7 +31,9 @@ export async function POST(req: NextRequest) {
   const order = await ordersStore.getOrder(orderId);
   if (!order) return NextResponse.json({ ok: false, error: "order not found in store" }, { status: 404 });
 
-  const toPincode = order.address?.postalCode || "";
+  // Destination pincode: the stored order's, or an explicit override so a WRONG
+  // pincode on the order can be re-quoted with the corrected one before fixing it.
+  const toPincode = String(body?.toPincode || order.address?.postalCode || "").trim();
   if (!toPincode) return NextResponse.json({ ok: false, error: "order has no destination pincode" }, { status: 400 });
 
   // Parcel size scales with the combined unit count (same rule the shipment uses):
