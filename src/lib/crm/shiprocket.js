@@ -201,6 +201,26 @@ async function authedPost(path, body) {
   return { res, data };
 }
 
+/** Authed GET with the same 401/403 -> refresh-once retry as authedPost. */
+async function authedGet(path) {
+  const c = cfg();
+  const get = (token) =>
+    fetch(`${c.baseUrl}${path}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    });
+
+  let token = await getToken();
+  let res = await get(token);
+  if (res.status === 401 || res.status === 403) {
+    tokenCache = null;
+    token = await getToken(true);
+    res = await get(token);
+  }
+  const data = await res.json().catch(() => ({}));
+  return { res, data };
+}
+
 /**
  * CREATE-ONLY: create an order WITHOUT assigning a courier/AWB (Shiprocket's
  * create/adhoc endpoint). Lands in "New Orders" with NO wallet deduction; the
@@ -346,6 +366,96 @@ function firstError(data) {
   if (!firstKey) return null;
   const v = e[firstKey];
   return Array.isArray(v) ? v[0] : String(v);
+}
+
+// ===========================================================================
+// RATE CHECK  (serviceability — read-only, never books)
+// ===========================================================================
+
+// Pickup pincode drives the serviceability/rate quote. Resolve it once from the
+// registered pickup address (matched by nickname) — or SHIPROCKET_PICKUP_PINCODE
+// / PICKUP_PINCODE if set — and cache in-module.
+let _pickupPincode = null;
+async function getPickupPincode() {
+  const envPin = (process.env.SHIPROCKET_PICKUP_PINCODE || process.env.PICKUP_PINCODE || "").trim();
+  if (envPin) return envPin.replace(/\D/g, "");
+  if (_pickupPincode) return _pickupPincode;
+  const c = cfg();
+  if (!c.email || !c.password) return null;
+  try {
+    const { res, data } = await authedGet("/settings/company/pickup");
+    if (!res.ok) return null;
+    const list =
+      data?.data?.shipping_address ||
+      data?.data?.pickup_address ||
+      (Array.isArray(data?.data) ? data.data : []);
+    const arr = Array.isArray(list) ? list : [];
+    const match =
+      arr.find((a) => String(a?.pickup_location || "").trim().toLowerCase() === c.pickupLocation.toLowerCase()) ||
+      arr[0];
+    const pin = match?.pin_code || match?.pincode || match?.pin || null;
+    if (pin) _pickupPincode = String(pin).replace(/\D/g, "");
+    return _pickupPincode;
+  } catch (e) {
+    console.warn("[shiprocket] getPickupPincode failed:", e?.message || e);
+    return null;
+  }
+}
+
+/**
+ * Per-courier freight quotes for a shipment WITHOUT booking — GET
+ * /courier/serviceability. Read-only, never assigns an AWB. Never throws.
+ * Mirrors ithink.checkRate's signature & return shape so the compare endpoint
+ * can treat all couriers uniformly.
+ * @param {{toPincode, weightKg, dims?, paymentMode, amount, fromPincode?}} o
+ * @returns {Promise<{ok, rates?:Array<{courier,serviceType,rate,cod,prepaid,tat,zone}>, edd?, error?}>}
+ */
+async function checkRate({ toPincode, weightKg, dims, paymentMode, amount, fromPincode }) {
+  const c = cfg();
+  if (c.mock || !c.enabled) {
+    return { ok: true, dryRun: true, rates: [{ courier: "Shiprocket (mock)", serviceType: "surface", rate: 0, cod: "Y", prepaid: "Y", tat: "-" }] };
+  }
+  if (!c.email || !c.password) return { ok: false, error: "shiprocket not configured" };
+  const to = String(toPincode || "").replace(/\D/g, "");
+  if (!to) return { ok: false, error: "destination pincode required" };
+  const from = String(fromPincode || (await getPickupPincode()) || "").replace(/\D/g, "");
+  if (!from) return { ok: false, error: "pickup pincode unknown (set SHIPROCKET_PICKUP_PINCODE)" };
+
+  const isCOD = paymentMode !== "PREPAID";
+  const d = dims || c.dims;
+  const weight = weightKg || d.weight || 0.5;
+  const qs = new URLSearchParams({
+    pickup_postcode: from,
+    delivery_postcode: to,
+    weight: String(weight),
+    cod: isCOD ? "1" : "0",
+    declared_value: String(Number(amount) || 0),
+  });
+
+  try {
+    const { res, data } = await authedGet(`/courier/serviceability/?${qs.toString()}`);
+    if (!res.ok) return { ok: false, error: `shiprocket rate HTTP ${res.status}`, raw: data };
+    const arr = data?.data?.available_courier_companies;
+    if (!Array.isArray(arr) || !arr.length) {
+      return { ok: false, error: data?.message || firstError(data) || "no rates (unserviceable pincode?)", raw: data };
+    }
+    const rates = arr
+      .map((r) => ({
+        courier: r.courier_name || "?",
+        serviceType: r.is_surface ? "surface" : "air",
+        // `rate` is the all-in charge (freight + COD + other); fall back to the sum.
+        rate: Number(r.rate) || (Number(r.freight_charge) || 0) + (isCOD ? Number(r.cod_charges) || 0 : 0),
+        cod: r.cod ? "Y" : "N",
+        prepaid: "Y",
+        tat: r.estimated_delivery_days || r.etd || null,
+        zone: r.zone || null,
+      }))
+      .sort((a, b) => a.rate - b.rate);
+    return { ok: true, rates, edd: arr[0]?.etd || null, raw: data };
+  } catch (e) {
+    console.error("[shiprocket] checkRate failed:", e?.message || e);
+    return { ok: false, error: e?.message || String(e) };
+  }
 }
 
 // ===========================================================================
@@ -504,6 +614,7 @@ export {
   createShipment,
   buildOrderPayload,
   getToken,
+  checkRate,
   trackShipment,
   normalizeStatus,
   parseStatusWebhook,

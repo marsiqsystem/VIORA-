@@ -409,6 +409,26 @@ function canCancel(o: Order) {
 function AssignCell({ order, apiKey, onChanged }: { order: Order; apiKey: string; onChanged: () => void }) {
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
+  const [rate, setRate] = useState<any>(null);
+
+  // COMPARE RATES — read-only freight quotes from ALL THREE couriers (Velocity,
+  // Shiprocket, iThink) side by side for THIS order's pincode + weight, quoted for
+  // its actual payment mode (COD vs prepaid). Nothing is booked or charged on any
+  // platform — the operator compares, then records + ships on the chosen courier.
+  const checkRate = async () => {
+    setBusy("rate"); setErr(""); setRate(null);
+    try {
+      const res = await fetch(`/api/dashboard/rate-compare?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-inbox-key": apiKey },
+        body: JSON.stringify({ orderId: order.orderId }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) { setErr(typeof data.error === "string" ? data.error : `Error ${res.status}`); return; }
+      setRate(data);
+    } catch (e: any) { setErr(e?.message || "Failed"); }
+    finally { setBusy(""); }
+  };
 
   // CREATE-ONLY: records the order + chosen courier without booking or charging.
   // Safe for all three couriers (iThink included — it no longer books/charges on
@@ -502,6 +522,17 @@ function AssignCell({ order, apiKey, onChanged }: { order: Order; apiKey: string
           ))}
         </div>
       )}
+      {/* Rate comparison — read-only, no booking, no wallet charge on ANY courier.
+          Shows Velocity / Shiprocket / iThink side by side for this order's pincode,
+          weight & payment mode so the operator picks the cheapest, then records +
+          ships on that courier. */}
+      {showAssign && (
+        <button disabled={!!busy} onClick={checkRate} style={rateBtn}
+          title="Compare Velocity / Shiprocket / iThink rates for this order — nothing is booked or charged">
+          {busy === "rate" ? "Comparing…" : "📊 Compare rates"}
+        </button>
+      )}
+      {rate && <RateCompare rate={rate} />}
       {/* iThink is booked from HERE (no draft-state panel to ship from). Only shows
           once the order is on iThink but not yet booked (no AWB). This is the ONLY
           button that charges the iThink wallet. */}
@@ -521,6 +552,71 @@ function AssignCell({ order, apiKey, onChanged }: { order: Order; apiKey: string
   );
 }
 const cancelBtn: React.CSSProperties = { padding: "5px 9px", borderRadius: 7, border: "1px solid #d9534f", background: "#fff", color: "#c9302c", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", alignSelf: "flex-start" };
+const rateBtn: React.CSSProperties = { padding: "5px 9px", borderRadius: 7, border: "1px solid #0a7d5a", background: "#fff", color: "#0a7d5a", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", alignSelf: "flex-start" };
+
+// Side-by-side rate comparison for one order (Velocity / Shiprocket / iThink).
+// The cheapest platform overall is highlighted. Read-only — nothing is booked.
+const COURIER_META: Record<string, { label: string; color: string }> = {
+  velocity: { label: "Velocity", color: "#6b4a8f" },
+  shiprocket: { label: "Shiprocket", color: "#5b3bd4" },
+  ithink: { label: "iThink", color: "#0a7d5a" },
+};
+function RateCompare({ rate }: { rate: any }) {
+  const couriers: Record<string, any> = rate?.couriers || {};
+  const order = ["velocity", "shiprocket", "ithink"];
+  // Lowest cheapest-rate across the platforms that returned a quote -> winner.
+  const best = order
+    .map((k) => ({ k, c: couriers[k]?.cheapest?.rate }))
+    .filter((x) => typeof x.c === "number")
+    .sort((a, b) => a.c - b.c)[0]?.k;
+  return (
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, background: C.card, padding: "8px 9px", fontSize: 11, color: C.text, minWidth: 250 }}>
+      <div style={{ color: C.sub, marginBottom: 6 }}>
+        {(rate.paymentMode || "—").toUpperCase()} · {rate.weightKg}kg · box {rate.box}
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {order.map((k) => {
+          const c = couriers[k] || {};
+          const meta = COURIER_META[k];
+          const isBest = k === best;
+          const cheapest = c?.cheapest;
+          return (
+            <div key={k} style={{ flex: "1 1 130px", minWidth: 130, border: `1px solid ${isBest ? C.ok : C.border}`, borderRadius: 7, padding: "6px 7px", background: isBest ? "#F0FAF3" : "#fff" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+                <b style={{ color: meta.color }}>{meta.label}</b>
+                {isBest && <span style={{ color: C.ok, fontWeight: 700, fontSize: 10 }}>★ cheapest</span>}
+              </div>
+              {c.ok && cheapest ? (
+                <>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: C.ok }}>₹{cheapest.rate}</div>
+                  <div style={{ color: C.sub, fontSize: 10 }}>
+                    {cheapest.courier}{cheapest.tat ? ` · ${cheapest.tat}d` : ""}
+                  </div>
+                  {Array.isArray(c.rates) && c.rates.length > 1 && (
+                    <div style={{ marginTop: 4, color: C.sub, fontSize: 10, borderTop: `1px dashed ${C.border}`, paddingTop: 3 }}>
+                      {c.rates.slice(0, 4).map((r: any, i: number) => (
+                        <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 90 }}>{r.courier}</span>
+                          <span>₹{r.rate}</span>
+                        </div>
+                      ))}
+                      {c.rates.length > 4 && <div>+{c.rates.length - 4} more…</div>}
+                    </div>
+                  )}
+                </>
+              ) : c.needsConfig ? (
+                <div style={{ color: C.warn, fontSize: 10 }}>Rate endpoint not set up yet.</div>
+              ) : (
+                <div style={{ color: C.bad, fontSize: 10 }}>{c.error || "no quote"}</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ color: C.sub, marginTop: 6, fontSize: 10 }}>Quotes only — nothing booked or charged. Pick a courier below to record & ship.</div>
+    </div>
+  );
+}
 function assignBtn(bg: string): React.CSSProperties {
   return { padding: "5px 9px", borderRadius: 7, border: "none", background: bg, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" };
 }
