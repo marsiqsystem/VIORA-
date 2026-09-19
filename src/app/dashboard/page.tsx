@@ -377,15 +377,17 @@ function isPickable(o: Order) {
 // branch in /api/dashboard/assign-courier (until then an unknown courier is only
 // RECORDED, to be shipped in that courier's own dashboard).
 //
-// ALL three buttons are now CREATE-ONLY and SAFE: they record the order + chosen
-// courier WITHOUT booking or charging. Velocity/Shiprocket land the order in their
-// "New Orders"; iThink (whose API has no draft state) is recorded on our side only,
-// then booked + charged later with the explicit "💸 Book on iThink" button. So
-// picking a courier here never debits a wallet — exactly what the operator asked.
+// These CREATE-ONLY buttons record the order + chosen courier WITHOUT booking or
+// charging: Velocity/Shiprocket land the order in their "New Orders", so picking a
+// courier here never debits a wallet.
+//
+// iThink is deliberately NOT in this picker: its API has no draft/"New Orders"
+// state, so "recording" it would do nothing on iThink's side (a common source of
+// confusion — it looked booked but never reached iThink). Instead iThink has its
+// own single, explicit "💸 Book on iThink" button that books + charges in one step.
 const PICKER_COURIERS: { id: string; label: string; color: string }[] = [
   { id: "velocity", label: "Velocity", color: "#6b4a8f" },
   { id: "shiprocket", label: "Shiprocket", color: "#5b3bd4" },
-  { id: "ithink", label: "iThink", color: "#0a7d5a" },
 ];
 
 // The picker stays available while an order is still pre-shipment, EVEN if a
@@ -463,8 +465,14 @@ function AssignCell({ order, apiKey, onChanged }: { order: Order; apiKey: string
   // a reflex/"just checking rates" click. iThink has no draft state, so this is how
   // an iThink-assigned order is shipped (there's no New Orders panel to ship from).
   const bookIthink = async () => {
+    // If the order was already recorded on another courier (e.g. it's sitting in
+    // Velocity/Shiprocket "New Orders"), booking on iThink too would ship it twice.
+    const dupWarn =
+      order.courier && order.courier !== "ithink"
+        ? `\n\n⚠️ This order is already recorded on ${order.courier}. If you also book it on iThink you'll ship it TWICE — cancel the ${order.courier} one first if you don't want that.`
+        : "";
     const warn1 =
-      `💸 BOOK #${order.orderId} on iThink now?\n\nThis GENERATES the AWB and DEBITS your iThink wallet immediately — there is no undo from here (cancel in the iThink panel to refund). Only do this after you've checked the rate.`;
+      `💸 BOOK #${order.orderId} on iThink now?\n\nThis GENERATES the AWB and DEBITS your iThink wallet immediately — there is no undo from here (cancel in the iThink panel to refund). Only do this after you've compared the rate.${dupWarn}`;
     if (!window.confirm(warn1)) return;
     if (!window.confirm(`Last check: #${order.orderId} will be charged to your iThink wallet the moment you press OK.`)) return;
     setBusy("book-ithink"); setErr("");
@@ -533,12 +541,13 @@ function AssignCell({ order, apiKey, onChanged }: { order: Order; apiKey: string
         </button>
       )}
       {rate && <RateCompare rate={rate} />}
-      {/* iThink is booked from HERE (no draft-state panel to ship from). Only shows
-          once the order is on iThink but not yet booked (no AWB). This is the ONLY
-          button that charges the iThink wallet. */}
-      {showAssign && order.courier === "ithink" && !order.awb && (
+      {/* iThink is booked DIRECTLY from HERE — no "record" step first (its API has
+          no draft/New-Orders state). Shows on any pre-shipment order without an AWB.
+          This is the ONLY button that books on iThink AND charges the iThink wallet
+          (double-confirmed inside bookIthink). */}
+      {showAssign && !order.awb && (
         <button disabled={!!busy} onClick={bookIthink} style={assignBtn("#B8860B")}
-          title="Generates the AWB and charges your iThink wallet — do this after checking the rate">
+          title="Books the order on iThink, generates the AWB and charges your iThink wallet — do this after comparing rates">
           {busy === "book-ithink" ? "Booking…" : "💸 Book on iThink"}
         </button>
       )}

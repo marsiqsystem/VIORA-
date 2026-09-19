@@ -591,27 +591,19 @@ function verifyWebhook(secretHeader) {
 // ===========================================================================
 
 /**
- * Per-courier freight quote WITHOUT booking. Mirrors ithink/shiprocket.checkRate's
- * signature & return shape so the compare endpoint treats all couriers uniformly.
- *
- * ⚠️ Velocity's rate/serviceability endpoint isn't documented in this repo, so the
- * path + response shape are BEST-EFFORT and gated behind env so we never fire a
- * guessed call by accident:
- *   VELOCITY_RATE_PATH   -> the rate endpoint path (e.g. /custom/api/v1/rate-calculator).
- *                           Unset -> checkRate returns needsConfig (UI shows "add endpoint").
- *   VELOCITY_PICKUP_PINCODE / PICKUP_PINCODE -> origin pincode for the quote.
- * Confirm the real path/shape from Velocity's API docs or the dashboard Rate
- * Calculator's network call, then set VELOCITY_RATE_PATH. Never throws.
+ * Per-courier freight quotes WITHOUT booking — POST /custom/api/v1/rates (read-only,
+ * documented at github.com/Velocity-Engineering/shipping-faq). Mirrors ithink/
+ * shiprocket.checkRate's signature & return shape so the compare endpoint treats all
+ * couriers uniformly. Origin pincode comes from VELOCITY_PICKUP_PINCODE / PICKUP_PINCODE.
+ * Never throws.
  * @param {{toPincode, weightKg, dims?, paymentMode, amount, fromPincode?}} o
- * @returns {Promise<{ok, rates?:Array, edd?, error?, needsConfig?:boolean}>}
+ * @returns {Promise<{ok, rates?:Array<{courier,serviceType,rate,cod,prepaid,tat,zone}>, zone?, edd?, error?}>}
  */
 async function checkRate({ toPincode, weightKg, dims, paymentMode, amount, fromPincode }) {
   const c = cfg();
   if (c.mock || !c.enabled) {
-    return { ok: true, dryRun: true, rates: [{ courier: "Velocity (mock)", serviceType: "surface", rate: 0, cod: "Y", prepaid: "Y", tat: "-" }] };
+    return { ok: true, dryRun: true, rates: [{ courier: "Velocity (mock)", serviceType: "standard", rate: 0, cod: "Y", prepaid: "Y", tat: "-" }] };
   }
-  const ratePath = (process.env.VELOCITY_RATE_PATH || "").trim();
-  if (!ratePath) return { ok: false, needsConfig: true, error: "velocity rate endpoint not set (VELOCITY_RATE_PATH)" };
   if (!hasAuth(c)) return { ok: false, error: "velocity not configured" };
 
   const to = String(toPincode || "").replace(/\D/g, "");
@@ -621,24 +613,25 @@ async function checkRate({ toPincode, weightKg, dims, paymentMode, amount, fromP
 
   const d = dims || c.dims || { length: 18, breadth: 12, height: 4, weight: 0.2 };
   const isCOD = paymentMode !== "PREPAID";
-  const weight = weightKg || d.weight || 0.5;
+  const weightKgNum = weightKg || d.weight || 0.5;
+  // Velocity's /rates wants dead_weight in GRAMS (all others take kg).
   const body = {
-    from_pincode: from,
-    to_pincode: to,
-    weight: String(weight),
-    length: String(d.length),
-    breadth: String(d.breadth),
-    height: String(d.height),
-    payment_mode: isCOD ? "COD" : "Prepaid",
-    cod_amount: isCOD ? Number(amount) || 0 : 0,
-    order_amount: Number(amount) || 0,
+    journey_type: "forward",
+    origin_pincode: from,
+    destination_pincode: to,
+    dead_weight: Math.round(weightKgNum * 1000),
+    length: d.length,
+    width: d.breadth,
+    height: d.height,
+    payment_method: isCOD ? "cod" : "prepaid",
+    ...(isCOD ? { shipment_value: Number(amount) || 0 } : {}),
   };
 
   try {
     return await withRetry(
       async () => {
         const post = (token) =>
-          fetch(`${c.baseUrl}${ratePath.startsWith("/") ? "" : "/"}${ratePath}`, {
+          fetch(`${c.baseUrl}/custom/api/v1/rates`, {
             method: "POST",
             headers: { Authorization: token, "Content-Type": "application/json" },
             body: JSON.stringify(body),
@@ -653,32 +646,33 @@ async function checkRate({ toPincode, weightKg, dims, paymentMode, amount, fromP
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return { ok: false, error: `velocity rate HTTP ${res.status}`, raw: data };
 
-        // Best-effort parse: accept the common shapes (an array under data/rates/
-        // couriers, or a single rate object). Adjust once the real shape is known.
-        const arr =
-          (Array.isArray(data?.data) && data.data) ||
-          (Array.isArray(data?.rates) && data.rates) ||
-          (Array.isArray(data?.couriers) && data.couriers) ||
-          (Array.isArray(data) && data) ||
-          [];
-        const pickRate = (r) => Number(r?.rate ?? r?.total ?? r?.total_charge ?? r?.freight ?? r?.charge ?? r?.amount) || 0;
-        let rates = arr.map((r) => ({
-          courier: r.courier_name || r.logistic_name || r.name || r.courier || "Velocity",
-          serviceType: r.service_type || r.logistic_service_type || r.mode || "",
-          rate: pickRate(r),
-          cod: r.cod ?? "?",
-          prepaid: r.prepaid ?? "?",
-          tat: r.tat || r.delivery_tat || r.edd || null,
-          zone: r.zone || r.logistics_zone || null,
-        }));
-        // Single flat rate object fallback.
-        if (!rates.length) {
-          const flat = pickRate(data) || pickRate(data?.data);
-          if (flat) rates = [{ courier: "Velocity", serviceType: "", rate: flat, cod: isCOD ? "Y" : "N", prepaid: "Y", tat: data?.tat || null, zone: null }];
+        const arr = Array.isArray(data?.result?.serviceable_couriers) ? data.result.serviceable_couriers : [];
+        if (String(data?.status).toUpperCase() !== "SUCCESS" || !arr.length) {
+          return { ok: false, error: data?.message || data?.error || "no rates (unserviceable pincode?)", raw: data };
         }
-        if (!rates.length) return { ok: false, error: data?.message || "no rates (unserviceable, or unexpected response shape)", raw: data };
-        rates.sort((a, b) => a.rate - b.rate);
-        return { ok: true, rates, edd: data?.expected_delivery_date || data?.edd || null, raw: data };
+        // Days-in-transit from the pickup->delivery dates when both are present.
+        const tatDays = (ed) => {
+          const p = ed?.pickup ? new Date(ed.pickup).getTime() : NaN;
+          const dv = ed?.delivery ? new Date(ed.delivery).getTime() : NaN;
+          if (!Number.isFinite(p) || !Number.isFinite(dv) || dv < p) return null;
+          return Math.max(1, Math.round((dv - p) / 86400000));
+        };
+        const rates = arr
+          .map((r) => {
+            const ch = r.charges || {};
+            const rate = (Number(ch.total_forward_charges) || 0) + (Number(r.platform_fee) || 0);
+            return {
+              courier: r.carrier_name || r.carrier_code || "Velocity",
+              serviceType: r.service_level || "",
+              rate,
+              cod: isCOD ? "Y" : "N",
+              prepaid: isCOD ? "N" : "Y",
+              tat: tatDays(r.expected_delivery),
+              zone: data?.result?.zone || null,
+            };
+          })
+          .sort((a, b) => a.rate - b.rate);
+        return { ok: true, rates, zone: data?.result?.zone || null, edd: arr[0]?.expected_delivery?.delivery || null, raw: data };
       },
       { label: "velocity.checkRate", retries: 1 }
     );
