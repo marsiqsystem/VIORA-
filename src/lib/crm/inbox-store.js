@@ -237,6 +237,43 @@ function inboundMedia(msg) {
 }
 
 /**
+ * Pull the Click-to-WhatsApp AD REFERRAL off an inbound message. When a customer
+ * taps a Facebook/Instagram "Click to WhatsApp" ad (or a post CTA) and messages
+ * us, Meta attaches a `referral` object naming EXACTLY which ad/post they came
+ * from. Capturing it is what lets the operator see "this reply came from Ad X"
+ * instead of guessing. Returns null for an ordinary (non-ad) message.
+ *
+ * Fields kept (all optional in Meta's payload):
+ *   source_type  'ad' | 'post'
+ *   source_id    the ad / post id  (matches Ads Manager)
+ *   source_url   fb.me/… deep link back to the ad/post
+ *   headline     the ad's headline text   ← the human-readable "which ad"
+ *   body         the ad's body text
+ *   media_type   'image' | 'video'
+ *   image_url / video_url / thumbnail_url   the creative preview
+ *   ctwa_clid    click id (for Meta CAPI attribution, if ever wired)
+ */
+function inboundReferral(msg) {
+  const r = msg?.referral;
+  if (!r || typeof r !== "object") return null;
+  const out = {
+    sourceType: r.source_type || "",
+    sourceId: r.source_id || "",
+    sourceUrl: r.source_url || "",
+    headline: r.headline || "",
+    body: r.body || "",
+    mediaType: r.media_type || "",
+    imageUrl: r.image_url || "",
+    videoUrl: r.video_url || "",
+    thumbUrl: r.thumbnail_url || "",
+    ctwaClid: r.ctwa_clid || "",
+  };
+  // Ignore an empty shell (no id AND no text tells us nothing).
+  if (!out.sourceId && !out.headline && !out.sourceUrl && !out.body) return null;
+  return out;
+}
+
+/**
  * Pull latitude/longitude (+ optional name/address) off an inbound location
  * message so the inbox can render a tappable Google-Maps card. Returns null for
  * any non-location message.
@@ -289,6 +326,9 @@ async function ingestWebhook(body) {
           const text = inboundText(msg);
           const media = inboundMedia(msg);
           const location = inboundLocation(msg);
+          // Click-to-WhatsApp ad attribution: when present, this message is the
+          // moment the customer arrived FROM a Facebook/Instagram ad or post.
+          const referral = inboundReferral(msg);
           // When the customer swipe-replies to one of our messages, Meta echoes
           // the quoted message's id in msg.context.id — store it so the inbox can
           // render "in reply to …" by looking that id up in the thread.
@@ -305,6 +345,7 @@ async function ingestWebhook(body) {
               : {}),
             ...(location ? { location } : {}),
             ...(quotedId ? { quotedId } : {}),
+            ...(referral ? { referral } : {}),
           });
 
           const conv = await readConv(phone);
@@ -316,6 +357,14 @@ async function ingestWebhook(body) {
           conv.lastTs = tsMs;
           conv.lastInboundTs = tsMs;
           conv.unread = (Number(conv.unread) || 0) + 1;
+          // First-touch ad attribution: remember the FIRST ad that brought this
+          // customer so the chat list can badge "From ad: <headline>". A later ad
+          // click still shows per-message in the thread, but the conversation's
+          // acquisition source stays fixed. `firstReplyTs` on the referral marks
+          // when they first messaged from it.
+          if (referral && !conv.referral) {
+            conv.referral = { ...referral, firstReplyTs: tsMs };
+          }
           await writeConv(conv);
           inbound++;
         }
@@ -441,6 +490,8 @@ async function getConversations(limit = 100) {
         lastTs: Number(conv.lastTs) || 0,
         unread: Number(conv.unread) || 0,
         withinWindow: withinWindow(conv, now),
+        // Click-to-WhatsApp ad this customer arrived from (first-touch), or null.
+        referral: conv.referral || null,
       };
     });
   } catch (e) {
@@ -494,6 +545,8 @@ async function getMessages(phone) {
       name: conv.name || "",
       withinWindow: withinWindow(conv),
       lastInboundTs: Number(conv.lastInboundTs) || 0,
+      // First-touch Click-to-WhatsApp ad, so the thread header can banner it.
+      referral: conv.referral || null,
       messages,
     };
   } catch (e) {

@@ -23,6 +23,20 @@ const KEY_STORE = "viora_inbox_key";
 const DEFAULT_HEADER_IMAGE =
   process.env.NEXT_PUBLIC_WHATSAPP_HEADER_IMAGE || "https://viorajewel.in/email-logo.png";
 
+// A Click-to-WhatsApp ad/post the customer arrived from (Meta `referral`).
+type Referral = {
+  sourceType?: string; // 'ad' | 'post'
+  sourceId?: string;   // ad/post id — matches Ads Manager
+  sourceUrl?: string;  // fb.me/… link back to the ad
+  headline?: string;   // the ad's headline — the human "which ad"
+  body?: string;       // the ad's body text
+  mediaType?: string;  // 'image' | 'video'
+  imageUrl?: string;
+  videoUrl?: string;
+  thumbUrl?: string;
+  ctwaClid?: string;
+  firstReplyTs?: number;
+};
 type Conversation = {
   phone: string;
   name: string;
@@ -30,6 +44,7 @@ type Conversation = {
   lastTs: number;
   unread: number;
   withinWindow: boolean;
+  referral?: Referral | null;
 };
 type Message = {
   id: string;
@@ -47,6 +62,7 @@ type Message = {
   location?: { lat: number; long: number; name?: string; address?: string };
   quoted?: { id: string; text: string; dir: "in" | "out" }; // snapshot of a quoted msg (outbound reply)
   quotedId?: string; // id of a quoted msg (inbound reply) — resolved from the thread
+  referral?: Referral | null; // set when THIS inbound message came from a Click-to-WhatsApp ad
 };
 type Template = {
   name: string;
@@ -72,6 +88,7 @@ type Thread = {
   name: string;
   withinWindow: boolean;
   lastInboundTs?: number;
+  referral?: Referral | null; // first-touch Click-to-WhatsApp ad for this chat
   messages: Message[];
 };
 
@@ -103,7 +120,7 @@ const SERIF = "var(--font-cormorant), Georgia, 'Times New Roman', serif";
 // --- mock seed data ----------------------------------------------------------
 const now = Date.now();
 const MOCK_CONVS: Conversation[] = [
-  { phone: "918100460566", name: "Zeeshan", lastText: "Order kab tak aayega?", lastTs: now - 120000, unread: 2, withinWindow: true },
+  { phone: "918100460566", name: "Zeeshan", lastText: "Order kab tak aayega?", lastTs: now - 120000, unread: 2, withinWindow: true, referral: { sourceType: "ad", sourceId: "120210000000123456", sourceUrl: "https://fb.me/xyz", headline: "Rakhi Luxe Gift Set — Flat 20% Off", body: "Handcrafted jewellery gifts. Free shipping.", mediaType: "image" } },
   { phone: "919812345678", name: "Aisha", lastText: "Thank you! 🎉", lastTs: now - 3600000, unread: 0, withinWindow: true },
   { phone: "918082136359", name: "Rebel Faisal", lastText: "Confirm Order", lastTs: now - 90000000, unread: 0, withinWindow: false },
 ];
@@ -187,6 +204,73 @@ function Ticks({ status, error }: { status?: string; error?: { code?: number | n
     <span title={status} style={{ color: blue ? "#2f6fed" : C.sub, fontSize: 12, letterSpacing: -2 }}>
       {double ? "✓✓" : "✓"}
     </span>
+  );
+}
+
+// A compact "came from an ad" pill for the conversation list — the at-a-glance
+// answer to "which ad did this response come from?". Falls back to the ad/post
+// id when the ad had no headline text.
+function AdBadge({ referral }: { referral?: Referral | null }) {
+  if (!referral) return null;
+  const label =
+    referral.headline?.trim() ||
+    (referral.sourceType === "post" ? "Instagram/FB post" : `Ad ${referral.sourceId || ""}`.trim());
+  return (
+    <span
+      title={`This customer arrived from a Click-to-WhatsApp ${referral.sourceType || "ad"}${referral.headline ? `: ${referral.headline}` : ""}`}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 4, maxWidth: "100%",
+        marginTop: 4, fontSize: 10.5, fontWeight: 700, lineHeight: 1.2,
+        color: C.plumDark, background: "rgba(201,166,107,.20)", border: `1px solid ${C.gold}`,
+        borderRadius: 6, padding: "2px 7px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+      }}
+    >
+      📣 <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+    </span>
+  );
+}
+
+// The full ad-source card shown at the top of a thread: creative thumbnail,
+// headline + body, the source type/id (matches Ads Manager) and a link back to
+// the actual ad. This is how the operator knows exactly which campaign creative
+// drove this WhatsApp conversation.
+function AdCard({ referral }: { referral?: Referral | null }) {
+  if (!referral) return null;
+  const isPost = referral.sourceType === "post";
+  const title = referral.headline?.trim() || (isPost ? "Instagram / Facebook post" : "Click-to-WhatsApp ad");
+  const thumb = referral.imageUrl || referral.thumbUrl || "";
+  return (
+    <div style={{ background: C.bgList, borderBottom: `1px solid ${C.border}`, padding: "10px 16px" }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-start", background: "rgba(201,166,107,.12)", border: `1px solid ${C.gold}`, borderRadius: 10, padding: 10 }}>
+        {thumb ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={thumb} alt="Ad creative" style={{ width: 46, height: 46, borderRadius: 8, objectFit: "cover", flexShrink: 0, border: `1px solid ${C.border}` }} />
+        ) : (
+          <div style={{ width: 46, height: 46, borderRadius: 8, background: GOLD_BG, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>📣</div>
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: C.goldDark }}>
+            Came from {isPost ? "a post" : "an ad"}{referral.mediaType ? ` · ${referral.mediaType}` : ""}
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{title}</div>
+          {referral.body && (
+            <div style={{ fontSize: 12, color: C.sub, marginTop: 1, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{referral.body}</div>
+          )}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 4, alignItems: "center" }}>
+            {referral.sourceId && (
+              <span style={{ fontSize: 10.5, color: C.sub }}>
+                {isPost ? "Post" : "Ad"} ID: <code style={{ fontSize: 10.5, color: C.plum, userSelect: "all" }}>{referral.sourceId}</code>
+              </span>
+            )}
+            {referral.sourceUrl && (
+              <a href={referral.sourceUrl} target="_blank" rel="noreferrer" style={{ fontSize: 11, fontWeight: 700, color: C.plum, textDecoration: "none" }}>
+                View {isPost ? "post" : "ad"} ↗
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -280,14 +364,14 @@ export default function InboxPage() {
   const loadThread = useCallback(async (phone: string) => {
     if (MOCK) {
       const conv = MOCK_CONVS.find((c) => c.phone === phone);
-      setThread({ phone, name: conv?.name || phone, withinWindow: conv?.withinWindow ?? true, lastInboundTs: now - 120000, messages: MOCK_THREADS[phone] || [] });
+      setThread({ phone, name: conv?.name || phone, withinWindow: conv?.withinWindow ?? true, lastInboundTs: now - 120000, referral: conv?.referral || null, messages: MOCK_THREADS[phone] || [] });
       return;
     }
     try {
       const res = await api(`/api/inbox/conversations?phone=${encodeURIComponent(phone)}`);
       if (!res.ok) return;
       const data = await res.json();
-      if (data.ok) setThread({ phone: data.phone, name: data.name, withinWindow: data.withinWindow, lastInboundTs: data.lastInboundTs, messages: data.messages || [] });
+      if (data.ok) setThread({ phone: data.phone, name: data.name, withinWindow: data.withinWindow, lastInboundTs: data.lastInboundTs, referral: data.referral || null, messages: data.messages || [] });
     } catch { /* ignore */ }
   }, [api]);
 
@@ -780,6 +864,11 @@ export default function InboxPage() {
                       <span style={{ background: C.plum, color: "#fff", borderRadius: 10, fontSize: 11, minWidth: 18, height: 18, padding: "0 5px", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{c.unread}</span>
                     )}
                   </div>
+                  {c.referral && (
+                    <div style={{ marginTop: 2 }}>
+                      <AdBadge referral={c.referral} />
+                    </div>
+                  )}
                 </div>
               </button>
             );
@@ -833,6 +922,8 @@ export default function InboxPage() {
                 )}
               </div>
             </header>
+
+            {thread.referral && <AdCard referral={thread.referral} />}
 
             <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 8 }}>
               {thread.messages.map((m, i) => {
