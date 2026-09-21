@@ -26,6 +26,7 @@
 //   VELOCITY_ENABLED=false -> even if not mocking, treat as dry-run.
 
 import { withRetry } from "./reliability";
+import { PACKAGE_BOX, parcelWeightKg, parcelHeightCm } from "./packageBox";
 
 // Refresh the token this many ms before its stated expiry so an in-flight
 // request never races the expiry boundary.
@@ -61,16 +62,11 @@ function cfg() {
       .replace(/https?:\/\/(www\.)?shipfastt?\.in/gi, "https://www.velocityshipping.in")
       .replace(/https?:\/\/(www\.)?velocityshipping\.in/gi, "https://viorajewel.velocityshipping.in")
       .replace(/\/$/, ""),
-    // Viora's standard jewellery package — FIXED. Hardcoded (not env) so a wrong
-    // VELOCITY_DEFAULT_* value in a dashboard can't silently change it (a stale
-    // env was sending breadth 10 instead of 12). Height & weight scale with
+    // Viora's standard jewellery package — from the single source of truth
+    // (packageBox.js), shared by all three couriers + rate-compare. NOT env, so a
+    // stale dashboard value can't silently change it. Height & weight scale with
     // quantity in buildShipmentPayload; length & breadth stay constant.
-    dims: {
-      length: 18, // cm
-      breadth: 12, // cm
-      height: 4, // cm (per unit)
-      weight: 0.2, // kg (per unit)
-    },
+    dims: { ...PACKAGE_BOX },
     enabled: String(process.env.VELOCITY_ENABLED).trim().toLowerCase() === "true",
     mock: String(process.env.VELOCITY_MOCK).trim().toLowerCase() === "true",
   };
@@ -188,7 +184,7 @@ function buildShipmentPayload(o) {
     productItems.length
       ? productItems.map((it, i) => ({
           name: it.name || o.product || "Jewellery",
-          sku: it.sku || `SKU-${i + 1}`,
+          sku: it.sku || o.dCode || "",
           units: Number(it.quantity) || 1,
           // Respect an EXPLICIT price — including 0 (e.g. a combined shipment where
           // the already-paid/prepaid item rides along at ₹0). Only fall back to the
@@ -199,7 +195,7 @@ function buildShipmentPayload(o) {
               ? Number(it.price) || 0
               : Number(o.amount) || 0,
         }))
-      : [{ name: o.product || "Jewellery", sku: "SKU-1", units: 1, selling_price: amount }];
+      : [{ name: o.product || "Jewellery", sku: o.dCode || "", units: 1, selling_price: amount }];
 
   // Package dimensions scale with quantity. The default box (18 x 12 x 4 cm,
   // 0.2 kg) holds ONE unit; every extra unit is stacked on top, so only the
@@ -217,7 +213,7 @@ function buildShipmentPayload(o) {
     order_id: o.orderId ? `VJ-#${o.orderId}` : o.orderGuid,
     order_date: formatOrderDate(new Date()),
     billing_customer_name: o.name || "Customer",
-    billing_address: address.line1 || "",
+    billing_address: [address.line1, address.line2, address.line3].filter(Boolean).join(", ") || "",
     billing_city: address.city || "",
     billing_pincode: address.postalCode || "",
     billing_state: address.state || "",
@@ -230,8 +226,8 @@ function buildShipmentPayload(o) {
     cod_collectible: isCOD ? amount : 0,
     length: c.dims.length,
     breadth: c.dims.breadth,
-    height: c.dims.height * totalUnits,
-    weight: Number((c.dims.weight * totalUnits).toFixed(3)),
+    height: parcelHeightCm(totalUnits),
+    weight: parcelWeightKg(totalUnits),
     warehouse_id: c.warehouseId,
     order_items: items,
   };
@@ -611,7 +607,7 @@ async function checkRate({ toPincode, weightKg, dims, paymentMode, amount, fromP
   const from = String(fromPincode || process.env.VELOCITY_PICKUP_PINCODE || process.env.PICKUP_PINCODE || "").replace(/\D/g, "");
   if (!from) return { ok: false, error: "pickup pincode unknown (set VELOCITY_PICKUP_PINCODE)" };
 
-  const d = dims || c.dims || { length: 18, breadth: 12, height: 4, weight: 0.2 };
+  const d = dims || c.dims || { ...PACKAGE_BOX };
   const isCOD = paymentMode !== "PREPAID";
   const weightKgNum = weightKg || d.weight || 0.5;
   // Velocity's /rates wants dead_weight in GRAMS (all others take kg).

@@ -27,6 +27,7 @@
 //   ITHINK_ENABLED=false -> even if not mocking, treat as dry-run.
 
 import { withRetry } from "./reliability";
+import { PACKAGE_BOX, parcelWeightKg, parcelHeightCm } from "./packageBox";
 
 function cfg() {
   return {
@@ -53,14 +54,10 @@ function cfg() {
     // Customer-facing tracking page. Set a branded URL later (as we did for
     // Velocity); default to iThink's public tracker.
     trackBase: (process.env.ITHINK_TRACK_URL_BASE || "https://ithinklogistics.com/track").replace(/\/$/, ""),
-    // Viora's standard jewellery package — FIXED (mirrors shiprocket/velocity).
-    // Height & weight scale with quantity; length & breadth are const.
-    dims: {
-      length: 18, // cm
-      breadth: 12, // cm
-      height: 4, // cm (per unit)
-      weight: 0.2, // kg (per unit)
-    },
+    // Viora's standard jewellery package — from the single source of truth
+    // (packageBox.js), shared by all three couriers + rate-compare so the box is
+    // identical everywhere. Height & weight scale with quantity at build time.
+    dims: { ...PACKAGE_BOX },
     enabled: String(process.env.ITHINK_ENABLED).trim().toLowerCase() === "true",
     mock: String(process.env.ITHINK_MOCK).trim().toLowerCase() === "true",
   };
@@ -118,14 +115,14 @@ function buildOrderPayload(o) {
   const products = productItems.length
     ? productItems.map((it, i) => ({
         product_name: it.name || o.product || "Jewellery",
-        product_sku: it.sku || `SKU-${i + 1}`,
+        product_sku: it.sku || o.dCode || "",
         product_quantity: String(Number(it.quantity) || 1),
         product_price: String(Number(it.price) || 0),
       }))
     : [
         {
           product_name: o.product || "Jewellery",
-          product_sku: "SKU-1",
+          product_sku: o.dCode || "",
           product_quantity: String(totalUnits),
           product_price: String(amount || 0),
         },
@@ -151,7 +148,7 @@ function buildOrderPayload(o) {
     company_name: "",
     add: address.line1 || "",
     add2: address.line2 || "",
-    add3: "",
+    add3: address.line3 || "",
     pin: address.postalCode || "",
     city: address.city || "",
     state: address.state || "",
@@ -175,8 +172,8 @@ function buildOrderPayload(o) {
     products,
     shipment_length: String(c.dims.length),
     shipment_width: String(c.dims.breadth),
-    shipment_height: String(c.dims.height * totalUnits),
-    weight: String(Number((c.dims.weight * totalUnits).toFixed(3))),
+    shipment_height: String(parcelHeightCm(totalUnits)),
+    weight: String(parcelWeightKg(totalUnits)),
     shipping_charges: "0",
     giftwrap_charges: "0",
     transaction_charges: "0",
@@ -196,14 +193,28 @@ function buildOrderPayload(o) {
     store_id: c.storeId,
   };
 
+  // Which carrier + service to book. Prefer the courier the operator CHOSE in the
+  // rate-compare table (o.logistics / o.serviceType — the option's logistic_name /
+  // logistic_service_type). Fall back to the account default only when no choice
+  // was passed. THIS is the fix for "picked Shadowfax but it booked Delhivery".
+  //
+  // add.json expects the SHORT lowercase carrier token (this account's allowed
+  // values: delhivery, xpressbees, dtdc, bluedart, shadowfax) and s_type air|surface,
+  // but rate/check.json returns a display name like "Delhivery Surface". Normalise
+  // to the first lowercase word so a chosen "Shadowfax"/"Delhivery Surface" maps to
+  // "shadowfax"/"delhivery" and s_type to "surface"/"air".
+  const toToken = (s) => String(s || "").trim().toLowerCase().split(/\s+/)[0] || "";
+  const logistics = toToken(o.logistics) || String(c.logistics || "").trim();
+  const s_type = toToken(o.serviceType) || String(c.serviceType || "").trim();
+
   return {
     data: {
       shipments: [shipment],
       pickup_address_id: c.pickupAddressId,
       access_token: c.accessToken,
       secret_key: c.secretKey,
-      logistics: c.logistics,
-      s_type: c.serviceType,
+      logistics,
+      s_type,
       order_type: "",
     },
   };
@@ -253,9 +264,9 @@ async function createShipment(o) {
 
   if (c.mock || !c.enabled) {
     const awb = `MOCK-IT-${o.orderId}`;
-    console.log(`[ithink] MOCK createShipment (ITHINK_MOCK/ENABLED gate) -> awb=${awb}`);
+    console.log(`[ithink] MOCK createShipment (ITHINK_MOCK/ENABLED gate) -> awb=${awb}, logistics=${body?.data?.logistics}, s_type=${body?.data?.s_type}`);
     console.log("[ithink] would POST /order/add.json:", JSON.stringify(body, null, 2));
-    return { ok: true, dryRun: true, awb, trackingUrl: `${c.trackBase}/${awb}`, raw: { mock: true } };
+    return { ok: true, dryRun: true, awb, courierName: body?.data?.logistics || c.logistics, trackingUrl: `${c.trackBase}/${awb}`, raw: { mock: true } };
   }
 
   if (!c.accessToken || !c.secretKey || !c.pickupAddressId) {
@@ -287,7 +298,9 @@ async function createShipment(o) {
           ok: true,
           dryRun: false,
           awb: result.waybill,
-          courierName: c.logistics,
+          // Report the carrier actually booked (operator's chosen courier), not
+          // the fixed account default.
+          courierName: body?.data?.logistics || c.logistics,
           courierOrderId: result.refnum,
           trackingUrl: `${c.trackBase}/${result.waybill}`,
           raw: data,

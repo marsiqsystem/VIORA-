@@ -43,7 +43,10 @@ type Order = {
   paymentMode: string; courier: string; awb: string; status: string;
   deliveryStatus?: string; pickupStatus?: string; transitStatus?: string;
   freight: number | null; goodsCost?: number | null; profit?: number | null;
-  rtoCost: number | null; address: { city?: string; state?: string } | null;
+  rtoCost: number | null;
+  address: { line1?: string; line2?: string; line3?: string; city?: string; state?: string; postalCode?: string; country?: string } | null;
+  addressText?: string; addressEdited?: boolean;
+  courierService?: string; // actual iThink carrier booked (e.g. "shadowfax")
 };
 
 const rupee = (v: number | null | undefined) =>
@@ -413,6 +416,41 @@ function AssignCell({ order, apiKey, onChanged }: { order: Order; apiKey: string
   const [err, setErr] = useState("");
   const [rate, setRate] = useState<any>(null);
 
+  // --- Ship-to address editor (one box → auto pincode + city/state → all couriers) ---
+  const reconstructAddr = () => {
+    if (order.addressText) return order.addressText;
+    const a = order.address || {};
+    return [a.line1, a.line2, a.line3, [a.city, a.state, a.postalCode].filter(Boolean).join(", "), a.country]
+      .filter(Boolean)
+      .join("\n");
+  };
+  const [addrOpen, setAddrOpen] = useState(false);
+  const [addrText, setAddrText] = useState("");
+  const [addrMsg, setAddrMsg] = useState("");
+  const openAddr = () => { setAddrText(reconstructAddr()); setAddrMsg(""); setErr(""); setAddrOpen(true); };
+  const saveAddr = async () => {
+    const text = addrText.trim();
+    if (!text) { setErr("Address is empty."); return; }
+    setBusy("addr"); setErr(""); setAddrMsg("");
+    try {
+      const res = await fetch(`/api/dashboard/update-address?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-inbox-key": apiKey },
+        body: JSON.stringify({ orderId: order.orderId, addressText: text }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) { setErr(typeof data.error === "string" ? data.error : `Error ${res.status}`); return; }
+      const r = data.resolved || {};
+      setAddrMsg(
+        `Saved ✓  Pincode ${r.pincode || "—"}${r.city ? ` · ${r.city}` : ""}${r.state ? `, ${r.state}` : ""}` +
+        (data.note ? `  — ${data.note}` : "")
+      );
+      setRate(null); // stale: re-compare on the new pincode
+      onChanged();
+    } catch (e: any) { setErr(e?.message || "Failed"); }
+    finally { setBusy(""); }
+  };
+
   // COMPARE RATES — read-only freight quotes from ALL THREE couriers (Velocity,
   // Shiprocket, iThink) side by side for THIS order's pincode + weight, quoted for
   // its actual payment mode (COD vs prepaid). Nothing is booked or charged on any
@@ -464,23 +502,33 @@ function AssignCell({ order, apiKey, onChanged }: { order: Order; apiKey: string
   // iThink wallet. Behind an explicit, spelled-out double confirm so it can never be
   // a reflex/"just checking rates" click. iThink has no draft state, so this is how
   // an iThink-assigned order is shipped (there's no New Orders panel to ship from).
-  const bookIthink = async () => {
+  // BOOK on iThink. Optionally book a SPECIFIC carrier the operator picked in the
+  // rate-compare table (logistics = its logistic_name, serviceType = its
+  // logistic_service_type). Without a pick it books the account default courier.
+  const bookIthink = async (logistics?: string, serviceType?: string) => {
     // If the order was already recorded on another courier (e.g. it's sitting in
     // Velocity/Shiprocket "New Orders"), booking on iThink too would ship it twice.
     const dupWarn =
       order.courier && order.courier !== "ithink"
         ? `\n\n⚠️ This order is already recorded on ${order.courier}. If you also book it on iThink you'll ship it TWICE — cancel the ${order.courier} one first if you don't want that.`
         : "";
+    const which = logistics ? ` via ${logistics}${serviceType ? ` (${serviceType})` : ""}` : "";
     const warn1 =
-      `💸 BOOK #${order.orderId} on iThink now?\n\nThis GENERATES the AWB and DEBITS your iThink wallet immediately — there is no undo from here (cancel in the iThink panel to refund). Only do this after you've compared the rate.${dupWarn}`;
+      `💸 BOOK #${order.orderId} on iThink${which} now?\n\nThis GENERATES the AWB and DEBITS your iThink wallet immediately — there is no undo from here (cancel in the iThink panel to refund). Only do this after you've compared the rate.${dupWarn}`;
     if (!window.confirm(warn1)) return;
-    if (!window.confirm(`Last check: #${order.orderId} will be charged to your iThink wallet the moment you press OK.`)) return;
+    if (!window.confirm(`Last check: #${order.orderId} will be charged to your iThink wallet${which} the moment you press OK.`)) return;
     setBusy("book-ithink"); setErr("");
     try {
       const res = await fetch(`/api/dashboard/assign-courier?key=${encodeURIComponent(apiKey)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-inbox-key": apiKey },
-        body: JSON.stringify({ orderId: order.orderId, courier: "ithink", ship: true }),
+        body: JSON.stringify({
+          orderId: order.orderId,
+          courier: "ithink",
+          ship: true,
+          ...(logistics ? { logistics } : {}),
+          ...(serviceType ? { serviceType } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) { setErr(typeof data.error === "string" ? data.error : `Error ${res.status}`); return; }
@@ -534,21 +582,52 @@ function AssignCell({ order, apiKey, onChanged }: { order: Order; apiKey: string
           Shows Velocity / Shiprocket / iThink side by side for this order's pincode,
           weight & payment mode so the operator picks the cheapest, then records +
           ships on that courier. */}
+      {/* Edit the ship-to address ONCE here (auto pincode + city/state) so the
+          corrected address flows to every courier — no re-typing inside a panel. */}
+      {showAssign && (
+        <button disabled={!!busy} onClick={() => (addrOpen ? setAddrOpen(false) : openAddr())} style={addrBtn}
+          title="Edit the shipping address + pincode once — it fills into whichever courier you ship on">
+          {addrOpen ? "✕ Close address" : order.addressEdited ? "✎ Address (edited)" : "✎ Edit address"}
+        </button>
+      )}
+      {showAssign && addrOpen && (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, background: C.card, padding: 8, minWidth: 250 }}>
+          <div style={{ fontSize: 10.5, color: C.sub, marginBottom: 4 }}>
+            Paste the full address (pincode auto-detected; city/state auto-filled from it):
+          </div>
+          <textarea
+            value={addrText}
+            onChange={(e) => setAddrText(e.target.value)}
+            rows={5}
+            placeholder={"Near Bharka Devi Icecream\nChar Rasta, Tankal\nTaluka Chikhli, Navsari, Gujarat – 396560\nIndia"}
+            style={{ width: "100%", boxSizing: "border-box", fontSize: 12, padding: 7, borderRadius: 6, border: `1px solid ${C.border}`, resize: "vertical", fontFamily: "inherit" }}
+          />
+          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+            <button disabled={busy === "addr"} onClick={saveAddr} style={assignBtn("#0a7d5a")}>
+              {busy === "addr" ? "Saving…" : "Save address"}
+            </button>
+            <button disabled={busy === "addr"} onClick={() => setAddrOpen(false)} style={{ ...assignBtn("#999"), background: "#fff", color: C.sub, border: `1px solid ${C.border}` }}>
+              Cancel
+            </button>
+          </div>
+          {addrMsg && <div style={{ color: C.ok, fontSize: 10.5, marginTop: 5 }}>{addrMsg}</div>}
+        </div>
+      )}
       {showAssign && (
         <button disabled={!!busy} onClick={checkRate} style={rateBtn}
           title="Compare Velocity / Shiprocket / iThink rates for this order — nothing is booked or charged">
           {busy === "rate" ? "Comparing…" : "📊 Compare rates"}
         </button>
       )}
-      {rate && <RateCompare rate={rate} />}
+      {rate && <RateCompare rate={rate} busy={busy} onBookIthink={bookIthink} />}
       {/* iThink is booked DIRECTLY from HERE — no "record" step first (its API has
           no draft/New-Orders state). Shows on any pre-shipment order without an AWB.
           This is the ONLY button that books on iThink AND charges the iThink wallet
           (double-confirmed inside bookIthink). */}
       {showAssign && !order.awb && (
-        <button disabled={!!busy} onClick={bookIthink} style={assignBtn("#B8860B")}
-          title="Books the order on iThink, generates the AWB and charges your iThink wallet — do this after comparing rates">
-          {busy === "book-ithink" ? "Booking…" : "💸 Book on iThink"}
+        <button disabled={!!busy} onClick={() => bookIthink()} style={assignBtn("#B8860B")}
+          title="Books the order on iThink (default courier), generates the AWB and charges your iThink wallet — or use Compare to book a specific courier">
+          {busy === "book-ithink" ? "Booking…" : "💸 Book on iThink (default)"}
         </button>
       )}
       {showCancel && (
@@ -562,6 +641,7 @@ function AssignCell({ order, apiKey, onChanged }: { order: Order; apiKey: string
 }
 const cancelBtn: React.CSSProperties = { padding: "5px 9px", borderRadius: 7, border: "1px solid #d9534f", background: "#fff", color: "#c9302c", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", alignSelf: "flex-start" };
 const rateBtn: React.CSSProperties = { padding: "5px 9px", borderRadius: 7, border: "1px solid #0a7d5a", background: "#fff", color: "#0a7d5a", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", alignSelf: "flex-start" };
+const addrBtn: React.CSSProperties = { padding: "5px 9px", borderRadius: 7, border: "1px solid #b07d2b", background: "#fff", color: "#8a6011", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", alignSelf: "flex-start" };
 
 // Side-by-side rate comparison for one order (Velocity / Shiprocket / iThink).
 // The cheapest platform overall is highlighted. Read-only — nothing is booked.
@@ -570,7 +650,7 @@ const COURIER_META: Record<string, { label: string; color: string }> = {
   shiprocket: { label: "Shiprocket", color: "#5b3bd4" },
   ithink: { label: "iThink", color: "#0a7d5a" },
 };
-function RateCompare({ rate }: { rate: any }) {
+function RateCompare({ rate, busy, onBookIthink }: { rate: any; busy?: string; onBookIthink?: (logistics: string, serviceType: string) => void }) {
   const couriers: Record<string, any> = rate?.couriers || {};
   const order = ["velocity", "shiprocket", "ithink"];
   // Lowest cheapest-rate across the platforms that returned a quote -> winner.
@@ -601,7 +681,31 @@ function RateCompare({ rate }: { rate: any }) {
                   <div style={{ color: C.sub, fontSize: 10 }}>
                     {cheapest.courier}{cheapest.tat ? ` · ${cheapest.tat}d` : ""}
                   </div>
-                  {Array.isArray(c.rates) && c.rates.length > 1 && (
+                  {/* iThink: every option is BOOKABLE straight from here — pick the
+                      reliable courier (not always the cheapest) and book that exact
+                      one (books + charges the iThink wallet, double-confirmed). */}
+                  {k === "ithink" && onBookIthink && Array.isArray(c.rates) && c.rates.length > 0 && (
+                    <div style={{ marginTop: 5, borderTop: `1px dashed ${C.border}`, paddingTop: 4, display: "flex", flexDirection: "column", gap: 4 }}>
+                      {c.rates.slice(0, 6).map((r: any, i: number) => (
+                        <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 6, alignItems: "center" }}>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 78, fontSize: 10 }} title={`${r.courier}${r.serviceType ? ` (${r.serviceType})` : ""}`}>
+                            {r.courier}
+                          </span>
+                          <span style={{ fontSize: 10, color: C.sub }}>₹{r.rate}</span>
+                          <button
+                            disabled={!!busy}
+                            onClick={() => onBookIthink(r.courier, r.serviceType || "")}
+                            title={`Book on iThink via ${r.courier}${r.serviceType ? ` (${r.serviceType})` : ""} — generates AWB + charges wallet`}
+                            style={{ padding: "2px 7px", borderRadius: 6, border: "none", background: "#B8860B", color: "#fff", fontSize: 10, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
+                          >
+                            {busy === "book-ithink" ? "…" : "💸 Book"}
+                          </button>
+                        </div>
+                      ))}
+                      {c.rates.length > 6 && <div style={{ color: C.sub, fontSize: 10 }}>+{c.rates.length - 6} more…</div>}
+                    </div>
+                  )}
+                  {k !== "ithink" && Array.isArray(c.rates) && c.rates.length > 1 && (
                     <div style={{ marginTop: 4, color: C.sub, fontSize: 10, borderTop: `1px dashed ${C.border}`, paddingTop: 3 }}>
                       {c.rates.slice(0, 4).map((r: any, i: number) => (
                         <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
@@ -681,7 +785,12 @@ function OrdersTab({ orders, loading, apiKey, onChanged }: { orders: Order[]; lo
                 <td style={tnum}>{o.qty || 1}</td>
                 <td style={tnum}>{rupee2(o.sellingPrice)}</td>
                 <td style={td}><span style={{ color: o.paymentMode === "PREPAID" ? C.ok : C.warn, fontWeight: 600 }}>{o.paymentMode || "—"}</span></td>
-                <td style={{ ...td, textTransform: "capitalize" }}>{o.courier || "—"}</td>
+                <td style={{ ...td, textTransform: "capitalize" }}>
+                  {o.courier || "—"}
+                  {o.courierService && o.courierService.toLowerCase() !== (o.courier || "").toLowerCase() && (
+                    <div style={{ color: C.sub, fontSize: 11 }}>via {o.courierService}</div>
+                  )}
+                </td>
                 <td style={td}><StatusBadge status={o.status || "new"} />
                   {(o.transitStatus || o.pickupStatus) && <div style={{ color: C.sub, fontSize: 11, marginTop: 3 }}>{[o.transitStatus, o.pickupStatus].filter(Boolean).join(" · ")}</div>}
                 </td>

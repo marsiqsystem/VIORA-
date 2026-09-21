@@ -19,6 +19,7 @@ import * as ordersStore from "@/lib/crm/orders-store";
 import * as ithink from "@/lib/crm/ithink";
 import * as velocity from "@/lib/crm/velocity";
 import * as shiprocket from "@/lib/crm/shiprocket";
+import { PACKAGE_BOX, parcelWeightKg, parcelHeightCm } from "@/lib/crm/packageBox";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,13 +51,15 @@ export async function POST(req: NextRequest) {
   if (!toPincode) return NextResponse.json({ ok: false, error: "order has no destination pincode" }, { status: 400 });
 
   // Parcel size scales with the combined unit count — the SAME rule every courier's
-  // shipment uses (box 18 x 12 x 4*units cm, 0.2 kg/unit) so the quotes compare fairly.
+  // shipment uses (from packageBox.js, height & weight × units) so the quotes
+  // compare fairly and always match what actually gets shipped.
   const units =
     Array.isArray(order.items) && order.items.length
       ? order.items.reduce((s: number, it: any) => s + (Number(it?.quantity) || 1), 0)
       : Number(order.qty) || 1;
-  const dims = { length: 18, breadth: 12, height: 4 * (units || 1) };
-  const weightKg = body?.weightKg != null ? Number(body.weightKg) : Number((0.2 * (units || 1)).toFixed(3));
+  const u = units || 1;
+  const dims = { length: PACKAGE_BOX.length, breadth: PACKAGE_BOX.breadth, height: parcelHeightCm(u) };
+  const weightKg = body?.weightKg != null ? Number(body.weightKg) : parcelWeightKg(u);
 
   const args = { toPincode, weightKg, dims, paymentMode: order.paymentMode, amount: order.sellingPrice };
 
@@ -75,7 +78,7 @@ export async function POST(req: NextRequest) {
     toPincode,
     paymentMode: order.paymentMode || "COD",
     weightKg,
-    box: `18 x 12 x ${dims.height}`,
+    box: `${dims.length} x ${dims.breadth} x ${dims.height}`,
     couriers: {
       velocity: summarize(unwrap(vel)),
       shiprocket: summarize(unwrap(shp)),

@@ -21,6 +21,7 @@
 //   SHIPROCKET_ENABLED=false  -> even if not mocking, treat as dry-run.
 
 import { withRetry } from "./reliability";
+import { PACKAGE_BOX, parcelWeightKg, parcelHeightCm } from "./packageBox";
 
 // Shiprocket JWTs live ~10 days. Cache for 9 to leave a safe margin, and always
 // refetch on a 401/403 mid-life (rotated/expired token).
@@ -39,14 +40,10 @@ function cfg() {
     // Customer-facing tracking page. Shiprocket's public tracker is
     // shiprocket.co/tracking/<AWB>; a branded domain can override via env later.
     trackBase: (process.env.SHIPROCKET_TRACK_URL_BASE || "https://shiprocket.co/tracking").replace(/\/$/, ""),
-    // Viora's standard jewellery package — FIXED (mirrors velocity.js). Height &
+    // Viora's standard jewellery package — from the single source of truth
+    // (packageBox.js), shared by all three couriers + rate-compare. Height &
     // weight scale with quantity in buildOrderPayload; length & breadth are const.
-    dims: {
-      length: 18, // cm
-      breadth: 12, // cm
-      height: 4, // cm (per unit)
-      weight: 0.2, // kg (per unit)
-    },
+    dims: { ...PACKAGE_BOX },
     enabled: String(process.env.SHIPROCKET_ENABLED).trim().toLowerCase() === "true",
     mock: String(process.env.SHIPROCKET_MOCK).trim().toLowerCase() === "true",
   };
@@ -135,11 +132,11 @@ function buildOrderPayload(o) {
     productItems.length
       ? productItems.map((it, i) => ({
           name: it.name || o.product || "Jewellery",
-          sku: it.sku || `SKU-${i + 1}`,
+          sku: it.sku || o.dCode || "",
           units: Number(it.quantity) || 1,
           selling_price: Number(it.price) || amount || 0,
         }))
-      : [{ name: o.product || "Jewellery", sku: "SKU-1", units: 1, selling_price: amount }];
+      : [{ name: o.product || "Jewellery", sku: o.dCode || "", units: 1, selling_price: amount }];
 
   // Package dimensions scale with quantity (same rule as Velocity): the default
   // box holds ONE unit; each extra unit stacks on top, so only HEIGHT grows and
@@ -162,7 +159,7 @@ function buildOrderPayload(o) {
     pickup_location: c.pickupLocation, // the registered pickup nickname
     billing_customer_name: firstName,
     billing_last_name: lastName,
-    billing_address: address.line1 || "",
+    billing_address: [address.line1, address.line2, address.line3].filter(Boolean).join(", ") || "",
     billing_city: address.city || "",
     billing_pincode: address.postalCode || "",
     billing_state: address.state || "",
@@ -175,8 +172,8 @@ function buildOrderPayload(o) {
     sub_total: amount,
     length: c.dims.length,
     breadth: c.dims.breadth,
-    height: c.dims.height * totalUnits,
-    weight: Number((c.dims.weight * totalUnits).toFixed(3)),
+    height: parcelHeightCm(totalUnits),
+    weight: parcelWeightKg(totalUnits),
   };
 }
 
