@@ -17,6 +17,15 @@
 //        assigns the courier + AWB now.
 //   { ..., "prepaidPrice": 0 }                             -> override the prepaid
 //        item's shipment price (default 0).
+//   { ..., "bothCod": true }                               -> BOTH orders are COD
+//        (the same customer placed two COD orders). Collect the SUM of both amounts
+//        on delivery and ship every item at its real price — nothing rides at ₹0.
+//        (Pass either order as codNumber/prepaidNumber; the parcel is keyed to
+//        codNumber for the VJ-#<number> id + WhatsApp/tracking correlation.)
+//   { ..., "address": { line1, line2, line3, city, state, postalCode, country } }
+//        -> override the ship-to address on the key (COD) order when the Wix
+//        address is wrong/incomplete. Provided fields replace; omitted fields keep
+//        the Wix value.
 //
 // DELETE this route once the combined order has shipped.
 
@@ -25,6 +34,7 @@ import * as wix from "@/lib/crm/wix";
 import * as velocity from "@/lib/crm/velocity";
 import * as ordersStore from "@/lib/crm/orders-store";
 import { authOk, authConfigured, keyFromRequest } from "@/lib/crm/inbox-store";
+import { parcelWeightKg, parcelHeightCm, PACKAGE_BOX } from "@/lib/crm/packageBox";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -79,27 +89,46 @@ export async function POST(req: NextRequest) {
   const mode = String(body?.mode ?? "create-only").trim().toLowerCase();
   const ship = mode === "ship";
   const prepaidPrice = body?.prepaidPrice != null ? Number(body.prepaidPrice) : 0;
+  // bothCod: the "prepaid" order is actually a SECOND COD order (same customer,
+  // two COD orders). Collect the SUM on delivery; ship every item at real price.
+  const bothCod = body?.bothCod === true;
+  // Optional ship-to address override (applied to the key/COD order).
+  const addressOverride =
+    body?.address && typeof body.address === "object" ? body.address : null;
 
   const cod = await fullOrder(codNumber);
   if (!cod) return NextResponse.json({ ok: false, error: `COD order ${codNumber} not found in Wix` }, { status: 404 });
   const prepaid = await fullOrder(prepaidNumber);
   if (!prepaid) return NextResponse.json({ ok: false, error: `Prepaid order ${prepaidNumber} not found in Wix` }, { status: 404 });
 
-  // COD collect = the COD order's amount ONLY (the prepaid item is already paid).
-  const codAmount = Number(cod.amount) || 0;
+  // Correct the ship-to address on the key (COD) order when supplied.
+  if (addressOverride) {
+    cod.address = { ...(cod.address || {}), ...addressOverride };
+  }
 
-  // Combined line items: EVERY prepaid product at ₹0 (already paid) + every COD
-  // product at its real price. Fall back to the single product name if an order
-  // carries no detailed line items (older orders).
+  // COD collect. Default: just the COD order's amount (the prepaid item is already
+  // paid). bothCod: the SUM of both orders (both are cash-on-delivery).
+  const codAmount = bothCod
+    ? (Number(cod.amount) || 0) + (Number(prepaid.amount) || 0)
+    : Number(cod.amount) || 0;
+
+  // Combined line items. Default: prepaid products at ₹0 (already paid) + COD
+  // products at real price. bothCod: the "prepaid" order's products ALSO at their
+  // real price (they will be collected). Fall back to the single product name if an
+  // order carries no detailed line items (older orders).
   const prepaidItems =
     Array.isArray(prepaid.items) && prepaid.items.length
       ? prepaid.items.map((it: any) => ({
           name: it.name || prepaid.product || "Jewellery",
           sku: it.sku || undefined,
           quantity: Number(it.quantity) || 1,
-          price: prepaidPrice, // already paid — ride along at ₹0
+          price: bothCod ? (Number(it.price) || Number(prepaid.amount) || 0) : prepaidPrice,
         }))
-      : [{ name: prepaid.product || "Jewellery", quantity: unitsOf(prepaid), price: prepaidPrice }];
+      : [{
+          name: prepaid.product || "Jewellery",
+          quantity: unitsOf(prepaid),
+          price: bothCod ? (Number(prepaid.amount) || 0) : prepaidPrice,
+        }];
 
   const codItems =
     Array.isArray(cod.items) && cod.items.length
@@ -139,8 +168,10 @@ export async function POST(req: NextRequest) {
     cod_to_collect: codAmount,
     items: items.map((it) => ({ name: it.name, units: it.quantity, price: it.price })),
     total_units: totalUnits,
-    weight_kg: Number((0.2 * totalUnits).toFixed(3)),
-    box_cm: `18 x 12 x ${4 * totalUnits}`,
+    // Reflect the SINGLE-SOURCE box (packageBox.js) that velocity.buildShipmentPayload
+    // actually uses, so the preview matches what gets created.
+    weight_kg: parcelWeightKg(totalUnits),
+    box_cm: `${PACKAGE_BOX.length} x ${PACKAGE_BOX.breadth} x ${parcelHeightCm(totalUnits)}`,
   };
 
   const sameCustomer =
@@ -152,6 +183,8 @@ export async function POST(req: NextRequest) {
       ok: true,
       dryRun: true,
       sameCustomer,
+      bothCod,
+      addressOverridden: !!addressOverride,
       wouldCreate: ship ? "ship (courier + AWB now)" : "create-only (Velocity New Orders)",
       preview,
       cod: { number: cod.orderId, product: cod.product, amount: cod.amount, paymentMode: cod.paymentMode },
