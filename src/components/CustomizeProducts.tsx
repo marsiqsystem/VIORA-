@@ -12,6 +12,7 @@ const CustomizeProducts = ({
   variants,
   productOptions,
   onOptionChange,
+  lowStockShownAbove = false,
 }: {
   productId: string;
   // Meta catalog Content ID (product slug) — forwarded to <Add> for content_ids.
@@ -21,6 +22,8 @@ const CustomizeProducts = ({
   variants: products.Variant[];
   productOptions: products.ProductOption[];
   onOptionChange?: (options: { [key: string]: string }) => void;
+  /** Forwarded to <Add> — the product page shows "Only N left" above the colours. */
+  lowStockShownAbove?: boolean;
 }) => {
   const [selectedOptions, setSelectedOptions] = useState<{
     [key: string]: string;
@@ -51,7 +54,11 @@ const CustomizeProducts = ({
         ([key, value]) => variantChoices[key] === value
       );
     });
-    setSelectedVariant(variant);
+    // Products without per-variant stock (manageVariants off) have one default
+    // variant with no choices — its stock is the product's stock.
+    const onlyDefault =
+      variants.length === 1 && Object.keys(variants[0].choices || {}).length === 0 ? variants[0] : undefined;
+    setSelectedVariant(variant || onlyDefault);
   }, [selectedOptions, variants]);
 
   // Notify parent when options change
@@ -91,7 +98,7 @@ const CustomizeProducts = ({
         
         return (
           <div className="flex flex-col gap-4" key={option.name}>
-            <h4 className="font-medium">Choose {option.name}</h4>
+            <h4 className="font-inter font-medium">Choose {option.name}</h4>
             <ul className="flex items-center gap-3">
             {option.choices?.map((choice) => {
               const disabled = !isVariantInStock({
@@ -163,6 +170,7 @@ const CustomizeProducts = ({
         productName={productName}
         productPrice={basePrice}
         selectedOptions={selectedOptions}
+        lowStockShownAbove={lowStockShownAbove}
       />
     </div>
   );

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Montserrat, Cormorant_Garamond } from "next/font/google";
+import { Figtree, Noto_Serif_Display } from "next/font/google";
 import "./globals.css";
 import dynamic from "next/dynamic";
 import Script from "next/script";
@@ -17,27 +17,33 @@ const MobileBottomNav = dynamic(() => import("@/components/MobileBottomNav"));
 const ConsentManager = dynamic(() => import("@/components/ConsentManager"));
 import { WixClientContextProvider } from "@/context/wixContext";
 import { ToastProvider } from "@/components/Toast";
-import AnnouncementMarquee from "@/components/AnnouncementMarquee";
+import { FloatingReelProvider } from "@/components/FloatingReel";
+import AnnouncementBar from "@/components/AnnouncementBar";
 const PendingReviewFlusher = dynamic(
   () => import("@/components/PendingReviewFlusher")
 );
+// The site's single bag drawer + checkout modal (each loads on first use).
+const CommerceOverlays = dynamic(() => import("@/components/CommerceOverlays"));
 
 const SITE_URL = (
   process.env.NEXT_PUBLIC_SITE_URL || "https://www.viorajewel.in"
 ).replace(/\/$/, "");
 
-const montserrat = Montserrat({
+// Body, prices and buttons: compact and friendly, with clear numerals and a ₹ glyph.
+const bodyFont = Figtree({
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
-  variable: "--font-montserrat",
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-body",
   display: "swap",
 });
 
-const cormorant = Cormorant_Garamond({
+// Headings: high-contrast display serif. No 700 is loaded, so `font-bold`
+// headings resolve to 600 instead of looking heavy.
+const headingFont = Noto_Serif_Display({
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  weight: ["400", "500", "600"],
   style: ["normal", "italic"],
-  variable: "--font-cormorant",
+  variable: "--font-heading",
   display: "swap",
 });
 
@@ -52,7 +58,7 @@ export const metadata: Metadata = {
   // ~150 chars: fits Google's snippet without truncation, leads with a CTA and
   // the core keywords, keeps the free-shipping + exchange hooks.
   description:
-    "Shop premium artificial & fashion jewellery online — necklace sets, earrings & bridal sets for women. Free shipping across India, easy 48-hour exchange.",
+    "Shop premium artificial & fashion jewellery online — necklace sets, earrings & bridal sets for women. Free delivery on prepaid orders, COD available, 48-hour exchange.",
   applicationName: "Viora Jewel",
   keywords: [
     "Viora Jewel",
@@ -174,7 +180,7 @@ const websiteSchema = {
   publisher: { "@type": "Organization", name: "Viora Jewel" },
   potentialAction: {
     "@type": "SearchAction",
-    target: `${SITE_URL}/list?search={search_term_string}`,
+    target: `${SITE_URL}/list?q={search_term_string}`,
     "query-input": "required name=search_term_string",
   },
 };
@@ -192,7 +198,7 @@ export default function RootLayout({
   return (
     <html
       lang="en-IN"
-      className={`${montserrat.variable} ${cormorant.variable} w-full max-w-[100vw]`}
+      className={`${bodyFont.variable} ${headingFont.variable} w-full max-w-[100vw]`}
     >
       {GTM_ID && <GoogleTagManager gtmId={GTM_ID} />}
       <head>
@@ -254,7 +260,7 @@ export default function RootLayout({
           `}
         </Script>
       </head>
-      <body className={`${montserrat.className} w-full max-w-[100vw]`}>
+      <body className={`${bodyFont.className} w-full max-w-[100vw]`}>
         {/* Skip link: first focusable element, lets keyboard/screen-reader
             users jump past the nav straight to page content. Hidden until
             focused via Tab. */}
@@ -267,14 +273,17 @@ export default function RootLayout({
         <WixClientContextProvider>
           <ToastProvider>
             <PendingReviewFlusher />
-            <AnnouncementMarquee />
+            <AnnouncementBar />
 
-            <Navbar />
-            <main id="main" className="w-full max-w-[100vw] pb-20 md:pb-0">
-              {children}
-            </main>
-            <Footer />
-            <MobileBottomNav />
+            <FloatingReelProvider>
+              <Navbar />
+              <main id="main" className="w-full max-w-[100vw] pb-20 md:pb-0">
+                {children}
+              </main>
+              <Footer />
+              <MobileBottomNav />
+              <CommerceOverlays />
+            </FloatingReelProvider>
           </ToastProvider>
         </WixClientContextProvider>
         <ConsentManager />

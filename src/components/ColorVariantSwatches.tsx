@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { memo } from "react";
 
@@ -8,6 +9,8 @@ export type ColorSibling = {
   slug: string;
   name: string;
   colorLabel: string;
+  /** Main product photo — shown as the swatch so shoppers see the actual piece. */
+  image?: string;
 };
 
 // Curated palette for common color names. Falls back to neutral if a label
@@ -70,16 +73,19 @@ type Props = {
 const ColorVariantSwatches = ({ currentId, currentColor, siblings }: Props) => {
   if (!siblings || siblings.length <= 1) return null;
 
+  const activeLabel =
+    currentColor || siblings.find((s) => s.id === currentId)?.colorLabel || "";
+
   return (
     <div className="space-y-3">
-      <div className="flex items-baseline justify-between">
-        <h4 className="text-sm font-semibold uppercase tracking-wider text-[#1A1410]">
-          Choose Color
-        </h4>
-        {currentColor && (
-          <span className="text-xs text-gray-500">{currentColor}</span>
+      <p className="text-sm text-gray-600">
+        <span className="font-semibold uppercase tracking-wider text-primary">Color</span>
+        {activeLabel && (
+          <>
+            : <span className="font-semibold text-primary">{activeLabel}</span>
+          </>
         )}
-      </div>
+      </p>
       <div className="flex flex-wrap gap-3">
         {siblings.map((sib) => {
           const isActive = sib.id === currentId;
@@ -90,23 +96,33 @@ const ColorVariantSwatches = ({ currentId, currentColor, siblings }: Props) => {
               href={`/${sib.slug}`}
               scroll={false}
               aria-label={`Switch to ${sib.colorLabel}`}
-              aria-pressed={isActive}
+              aria-current={isActive ? "true" : undefined}
               title={sib.colorLabel}
-              className={`group relative inline-flex h-11 w-11 items-center justify-center rounded-full transition-transform duration-200 active:scale-90 ${
+              className={`relative block h-16 w-16 overflow-hidden bg-gray-50 transition-transform duration-200 active:scale-95 ${
                 isActive
                   ? "ring-2 ring-[#9B1B30] ring-offset-2"
-                  : "ring-1 ring-[#1A1410]/15 hover:ring-2 hover:ring-[#1A1410]/40 hover:ring-offset-2"
+                  : "ring-1 ring-gray-200 hover:ring-2 hover:ring-gray-400"
               }`}
             >
+              {sib.image ? (
+                <Image
+                  src={sib.image}
+                  alt={sib.colorLabel}
+                  fill
+                  sizes="64px"
+                  quality={60}
+                  className="object-cover"
+                />
+              ) : null}
+              {/* Colour dot — the whole swatch without a photo, a corner marker with one */}
               <span
-                className="block h-7 w-7 rounded-full border border-black/10 shadow-sm"
+                className={`absolute rounded-full border shadow-sm ${
+                  sib.image
+                    ? "bottom-1 right-1 h-3.5 w-3.5 border-white"
+                    : "inset-0 m-auto h-7 w-7 border-black/10"
+                }`}
                 style={{ backgroundColor: swatch }}
               />
-              {isActive && (
-                <span className="pointer-events-none absolute -bottom-5 text-[10px] font-semibold uppercase tracking-wider text-[#9B1B30]">
-                  Selected
-                </span>
-              )}
             </Link>
           );
         })}

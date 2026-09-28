@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { CLUB_VIORA_CODE, CLUB_VIORA_MINIMUM, CLUB_VIORA_PERCENT } from "@/lib/checkoutPricing";
 
 export type AbandonedCartItem = {
   id: string;
@@ -23,7 +24,6 @@ type Props = {
 };
 
 // const SHINE50_MIN = 700; // SHINE50 DISABLED 2026-08-17 — re-enable on/after 30 Aug 2026
-const CLUBVIORA_MIN = 999;
 
 const BuyNowConfirmModal = ({
   open,
@@ -68,11 +68,11 @@ const BuyNowConfirmModal = ({
   // Smart coupon nudge: pick the best coupon the customer becomes eligible for
   // by adding the abandoned items along with the current one.
   const couponNudge = useMemo(() => {
-    if (combinedSubtotal >= CLUBVIORA_MIN && currentProductPrice < CLUBVIORA_MIN) {
-      const saving = Math.round(combinedSubtotal * 0.1);
+    if (combinedSubtotal >= CLUB_VIORA_MINIMUM && currentProductPrice < CLUB_VIORA_MINIMUM) {
+      const saving = Math.round((combinedSubtotal * CLUB_VIORA_PERCENT) / 100);
       return {
-        code: "CLUBVIORA",
-        label: `Unlock 10% OFF (≈ ₹${saving} savings) with code CLUBVIORA`,
+        code: CLUB_VIORA_CODE,
+        label: `Unlock ${CLUB_VIORA_PERCENT}% OFF (≈ ₹${saving} savings) with code ${CLUB_VIORA_CODE}`,
       };
     }
     // SHINE50 DISABLED 2026-08-17 (deleted from Wix while Rakhi set is live). Re-enable on/after 30 Aug 2026:
@@ -114,7 +114,7 @@ const BuyNowConfirmModal = ({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-5 py-4 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-[#1A1410]">
+          <h3 className="font-inter text-base font-semibold text-[#1A1410]">
             Just a quick check
           </h3>
           <button

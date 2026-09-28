@@ -17,7 +17,7 @@ const C = {
   sub: "#7A716C", text: "#1A1410", ok: "#1E874B", bad: "#C0392B", warn: "#B8860B",
 };
 const HEADER_BG = "linear-gradient(135deg, #1A1410 0%, #5A0A18 100%)";
-const SERIF = "var(--font-cormorant), Georgia, 'Times New Roman', serif";
+const SERIF = "var(--font-heading), Georgia, 'Times New Roman', serif";
 
 // D-code catalog: display name + goods cost (base + ₹30 packaging). Base costs
 // from the Product Costs sheet; blanks are editable later.

@@ -12,7 +12,8 @@ const config: Config = {
         "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
         "gradient-conic":
           "conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))",
-        "viora-gradient": "linear-gradient(135deg, #F8F8F8 0%, #EFE4CE 55%, #F5E8E2 100%)",
+        // Beige stops removed — off-white only (brand request 2026-09-15).
+        "viora-gradient": "linear-gradient(135deg, #FFFFFF 0%, #F8F8F8 100%)",
         "viora-gradient-dark": "linear-gradient(135deg, #1A1410 0%, #5A0A18 100%)",
       },
       colors: {
@@ -22,10 +23,14 @@ const config: Config = {
           dark: "#0F0B08",
         },
         silver: {
+          // Champagne-gold accent (text and buttons on dark sections).
           DEFAULT: "#C9A66B",
-          light: "#EFE4CE",
+          // Neutral grey for borders and dividers — was beige #EFE4CE. Beige panels now use
+          // bg-platinum (#F8F8F8) instead (brand request 2026-09-15).
+          light: "#E8E8E8",
           dark: "#A9844C",
-          muted: "#F5E8E2",
+          // Neutral grey — was blush beige #F5E8E2.
+          muted: "#E8E8E8",
         },
         platinum: {
           // Off-white (was the warm "beach" cream #F5F1EA) — brand request 2026-09-11.
@@ -40,8 +45,10 @@ const config: Config = {
         },
       },
       fontFamily: {
-        playfair: ["var(--font-cormorant)", "Cormorant Garamond", "serif"],
-        inter: ["var(--font-montserrat)", "Montserrat", "sans-serif"],
+        // Class names are historical: `font-playfair` = headings, `font-inter` = body.
+        playfair: ["var(--font-heading)", "Georgia", "serif"],
+        inter: ["var(--font-body)", "system-ui", "sans-serif"],
+        sans: ["var(--font-body)", "system-ui", "sans-serif"],
       },
       animation: {
         "fade-in": "fade-in 0.5s ease-out forwards",
@@ -54,7 +61,7 @@ const config: Config = {
       boxShadow: {
         'premium': '0 4px 20px rgba(0, 0, 0, 0.08)',
         'premium-hover': '0 8px 30px rgba(0, 0, 0, 0.12)',
-        'silver': '0 4px 15px rgba(201, 166, 107, 0.24)',
+        'silver': '0 4px 15px rgba(0, 0, 0, 0.08)',
       },
     },
   },

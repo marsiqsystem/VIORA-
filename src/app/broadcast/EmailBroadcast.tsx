@@ -26,7 +26,7 @@ const C = {
   bad: "#C0392B",
 };
 const GOLD_BG = "linear-gradient(135deg, #C9A66B 0%, #A9844C 100%)";
-const SERIF = "var(--font-cormorant), Georgia, 'Times New Roman', serif";
+const SERIF = "var(--font-heading), Georgia, 'Times New Roman', serif";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024; // 3 MB — keep the per-batch payload sane

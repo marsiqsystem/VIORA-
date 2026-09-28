@@ -1,18 +1,35 @@
 "use client";
 
 import { products } from "@wix/stores";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode, RefObject } from "react";
+import dynamic from "next/dynamic";
 import { trackMetaEvent } from "@/lib/metaEvents";
 import { rememberMetaCatalogId } from "@/lib/metaCatalogId";
-import dynamic from "next/dynamic";
+import { htmlToText } from "@/lib/htmlToText";
+import {
+    COD_CHARGE,
+    PREPAID_DISCOUNT,
+} from "@/lib/checkoutPricing";
+import { whatsappLink } from "@/lib/contact";
+import { DISPATCH_CUTOFF_LABEL } from "@/lib/deliveryEstimate";
+import { useSocialProof } from "@/hooks/useSocialProof";
+import type { ReviewSnippet } from "@/lib/reviewSnippets";
 import ProductImages from "./ProductImages";
 import CustomizeProducts from "./CustomizeProducts";
 import Add from "./Add";
 import ColorVariantSwatches, { ColorSibling } from "./ColorVariantSwatches";
+import PairItWith from "./PairItWith";
+import ProductOffers from "./ProductOffers";
+import DeliveryTimeline from "./product/DeliveryTimeline";
+import PaymentMethods from "./product/PaymentMethods";
+import ReviewSnippets from "./product/ReviewSnippets";
+import type { PairItem } from "./PairItWith";
+import type { ProductReel } from "./ProductReels";
+import { useProductFloatingReel } from "./FloatingReel";
 import type { PublicReview } from "@/lib/reviewsTypes";
 
 // Below-the-fold / non-critical: defer JS so initial product page is faster.
-const TrustBadges = dynamic(() => import("./TrustBadges"), { ssr: true });
 const ReviewsSection = dynamic(() => import("./ReviewsSection"), {
   ssr: false,
   loading: () => (
@@ -22,8 +39,140 @@ const ReviewsSection = dynamic(() => import("./ReviewsSection"), {
 const StickyAddToCart = dynamic(() => import("./StickyAddToCart"), {
   ssr: false,
 });
+const ProductReels = dynamic(() => import("./ProductReels"), { ssr: false });
 
 const STICKY_TRIGGER_ID = "product-actions-anchor";
+
+const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || "https://www.viorajewel.in").replace(/\/$/, "");
+
+// Same material facts as the FAQ and Material & Care below.
+const BENEFITS = [
+    "Rhodium-plated brass with a bright, lasting shine",
+    "Original stones that catch the light",
+    "Skin-friendly for everyday wear",
+];
+
+// Wix stock at or below this shows "Only N left" above the colours.
+const LOW_STOCK_MAX = 5;
+
+const ICON = {
+    truck: "M3 7h11v10H3zM14 10h4l3 3v4h-7M7.5 19.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM17.5 19.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z",
+    cash: "M3 6h18v12H3zM12 14.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM6 12h.01M18 12h.01",
+    exchange: "M3 12a9 9 0 019-9 9 9 0 018 5M21 12a9 9 0 01-9 9 9 9 0 01-8-5M3 4v4h4M21 20v-4h-4",
+    shield: "M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3zM9.5 12l1.8 1.8L15 10",
+    check: "M20 6L9 17l-5-5",
+    lock: "M5 11h14v10H5zM8 11V7a4 4 0 018 0v4",
+    share: "M4 12v8h16v-8M12 3v13M7 8l5-5 5 5",
+    sparkle: "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z",
+};
+
+const TRUST_ITEMS = [
+    { label: "Free delivery", sub: "When you pay online", d: ICON.truck },
+    { label: "Cash on delivery", sub: `Available, ₹${COD_CHARGE} extra`, d: ICON.cash },
+    { label: "48-hour exchange", sub: "If damaged or wrong", d: ICON.exchange },
+    { label: "Secure checkout", sub: "UPI & cards by Razorpay", d: ICON.shield },
+];
+
+// Shown only for products without their own "Care Instructions" section in
+// Wix. Same material/care facts as the FAQ (src/components/FaqSection.tsx).
+const MATERIAL_AND_CARE = [
+    "Premium brass with rhodium plating for a bright, lasting finish, set with original glass stones",
+    "Skin-friendly for everyday wear — if you have known metal sensitivities, patch test first",
+    "Wipe with a soft, dry cloth after each use",
+    "Keep away from water, perfume, sweat and harsh chemicals",
+    "Store in a dry, airtight pouch or box — with care, the polish lasts 1.5–2 years",
+];
+
+const STAR_PATH =
+    "M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z";
+
+// Wix rich text has no typography plugin to lean on, so style its tags directly.
+const RICH_TEXT =
+    "text-sm leading-relaxed text-gray-600 [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_strong]:text-primary [&_ul]:list-disc [&_ul]:pl-5";
+
+const Icon = ({ d, className = "h-5 w-5" }: { d: string; className?: string }) => (
+    <svg
+        className={className}
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+    >
+        <path d={d} />
+    </svg>
+);
+
+// Native share sheet on phones (WhatsApp, Instagram…); WhatsApp link elsewhere.
+const ShareButton = ({ name, slug }: { name: string; slug: string }) => {
+    const share = async () => {
+        const url = `${SITE_URL}/${slug}`;
+        const text = `Look at this ${name} from Viora Jewel — what do you think?`;
+        if (typeof navigator !== "undefined" && navigator.share) {
+            try {
+                await navigator.share({ title: name, text, url });
+            } catch {
+                // Shopper closed the share sheet — nothing to do.
+            }
+            return;
+        }
+        window.open(
+            `https://wa.me/?text=${encodeURIComponent(`${text} ${url}`)}`,
+            "_blank",
+            "noopener,noreferrer"
+        );
+    };
+
+    return (
+        <button
+            type="button"
+            onClick={share}
+            className="flex items-center gap-2.5 rounded-lg border border-gray-200 px-3 py-2.5 text-left transition-colors hover:border-primary"
+        >
+            <Icon d={ICON.share} className="h-5 w-5 flex-shrink-0 text-primary" />
+            <span className="text-xs leading-tight">
+                <span className="block font-semibold text-primary">Ask a friend</span>
+                <span className="text-gray-500">Share for a second opinion</span>
+            </span>
+        </button>
+    );
+};
+
+const Accordion = ({
+    title,
+    defaultOpen = false,
+    detailsRef,
+    children,
+}: {
+    title: string;
+    defaultOpen?: boolean;
+    detailsRef?: RefObject<HTMLDetailsElement>;
+    children: ReactNode;
+}) => (
+    <details
+        ref={detailsRef}
+        open={defaultOpen}
+        className="group scroll-mt-24 border-b border-gray-200"
+    >
+        <summary className="flex cursor-pointer list-none items-center justify-between py-4 [&::-webkit-details-marker]:hidden">
+            <h3 className="font-inter text-sm font-semibold uppercase tracking-wider text-primary">
+                {title}
+            </h3>
+            <svg
+                className="h-5 w-5 text-gray-400 transition-transform group-open:rotate-180"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                aria-hidden="true"
+            >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+        </summary>
+        <div className="pb-5">{children}</div>
+    </details>
+);
 
 interface ProductViewProps {
     product: products.Product;
@@ -32,12 +181,22 @@ interface ProductViewProps {
     displayName?: string;
     isBestSeller?: boolean;
     initialReviews?: PublicReview[];
+    pairWith?: PairItem[];
+    reels?: ProductReel[];
+    /** Occasion labels from the product's Wix collections, e.g. "Weddings & receptions". */
+    occasions?: string[];
+    /** Earrings vs sets — decides the festive-combo copy. */
+    /** Real 4★+ review quotes (this design first) for the top of the page. */
+    reviewSnippets?: ReviewSnippet[];
 }
 
-const ProductView = ({ product, colorSiblings = [], currentColor = "", displayName, isBestSeller = false, initialReviews = [] }: ProductViewProps) => {
+const ProductView = ({ product, colorSiblings = [], currentColor = "", displayName, isBestSeller = false, initialReviews = [], pairWith = [], reels = [], occasions = [], reviewSnippets = [] }: ProductViewProps) => {
     const [selectedOptions, setSelectedOptions] = useState<{
         [key: string]: string;
     }>({});
+    const descriptionRef = useRef<HTMLDetailsElement>(null);
+    // Real orders this week — the API only returns counts of 3 or more.
+    const weekOrders = useSocialProof().byProduct[product._id || ""] || 0;
 
     // Descriptive image alt text. Product photos previously all carried alt="product",
     // which tells Google Images nothing and fails screen readers.
@@ -45,6 +204,7 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
     const altName = [baseName, currentColor && `in ${currentColor}`]
         .filter(Boolean)
         .join(" ");
+    const slug = product.slug || "";
 
     // The ID our Meta catalog keys on is the product's URL SLUG, not the Wix
     // GUID. Send the slug on every Meta event so events match a catalog product
@@ -69,8 +229,11 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
         });
     }, [product?._id, product?.slug, metaContentId, product?.name, product?.price?.discountedPrice, product?.price?.price]);
 
-    // Get all media items from the product
-    const allMediaItems = product.media?.items || [];
+    // Photos only — product videos are shown in the reels row instead.
+    const allMediaItems = useMemo(
+        () => (product.media?.items || []).filter((item) => !!item.image?.url),
+        [product.media?.items]
+    );
 
     // Filter media items based on selected options
     const filteredMediaItems = useMemo(() => {
@@ -122,8 +285,25 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
 
     const actualPrice = product.price?.price || 0;
     const discountedPrice = product.price?.discountedPrice || null;
-    const hasDiscount = discountedPrice && discountedPrice < actualPrice;
+    const hasDiscount = !!discountedPrice && discountedPrice < actualPrice;
     const currentSellingPrice = hasDiscount ? discountedPrice : actualPrice;
+    const discountPercent = hasDiscount
+        ? Math.round(((actualPrice - currentSellingPrice) / actualPrice) * 100)
+        : 0;
+    const mrpSaving = hasDiscount ? actualPrice - currentSellingPrice : 0;
+
+    // Prepaid vs COD, from the same constants the checkout charges with.
+    const prepaidPrice = Math.max(0, currentSellingPrice - PREPAID_DISCOUNT);
+
+    // The site-wide floating reel shows only this product's videos here (none → hidden).
+    useProductFloatingReel(
+        reels.length
+            ? {
+                  items: reels.map((r) => ({ ...r, productName: baseName, price: currentSellingPrice, prepaidPrice })),
+                  shopTargetSelector: `#${STICKY_TRIGGER_ID}`,
+              }
+            : null
+    );
 
     // Real rating + count derived from initialReviews (Wix Reviews).
     const realReviewCount = initialReviews.length;
@@ -132,239 +312,223 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
             ? initialReviews.reduce((s, r) => s + (r.rating || 0), 0) / realReviewCount
             : 0;
     const hasRealReviews = realReviewCount > 0;
-    const ratingForDisplay = hasRealReviews ? realAvgRating.toFixed(1) : null;
     const filledStars = hasRealReviews ? Math.round(realAvgRating) : 0;
 
-    return (
-        <>
-            {/* Top trust strip — the three promises that matter most, up front.
-                Kept quiet and premium (hairline card, no loud colour) so it
-                reassures without shouting. */}
-            <div className="mb-6 grid grid-cols-3 divide-x divide-gray-200 overflow-hidden rounded-lg border border-gray-200 bg-white/70">
-                {[
-                    {
-                        t: "Free Shipping",
-                        s: "On prepaid orders",
-                        d: "M3 7h11v10H3zM14 10h4l3 3v4h-7M7.5 19.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM17.5 19.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z",
-                    },
-                    {
-                        t: "48-Hr Exchange",
-                        s: "Damaged / wrong item",
-                        d: "M3 12a9 9 0 019-9 9 9 0 018 5M21 12a9 9 0 01-9 9 9 9 0 01-8-5M3 4v4h4M21 20v-4h-4",
-                    },
-                    {
-                        t: "100% Secure",
-                        s: "Safe checkout",
-                        d: "M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3zM9.5 12l1.8 1.8L15 10",
-                    },
-                ].map((x) => (
-                    <div
-                        key={x.t}
-                        className="flex flex-col items-center gap-1 px-2 py-3 text-center"
-                    >
-                        <svg
-                            className="h-5 w-5 text-primary"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={1.5}
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                        >
-                            <path d={x.d} />
-                        </svg>
-                        <span className="text-[11px] font-semibold leading-tight text-primary sm:text-xs">
-                            {x.t}
-                        </span>
-                        <span className="text-[10px] leading-tight text-gray-500">
-                            {x.s}
-                        </span>
-                    </div>
-                ))}
-            </div>
+    const descriptionText = useMemo(
+        () => htmlToText(product.description || ""),
+        [product.description]
+    );
 
-            <div className="flex flex-col lg:flex-row lg:items-start gap-8 lg:gap-16">
+    // Wix "additional info" sections (Set Includes, Key Features, Care
+    // Instructions, Style Tip, Occasion…). "shortDesc" is card copy, not a section.
+    const infoSections = (product.additionalInfoSections || []).filter(
+        (s) => s.title && s.description && s.title !== "shortDesc"
+    );
+    const hasCareSection = infoSections.some((s) => /care/i.test(s.title || ""));
+
+    const openDescription = () => {
+        const el = descriptionRef.current;
+        if (!el) return;
+        el.open = true;
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+
+    // Real Wix stock: the selected option's variant when the piece has options
+    // (same rule as CustomizeProducts), otherwise the product's tracked quantity.
+    const hasOptions = !!(product.variants && product.productOptions);
+    const onlyDefaultVariant =
+        product.variants?.length === 1 && Object.keys(product.variants[0].choices || {}).length === 0
+            ? product.variants[0]
+            : undefined;
+    const selectedVariant = hasOptions
+        ? product.variants!.find(
+              (v) =>
+                  !!v.choices &&
+                  Object.entries(selectedOptions).every(([k, val]) => v.choices![k] === val)
+          ) || onlyDefaultVariant
+        : undefined;
+    const stockQuantity = hasOptions
+        ? selectedVariant?.stock?.quantity
+        : product.stock?.trackInventory === true
+          ? product.stock?.quantity
+          : undefined;
+    const lowStockLeft =
+        typeof stockQuantity === "number" && stockQuantity > 0 && stockQuantity <= LOW_STOCK_MAX
+            ? stockQuantity
+            : 0;
+
+    const stockOut =
+        // Only flag as sold out when Wix explicitly says inStock: false
+        // OR when inventory IS tracked and quantity has reached 0.
+        // Products that don't track inventory have undefined quantity —
+        // the old `(quantity || 0) < 1` was wrongly marking those as
+        // sold out, which is why every product showed "SOLD OUT".
+        product.stock?.inStock === false ||
+        (product.stock?.trackInventory === true &&
+            (product.stock?.quantity ?? 0) < 1);
+
+    return (
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-10">
             {/* Images — pins to viewport while right column (details/reviews) scrolls.
                 `lg:self-start lg:h-fit` keeps the column from stretching to the full
                 grid height (which is what previously broke the sticky lock and left
                 blank space below the image on long pages). */}
             {/*
               Full-bleed mobile: w-screen + relative left-1/2 -translate-x-1/2 escapes
-              ANY parent padding (container-responsive px-4) and locks the gallery to
-              exactly the viewport width. overflow-hidden contains the swipe gesture
-              so no horizontal page scroll appears as a "white gap" on the right.
-              Desktop (md+) restores normal in-flow column behavior.
+              the parent's px-4 and locks the gallery to exactly the viewport width.
+              overflow-hidden contains the swipe gesture so no horizontal page scroll
+              appears as a "white gap" on the right. md+ restores in-flow behaviour.
             */}
-            <div className="relative left-1/2 -translate-x-1/2 w-screen max-w-[100vw] overflow-hidden md:left-auto md:translate-x-0 md:w-full md:max-w-none md:overflow-visible lg:w-1/2 lg:sticky lg:top-32 lg:self-start lg:h-fit">
-                <ProductImages items={filteredMediaItems} isBestSeller={isBestSeller} rating={hasRealReviews ? realAvgRating : undefined} productName={altName} />
+            <div className="relative left-1/2 -translate-x-1/2 w-screen max-w-[100vw] overflow-hidden md:left-auto md:translate-x-0 md:w-full md:max-w-none md:overflow-visible lg:w-[55%] lg:flex-shrink-0 lg:sticky lg:top-32 lg:self-start lg:h-fit">
+                <ProductImages
+                    items={filteredMediaItems}
+                    isBestSeller={isBestSeller}
+                    ribbon={product.ribbon || ""}
+                    discountPercent={discountPercent}
+                    reelCount={reels.length}
+                    productName={altName}
+                />
             </div>
 
-            {/* Details */}
-            <div className="w-full lg:w-1/2 flex flex-col gap-6">
-                {/* Title & Badge */}
+            {/* Details — ordered for buying: what it is → price → prepaid offer →
+                colour → buy → delivery/trust → share → videos →
+                add to your order → details → reviews. */}
+            <div className="flex w-full min-w-0 flex-col gap-6 lg:flex-1">
+                {/* Name, stars, chips, summary */}
                 <div>
-                    {/* Badge hidden
-                    <span className="inline-block bg-gray-900 text-white text-xs font-bold px-3 py-1 rounded-sm mb-3 shadow-sm">
-                        -{fakeDiscountPercent}% OFF
-                    </span>
-                    */}
                     <h1 className="text-2xl md:text-3xl lg:text-4xl font-playfair font-bold text-primary leading-tight">
-                        {displayName || (product.name || "").split(" - ")[0].trim()}
+                        {baseName}
                     </h1>
 
-                    {/* Brand tagline — a soft value line under the name, styled to
-                        read as elegant, not as an ad. */}
-                    <p className="mt-1.5 font-playfair text-sm italic text-gray-500">
-                        Everyday elegance, crafted to be kind to your skin.
-                    </p>
-
-                    {/* Social Proof Text — rating shown only when real reviews exist */}
-                    {hasRealReviews ? (
-                        <p className="mt-2 text-sm text-gray-600 font-medium">
-                            ⭐ {ratingForDisplay} ({realReviewCount} {realReviewCount === 1 ? "review" : "reviews"})
-                        </p>
-                    ) : (
-                        <p className="mt-2 text-sm text-gray-500 font-medium">
-                            New arrival
-                        </p>
-                    )}
-                </div>
-
-                {/* Benefit trio — the three reasons this piece is worth it, as
-                    icon cards. Replaces the old flat text pills; claims are the
-                    real material story (brass + rhodium + glass stones). */}
-                <div className="grid grid-cols-3 gap-2">
-                    {[
-                        {
-                            label: "Skin-Friendly",
-                            sub: "Hypoallergenic",
-                            d: "M12 21c-4-1.5-7-4.8-7-9V6l7-3 7 3v6c0 4.2-3 7.5-7 9z",
-                        },
-                        {
-                            label: "Rhodium Plated",
-                            sub: "Lasting shine",
-                            d: "M12 3l2.5 5 5.5.8-4 3.9.9 5.5L12 21l-4.9-2.3.9-5.5-4-3.9 5.5-.8L12 3z",
-                        },
-                        {
-                            label: "Original Stones",
-                            sub: "Premium glass",
-                            d: "M6 3h12l3 6-9 12L3 9l3-6zM3 9h18M12 21L8 9l2-6M12 21l4-12-2-6",
-                        },
-                    ].map((b) => (
-                        <div
-                            key={b.label}
-                            className="flex flex-col items-center gap-1 rounded-lg border border-gray-200 bg-gray-50/60 px-2 py-3 text-center"
-                        >
-                            <svg
-                                className="h-5 w-5 text-primary"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                                strokeWidth={1.5}
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                            >
-                                <path d={b.d} />
-                            </svg>
-                            <span className="text-[11px] font-semibold leading-tight text-gray-800 sm:text-xs">
-                                {b.label}
-                            </span>
-                            <span className="text-[10px] leading-tight text-gray-500">
-                                {b.sub}
-                            </span>
-                        </div>
-                    ))}
-                </div>
-
-                {/* Honest trust line — no invented customer counts or stock
-                    faces; "Verified reviews" only appears once real reviews exist. */}
-                <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                    <svg
-                        className="h-4 w-4 flex-shrink-0 text-primary"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={1.5}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
+                    <a
+                        href="#reviews"
+                        className="mt-1.5 inline-flex items-center gap-2 text-sm"
+                        aria-label={
+                            hasRealReviews
+                                ? `Rated ${realAvgRating.toFixed(1)} out of 5 from ${realReviewCount} ${realReviewCount === 1 ? "review" : "reviews"}`
+                                : "No reviews yet — be the first to review"
+                        }
                     >
-                        <path d="M9 12l2 2 4-4M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z" />
-                    </svg>
-                    <span>
-                        Trusted by shoppers across India
-                        {hasRealReviews ? " · Verified reviews" : ""}
-                    </span>
-                </div>
-
-                {/* Rating — shown only when real reviews exist */}
-                {hasRealReviews && (
-                    <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-0.5">
+                        <span className="flex items-center gap-0.5" aria-hidden="true">
                             {[1, 2, 3, 4, 5].map((star) => (
                                 <svg
                                     key={star}
-                                    className={`w-5 h-5 ${star <= filledStars ? "text-accent" : "text-gray-200"}`}
+                                    className={`h-[18px] w-[18px] ${star <= filledStars ? "text-amber-400" : "text-gray-300"}`}
                                     fill="currentColor"
                                     viewBox="0 0 20 20"
                                 >
-                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                                    <path d={STAR_PATH} />
                                 </svg>
                             ))}
+                        </span>
+                        {hasRealReviews ? (
+                            <span aria-hidden="true">
+                                <span className="font-semibold text-gray-800">{realAvgRating.toFixed(1)}</span>
+                                <span className="ml-1 text-gray-500">
+                                    ({realReviewCount} {realReviewCount === 1 ? "review" : "reviews"})
+                                </span>
+                            </span>
+                        ) : (
+                            <span aria-hidden="true" className="text-gray-500 underline-offset-2 hover:underline">
+                                {reviewSnippets.length > 0 ? "Be the first to review this colour" : "Be the first to review"}
+                            </span>
+                        )}
+                    </a>
+
+                    {weekOrders > 0 && (
+                        <p className="mt-2.5">
+                            <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/5 px-3 py-1 text-xs font-semibold text-accent">
+                                <Icon d={ICON.check} className="h-3.5 w-3.5" />
+                                Ordered {weekOrders} times this week
+                            </span>
+                        </p>
+                    )}
+
+                    <ul className="mt-3 space-y-1.5">
+                        {BENEFITS.map((b) => (
+                            <li key={b} className="flex items-center gap-2 text-sm text-gray-700">
+                                <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-accent text-white">
+                                    <Icon d={ICON.check} className="h-2.5 w-2.5" />
+                                </span>
+                                {b}
+                            </li>
+                        ))}
+                    </ul>
+
+                    {occasions.length > 0 && (
+                        <p className="mt-2.5 flex items-center gap-1.5 text-sm text-gray-600">
+                            <Icon d={ICON.sparkle} className="h-4 w-4 flex-shrink-0 text-silver-dark" />
+                            <span>
+                                Perfect for{" "}
+                                <span className="font-semibold text-primary">{occasions.join(" · ")}</span>
+                            </span>
+                        </p>
+                    )}
+
+                    {descriptionText && (
+                        <div className="mt-3 text-sm leading-relaxed text-gray-600">
+                            <p className="line-clamp-2">{descriptionText}</p>
+                            <button
+                                type="button"
+                                onClick={openDescription}
+                                className="mt-1 font-semibold text-accent underline-offset-2 hover:underline"
+                            >
+                                Read more
+                            </button>
                         </div>
-                        <span className="text-sm text-gray-500 font-medium">({realReviewCount} {realReviewCount === 1 ? "review" : "reviews"})</span>
-                    </div>
-                )}
-
-                {/* Description */}
-                <div
-                    className="text-gray-700 leading-relaxed font-sans tracking-wide prose prose-stone prose-sm max-w-none prose-p:my-2 prose-headings:font-playfair"
-                    dangerouslySetInnerHTML={{
-                        __html: product.description || "",
-                    }}
-                />
-
-                <div className="h-px bg-gray-100" />
-
-                {/* Price */}
-                <div className="flex items-baseline flex-wrap gap-3 mt-2">
-                    <span className="text-3xl md:text-4xl font-bold text-primary">
-                        ₹{currentSellingPrice}
-                    </span>
-                    {hasDiscount && (
-                        <>
-                            <span className="text-xl text-gray-400 line-through font-medium">
-                                ₹{actualPrice}
-                            </span>
-                            <span className="text-green-700 bg-green-50 font-bold px-2.5 py-1 rounded-md text-sm border border-green-200 shadow-sm ml-1">
-                                Save {Math.round(((actualPrice - currentSellingPrice) / actualPrice) * 100)}%
-                            </span>
-                        </>
                     )}
                 </div>
 
-                {/* UPI Offer Strip */}
-                <div className="bg-green-50 border border-green-200 text-green-800 text-sm p-2.5 rounded flex items-center gap-2">
-                    <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z" />
-                    </svg>
-                    <span>🎉 FREE Shipping + Extra ₹25 OFF on Prepaid Payments</span>
+                {/* Price */}
+                <div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span className="text-3xl md:text-4xl font-bold text-primary">
+                            ₹{currentSellingPrice}
+                        </span>
+                        {hasDiscount && (
+                            <>
+                                <span className="text-lg text-gray-400 line-through">
+                                    ₹{actualPrice}
+                                </span>
+                                <span className="rounded-md bg-accent px-2.5 py-1 text-sm font-bold text-white">
+                                    {discountPercent}% OFF
+                                </span>
+                            </>
+                        )}
+                    </div>
+                    <p className="mt-1 text-xs text-gray-500">
+                        Inclusive of all taxes
+                        {mrpSaving > 0 && (
+                            <>
+                                {" · "}
+                                <span className="font-semibold text-green-700">You save ₹{mrpSaving}</span>
+                            </>
+                        )}
+                    </p>
                 </div>
 
-                <div className="h-px bg-gray-100" />
+                <ReviewSnippets snippets={reviewSnippets} />
+
+                {/* Pay-online deal, spend-more cards, festive combo */}
+                <ProductOffers price={currentSellingPrice} productId={product._id!} />
+
+                {lowStockLeft > 0 && (
+                    <p className="-mb-3 flex items-center gap-2 text-sm font-semibold text-red-700">
+                        <span className="h-2 w-2 animate-pulse rounded-full bg-red-600" aria-hidden="true" />
+                        Only {lowStockLeft} left in stock
+                    </p>
+                )}
 
                 {/* Color siblings (Wix 15-image bypass — grouped by Base Name) */}
                 {colorSiblings.length > 1 && (
-                    <>
-                        <ColorVariantSwatches
-                            currentId={product._id!}
-                            currentColor={currentColor}
-                            siblings={colorSiblings}
-                        />
-                        <div className="h-px bg-gray-100" />
-                    </>
+                    <ColorVariantSwatches
+                        currentId={product._id!}
+                        currentColor={currentColor}
+                        siblings={colorSiblings}
+                    />
                 )}
 
-                {/* Options & Add to Cart */}
+                {/* Options & buy buttons */}
                 <div id={STICKY_TRIGGER_ID}>
                     {product.variants && product.productOptions ? (
                         <CustomizeProducts
@@ -377,6 +541,7 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                             variants={product.variants || []}
                             productOptions={product.productOptions || []}
                             onOptionChange={handleOptionChange}
+                            lowStockShownAbove={lowStockLeft > 0}
                         />
                     ) : (
                         <Add
@@ -394,213 +559,133 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                             productPrice={
                                 product.price?.discountedPrice || product.price?.price || 0
                             }
+                            lowStockShownAbove={lowStockLeft > 0}
                         />
                     )}
+                    <PaymentMethods className="mt-4" />
                 </div>
 
-                <TrustBadges />
-
-                {/* Native Trust & Delivery Section */}
-                <div className="border border-gray-100 rounded-lg p-4 bg-gray-50/50">
-                    <div className="flex items-center gap-2 mb-3 text-sm text-gray-700 font-medium">
-                        <svg className="w-4 h-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h11v10H3zM14 10h4l3 3v4h-7" />
-                            <circle cx="7.5" cy="17.5" r="1.5" />
-                            <circle cx="17.5" cy="17.5" r="1.5" />
-                        </svg>
-                        🚚 Delivery within 6-7 days
-                    </div>
-                    <div className="flex flex-wrap gap-4">
-                        <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-                                <rect x="3" y="11" width="18" height="10" rx="2" />
-                                <path d="M7 11V8a5 5 0 0110 0v3" />
-                            </svg>
-                            Secure Payment
-                        </div>
-                        <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M3 12a9 9 0 109 9" />
-                                <path d="M3 4v5h5" />
-                            </svg>
-                            Easy Exchange
-                        </div>
-                        <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-                                <rect x="3" y="6" width="18" height="12" rx="2" />
-                                <circle cx="12" cy="12" r="2.5" />
-                                <path d="M6 12h.01M18 12h.01" />
-                            </svg>
-                            COD Available
-                        </div>
-                    </div>
-                </div>
-
-                {/* Why Viora? — the buying rationale as a scannable checklist.
-                    Uses the genuine product story; keep it factual, not hype. */}
-                <div className="rounded-lg border border-gray-100 bg-white p-4">
-                    <h3 className="mb-3 font-playfair text-lg font-semibold text-primary">
-                        Why Viora?
-                    </h3>
-                    <ul className="space-y-2.5">
-                        {[
-                            "Premium brass with rhodium plating for a lasting, bright finish",
-                            "Skin-friendly & hypoallergenic — comfortable for daily wear",
-                            "Tarnish-resistant so it keeps its shine longer",
-                            "Arrives gift-ready in premium packaging",
-                        ].map((point) => (
-                            <li
-                                key={point}
-                                className="flex items-start gap-2.5 text-sm text-gray-700"
-                            >
-                                <svg
-                                    className="mt-0.5 h-4 w-4 flex-shrink-0 text-green-600"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                    strokeWidth={2}
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                >
-                                    <path d="M20 6L9 17l-5-5" />
-                                </svg>
-                                <span>{point}</span>
+                {/* Trust tiles, delivery timeline with the real dispatch cutoff, WhatsApp help */}
+                <div>
+                    <ul className="grid grid-cols-2 gap-2">
+                        {TRUST_ITEMS.map((x) => (
+                            <li key={x.label} className="flex items-center gap-2.5 bg-platinum px-3 py-3">
+                                <Icon d={x.d} className="h-6 w-6 flex-shrink-0 text-primary" />
+                                <span className="min-w-0 leading-tight">
+                                    <span className="block text-[13px] font-semibold text-primary">{x.label}</span>
+                                    <span className="block text-[11px] text-gray-500">{x.sub}</span>
+                                </span>
                             </li>
                         ))}
                     </ul>
+                    <div className="mt-4 rounded-lg border border-gray-200 p-4">
+                        <DeliveryTimeline />
+                        <a
+                            href={whatsappLink(
+                                `Hi Viora! I'd like to know more about the ${baseName}: ${SITE_URL}/${slug}`
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-4 flex items-center justify-center gap-2 border-t border-gray-100 pt-3 text-sm font-medium text-green-700 hover:underline"
+                        >
+                            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path d="M17.47 14.38c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.67-1.61-.92-2.21-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.8.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.88 1.21 3.08c.15.2 2.1 3.2 5.08 4.49.71.31 1.26.49 1.7.63.71.23 1.36.2 1.87.12.57-.09 1.76-.72 2-1.41.25-.7.25-1.29.17-1.41-.07-.13-.27-.2-.57-.35zM12.04 21.5h-.01a9.5 9.5 0 01-4.84-1.33l-.35-.2-3.6.94.96-3.5-.23-.36a9.46 9.46 0 01-1.45-5.05c0-5.24 4.27-9.5 9.52-9.5a9.46 9.46 0 019.5 9.51c0 5.24-4.27 9.5-9.5 9.5zm8.08-17.58A11.35 11.35 0 0012.04.5C5.74.5.62 5.62.61 11.92c0 2.01.53 3.98 1.53 5.71L.5 23.5l6.02-1.58a11.4 11.4 0 005.51 1.4h.01c6.3 0 11.42-5.12 11.43-11.42a11.35 11.35 0 00-3.35-8.08z" />
+                            </svg>
+                            Want a closer look? Chat with us on WhatsApp
+                        </a>
+                    </div>
                 </div>
 
-                {/* Additional Info (Care Instructions etc. from Wix) */}
-                {product.additionalInfoSections?.map((section: any) => (
-                    <div
-                        className="border-t border-gray-100 pt-6"
-                        key={section.title}
-                    >
-                        <details className="group">
-                            <summary className="flex items-center justify-between cursor-pointer list-none">
-                                <h4 className="font-semibold text-lg text-primary font-playfair">
-                                    {section.title}
-                                </h4>
-                                <svg
-                                    className="w-5 h-5 text-gray-400 group-open:rotate-180 transition-transform"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M19 9l-7 7-7-7"
-                                    />
-                                </svg>
-                            </summary>
-                            <div
-                                className="mt-4 text-gray-600 leading-relaxed prose prose-sm max-w-none"
-                                dangerouslySetInnerHTML={{
-                                    __html: section.description || "",
-                                }}
-                            />
-                        </details>
-                    </div>
-                ))}
+                <ProductReels
+                    reels={reels}
+                    productName={baseName}
+                    price={currentSellingPrice}
+                    prepaidPrice={prepaidPrice}
+                    shopTargetSelector={`#${STICKY_TRIGGER_ID}`}
+                />
 
-                {/* Reviews */}
+                <ShareButton name={baseName} slug={slug} />
+
+                <PairItWith
+                    items={pairWith}
+                    current={{
+                        id: product._id!,
+                        slug: metaContentId,
+                        name: product.name || "",
+                        price: currentSellingPrice,
+                        variantId: selectedVariant?._id || undefined,
+                        options: Object.keys(selectedOptions).length ? selectedOptions : undefined,
+                        canAdd:
+                            !stockOut &&
+                            !(hasOptions && Object.keys(selectedOptions).length < (product.productOptions?.length || 0)),
+                    }}
+                />
+
+                {/* Details */}
+                <div className="border-t border-gray-200">
+                    {product.description && (
+                        <Accordion title="Description" detailsRef={descriptionRef}>
+                            <div
+                                className={RICH_TEXT}
+                                dangerouslySetInnerHTML={{ __html: product.description }}
+                            />
+                        </Accordion>
+                    )}
+
+                    {infoSections.map((section, i) => (
+                        <Accordion key={section.title} title={section.title!} defaultOpen={i === 0}>
+                            <div
+                                className={RICH_TEXT}
+                                dangerouslySetInnerHTML={{ __html: section.description || "" }}
+                            />
+                        </Accordion>
+                    ))}
+
+                    {!hasCareSection && (
+                        <Accordion title="Material & Care">
+                            <ul className="space-y-2">
+                                {MATERIAL_AND_CARE.map((point) => (
+                                    <li key={point} className="flex items-start gap-2.5 text-sm text-gray-600">
+                                        <Icon d={ICON.check} className="mt-0.5 h-4 w-4 flex-shrink-0 text-green-600" />
+                                        <span>{point}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </Accordion>
+                    )}
+
+                    <Accordion title="Shipping & Exchange">
+                        <ul className="space-y-2 text-sm text-gray-600">
+                            <li>
+                                <strong className="text-primary">Free delivery</strong> on prepaid
+                                orders. Cash on Delivery available with a ₹{COD_CHARGE} charge.
+                            </li>
+                            <li>
+                                Orders placed before {DISPATCH_CUTOFF_LABEL} ship the same day (Monday to
+                                Saturday), then usually arrive in 5–7 business days, anywhere in India.
+                            </li>
+                            <li>
+                                <strong className="text-primary">48-hour exchange</strong> for damaged
+                                or incorrect items.
+                            </li>
+                            <li className="pt-1">
+                                <a href="/shipping-policy" className="text-accent underline-offset-2 hover:underline">
+                                    Shipping policy
+                                </a>
+                                <span className="mx-2 text-gray-300">·</span>
+                                <a href="/exchange-policy" className="text-accent underline-offset-2 hover:underline">
+                                    Exchange policy
+                                </a>
+                            </li>
+                        </ul>
+                    </Accordion>
+                </div>
+
                 <ReviewsSection
                     productId={product._id || undefined}
                     productName={product.name || undefined}
                     reviews={initialReviews}
                 />
-
-                {/* Delivery Info */}
-                <div className="bg-viora-gradient rounded-xl p-6 mt-4">
-                    <h4 className="font-semibold text-primary mb-4 font-playfair text-lg">
-                        Delivery Information
-                    </h4>
-                    <div className="space-y-4">
-                        <div className="flex items-start gap-4">
-                            <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm flex-shrink-0">
-                                <svg
-                                    className="w-5 h-5 text-primary"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={1.5}
-                                        d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
-                                    />
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={1.5}
-                                        d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
-                                    />
-                                </svg>
-                            </div>
-                            <div>
-                                <p className="font-medium text-gray-800">
-                                    Pan India Delivery
-                                </p>
-                                <p className="text-sm text-gray-500">
-                                    Delivery within 5-7 business days
-                                </p>
-                            </div>
-                        </div>
-                        <div className="flex items-start gap-4">
-                            <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm flex-shrink-0">
-                                <svg
-                                    className="w-5 h-5 text-primary"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={1.5}
-                                        d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
-                                    />
-                                </svg>
-                            </div>
-                            <div>
-                                <p className="font-medium text-gray-800">
-                                    Cash on Delivery Available
-                                </p>
-                                <p className="text-sm text-gray-500">
-                                    Pay when you receive your order
-                                </p>
-                            </div>
-                        </div>
-                        <div className="flex items-start gap-4">
-                            <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm flex-shrink-0">
-                                <svg
-                                    className="w-5 h-5 text-primary"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={1.5}
-                                        d="M12 8v4l3 2m6-2a9 9 0 11-18 0 9 9 0 0118 0z"
-                                    />
-                                </svg>
-                            </div>
-                            <div>
-                                <p className="font-medium text-gray-800">
-                                    48 Hours Exchange
-                                </p>
-                                <p className="text-sm text-gray-500">
-                                    Valid only for damaged or incorrect items
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </div>
 
             <StickyAddToCart
@@ -611,27 +696,19 @@ const ProductView = ({ product, colorSiblings = [], currentColor = "", displayNa
                 productPrice={
                     product.price?.discountedPrice || product.price?.price || 0
                 }
+                compareAtPrice={hasDiscount ? actualPrice : undefined}
+                prepaidPrice={prepaidPrice}
                 productImage={product.media?.mainMedia?.image?.url}
-                isOutOfStock={
-                    // Only flag as sold out when Wix explicitly says inStock: false
-                    // OR when inventory IS tracked and quantity has reached 0.
-                    // Products that don't track inventory have undefined quantity —
-                    // the old `(quantity || 0) < 1` was wrongly marking those as
-                    // sold out, which is why every product showed "SOLD OUT".
-                    product.stock?.inStock === false ||
-                    (product.stock?.trackInventory === true &&
-                        (product.stock?.quantity ?? 0) < 1)
-                }
+                isOutOfStock={stockOut}
                 hasUnselectedVariants={
-                    !!(product.variants && product.productOptions) &&
+                    hasOptions &&
                     Object.keys(selectedOptions).length <
                         (product.productOptions?.length || 0)
                 }
                 selectedOptions={selectedOptions}
                 triggerSelector={`#${STICKY_TRIGGER_ID}`}
             />
-            </div>
-        </>
+        </div>
     );
 };
 

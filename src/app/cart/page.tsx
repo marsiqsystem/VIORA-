@@ -1,468 +1,55 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
+import { useEffect, useRef } from "react";
 import { useCartStore } from "@/hooks/useCartStore";
 import { useWixClient } from "@/hooks/useWixClient";
-import { media as wixMedia } from "@wix/sdk";
-import { trackMetaEvent } from "@/lib/metaEvents";
-import BackButton from "@/components/BackButton";
-// import GiftWrapUpsell from "@/components/GiftWrapUpsell"; // Gift wrap upsell paused — see banner comment below.
-import { useEffect, useState } from "react";
-import nextDynamic from "next/dynamic";
+import { useCommerceUi } from "@/hooks/useCommerceUi";
+import { isServiceLine } from "@/lib/cartLines";
+import CartContents from "@/components/cart/CartContents";
 
-const CheckoutModal = nextDynamic(() => import("@/components/CheckoutModal"), {
-    ssr: false,
-});
-
+/** Full-page bag — the same contents as the slide-in drawer, in two columns. */
 const CartPage = () => {
-    const wixClient = useWixClient();
-    const { cart, isLoading, getCart, removeItem, updateQuantity } = useCartStore();
-    const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const wixClient = useWixClient();
+  const { cart, getCart } = useCartStore();
+  const openCheckout = useCommerceUi((s) => s.openCheckout);
 
-    useEffect(() => {
-        getCart(wixClient).catch(() => {});
-    }, [getCart, wixClient]);
+  useEffect(() => {
+    getCart(wixClient).catch(() => {});
+  }, [getCart, wixClient]);
 
-    const handleCheckout = async () => {
-        try {
-            const lineItems = cart.lineItems || [];
-            trackMetaEvent("InitiateCheckout", {
-                currency: "INR",
-                value: lineItems.reduce(
-                    (sum, item) =>
-                        sum +
-                        (Number(item.price?.amount) || 0) * (item.quantity || 1),
-                    0
-                ),
-                content_ids: lineItems
-                    .map((item) => item.catalogReference?.catalogItemId)
-                    .filter((id): id is string => !!id),
-                content_type: "product",
-                contents: lineItems.map((item) => ({
-                    id: item.catalogReference?.catalogItemId || item._id || "",
-                    quantity: item.quantity || 1,
-                    item_price: Number(item.price?.amount) || 0,
-                })),
-                num_items: lineItems.reduce(
-                    (sum, item) => sum + (item.quantity || 1),
-                    0
-                ),
-            });
+  // Arriving from a WhatsApp checkout reminder (/recover/<id>) or an old
+  // /checkout link: open checkout straight away, once, as soon as the cart is here.
+  const openedFromLink = useRef(false);
+  useEffect(() => {
+    if (openedFromLink.current || !cart.lineItems?.length) return;
+    if (new URLSearchParams(window.location.search).get("checkout") !== "1") return;
+    openedFromLink.current = true;
+    openCheckout();
+  }, [cart.lineItems?.length, openCheckout]);
 
-            setCheckoutOpen(true);
-        } catch (err) {
-            console.log(err);
-        }
-    };
+  const pieces = (cart.lineItems || [])
+    .filter((li: any) => !isServiceLine(li))
+    .reduce((sum: number, li: any) => sum + (li.quantity || 1), 0);
 
-    const handleQuantityChange = (itemId: string, newQuantity: number) => {
-        if (newQuantity < 1) return;
-        updateQuantity(wixClient, itemId, newQuantity);
-    };
-
-    // Calculate subtotal
-    const subtotal = cart.lineItems?.reduce((total, item) => {
-        return total + (Number(item.price?.amount) || 0) * (item.quantity || 1);
-    }, 0) || 0;
-
-    const mrpSavings = cart.lineItems?.reduce((savings, item) => {
-        const fullPrice = Number(item.fullPrice?.amount) || Number(item.price?.amount) || 0;
-        const currentPrice = Number(item.price?.amount) || 0;
-        return savings + (fullPrice - currentPrice) * (item.quantity || 1);
-    }, 0) || 0;
-
-    // --- Real Wix coupon data ---
-    const CLUB_VIORA_CODE = "CLUBVIORA";
-    const CLUB_VIORA_MINIMUM = 999;
-    // SHINE50 DISABLED 2026-08-17 — re-enable on/after 30 Aug 2026:
-    // const SHINE_50_CODE = "SHINE50";
-    // const SHINE_50_MINIMUM = 700;
-    // const SHINE_50_DISCOUNT = 50;
-    const [couponCode, setCouponCode] = useState("");
-    const [applyingCoupon, setApplyingCoupon] = useState(false);
-    const [removingCoupon, setRemovingCoupon] = useState(false);
-    const { couponApplied, couponError, applyCoupon, removeCoupon } = useCartStore();
-
-    const appliedDiscounts = (cart as any)?.appliedDiscounts || [];
-    const appliedCoupon = appliedDiscounts.find((d: any) => d.coupon);
-    const appliedCouponCode = appliedCoupon?.coupon?.code || "";
-    // Trust Wix's own discountAmount whenever it's returned; fall back to a
-    // 10%-of-subtotal calculation only for the CLUBVIORA code when Wix hasn't
-    // populated discountAmount yet (some Wix responses on shared / non-checkout
-    // contexts don't return it).
-    const wixCouponDiscount = appliedDiscounts.reduce((sum: number, d: any) => {
-        if (!d.coupon) return sum;
-        const reported = Number(d.coupon?.amount?.amount ?? d.discountAmount?.amount ?? 0);
-        if (reported > 0) return sum + reported;
-        const couponCode = d.coupon.code?.toUpperCase();
-        if (couponCode === CLUB_VIORA_CODE && subtotal >= CLUB_VIORA_MINIMUM) {
-            return sum + subtotal * 0.1;
-        }
-        // SHINE50 DISABLED 2026-08-17 (deleted from Wix while Rakhi set is live).
-        // Re-enable on/after 30 Aug 2026 by uncommenting the block below.
-        // if (couponCode === "SHINE50" && subtotal >= 700) {
-        //     return sum + 50;
-        // }
-        return sum;
-    }, 0);
-    const amountToUnlockCoupon = Math.max(0, CLUB_VIORA_MINIMUM - subtotal);
-    // const amountToUnlockShine = Math.max(0, SHINE_50_MINIMUM - subtotal); // SHINE50 DISABLED 2026-08-17
-    const finalTotal = Math.max(0, subtotal - wixCouponDiscount);
-    const totalSavings = 149 + mrpSavings + wixCouponDiscount;
-
-    const handleApplyCoupon = async () => {
-        const code = couponCode.trim().toUpperCase();
-        if (!code) return;
-        setApplyingCoupon(true);
-        await applyCoupon(wixClient, code);
-        setApplyingCoupon(false);
-        setCouponCode("");
-    };
-
-    const handleRemoveCoupon = async () => {
-        setRemovingCoupon(true);
-        await removeCoupon(wixClient);
-        setRemovingCoupon(false);
-        setCouponCode("");
-    };
-
-    // Display-only inflated subtotal — frontend optics only.
-    const displaySubtotal = subtotal + 99 + 50;
-
-    let couponMessage = "";
-    if (couponError) {
-        couponMessage = couponError;
-    } else if (couponApplied) {
-        couponMessage = "Coupon applied! You save ₹" + wixCouponDiscount.toFixed(0) + ".";
-    } else if (couponCode.toUpperCase() === CLUB_VIORA_CODE && amountToUnlockCoupon > 0) {
-        couponMessage = "Add ₹" + amountToUnlockCoupon.toFixed(0) + " more to unlock this offer.";
-    }
-
-    return (
-        <div className="min-h-[calc(100vh-180px)] px-4 md:px-8 lg:px-16 xl:px-32 2xl:px-64 py-12">
-            <div className="mb-8 flex items-center gap-3">
-                <BackButton className="bg-white shadow-sm hover:shadow-md" />
-                <h1 className="text-3xl font-semibold">Shopping Cart</h1>
-            </div>
-
-            {!cart.lineItems || cart.lineItems.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 gap-6">
-                    <div className="text-gray-400 text-6xl">🛒</div>
-                    <h2 className="text-xl text-gray-600">Your cart is empty</h2>
-                    <p className="text-gray-500">Looks like you haven&apos;t added anything to your cart yet.</p>
-                    <Link
-                        href="/list"
-                        className="mt-4 bg-accent text-white py-3 px-8 rounded-md hover:bg-opacity-90 transition-colors"
-                    >
-                        Continue Shopping
-                    </Link>
-                </div>
-            ) : (
-                <div className="flex flex-col lg:flex-row gap-12">
-                    {/* Cart Items */}
-                    <div className="flex-1">
-                        <div className="hidden md:grid grid-cols-5 gap-4 pb-4 border-b text-sm font-medium text-gray-500">
-                            <div className="col-span-2">Product</div>
-                            <div className="text-center">Price</div>
-                            <div className="text-center">Quantity</div>
-                            <div className="text-right">Total</div>
-                        </div>
-
-                        <div className="flex flex-col divide-y">
-                            {cart.lineItems.map((item) => (
-                                <div
-                                    key={item._id}
-                                    className="py-6 grid grid-cols-1 md:grid-cols-5 gap-4 items-center"
-                                >
-                                    {/* Product */}
-                                    <div className="col-span-1 md:col-span-2 flex gap-4">
-                                        {item.image && (
-                                            <div className="relative w-24 h-32 flex-shrink-0">
-                                                <Image
-                                                    src={wixMedia.getScaledToFillImageUrl(
-                                                        item.image,
-                                                        96,
-                                                        128,
-                                                        {}
-                                                    )}
-                                                    alt={item.productName?.original || "Product"}
-                                                    fill
-                                                    sizes="96px"
-                                                    className="object-cover rounded-md"
-                                                />
-                                            </div>
-                                        )}
-                                        <div className="flex flex-col justify-center">
-                                            <h3 className="font-medium">{item.productName?.original}</h3>
-                                            <p className="text-sm text-gray-500 mt-1">
-                                                {item.availability?.status}
-                                            </p>
-                                            <button
-                                                onClick={() => removeItem(wixClient, item._id!)}
-                                                disabled={isLoading}
-                                                className="text-sm text-red-500 hover:text-red-700 mt-2 w-fit disabled:opacity-50"
-                                            >
-                                                Remove
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    {/* Price */}
-                                    <div className="text-center">
-                                        <span className="md:hidden text-gray-500 mr-2">Price:</span>
-                                        ₹{item.price?.amount}
-                                    </div>
-
-                                    {/* Quantity */}
-                                    <div className="flex items-center justify-center gap-3">
-                                        <span className="md:hidden text-gray-500 mr-2">Qty:</span>
-                                        <button
-                                            onClick={() =>
-                                                handleQuantityChange(item._id!, (item.quantity || 1) - 1)
-                                            }
-                                            disabled={isLoading || (item.quantity || 1) <= 1}
-                                            className="w-8 h-8 rounded-full border border-gray-300 flex items-center justify-center hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                            -
-                                        </button>
-                                        <span className="w-8 text-center font-medium">
-                                            {item.quantity}
-                                        </span>
-                                        <button
-                                            onClick={() =>
-                                                handleQuantityChange(item._id!, (item.quantity || 1) + 1)
-                                            }
-                                            disabled={isLoading}
-                                            className="w-8 h-8 rounded-full border border-gray-300 flex items-center justify-center hover:bg-gray-100 disabled:opacity-50"
-                                        >
-                                            +
-                                        </button>
-                                    </div>
-
-                                    {/* Total */}
-                                    <div className="text-right font-medium">
-                                        <span className="md:hidden text-gray-500 mr-2">Total:</span>
-                                        ₹{(Number(item.price?.amount) * (item.quantity || 1)).toFixed(2)}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Order Summary */}
-                    <div className="lg:w-80">
-                        <div className="bg-gray-50 rounded-lg p-6 sticky top-24">
-                            <h2 className="text-xl font-semibold mb-6">Order Summary</h2>
-
-                            <div className="space-y-3 mb-5">
-                                <div className="flex justify-between text-gray-600 text-sm">
-                                    <span>Subtotal ({cart.lineItems.length} {cart.lineItems.length === 1 ? "item" : "items"})</span>
-                                    <span>₹{displaySubtotal.toFixed(2)}</span>
-                                </div>
-                                <div className="flex justify-between text-gray-600 text-sm">
-                                    <span>Shipping</span>
-                                    <span>
-                                        <span className="text-gray-400 line-through mr-2">₹99</span>
-                                        <span className="text-green-600 font-bold">FREE Shipping!</span>
-                                    </span>
-                                </div>
-                                <div className="flex justify-between text-gray-600 text-sm">
-                                    <span>Processing Fee</span>
-                                    <span>
-                                        <span className="text-gray-400 line-through mr-2">₹50</span>
-                                        <span className="text-green-600 font-bold">FREE</span>
-                                    </span>
-                                </div>
-                            </div>
-
-                            {/* Savings Line */}
-                            <div className="mb-5 flex items-start gap-2 bg-green-50/50 p-3 rounded-lg border border-green-100">
-                                <svg className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                </svg>
-                                <div>
-                                    <p className="text-green-600 text-sm font-medium">
-                                        You are saving ₹{totalSavings.toFixed(0)} on this order!
-                                    </p>
-                                    {!couponApplied && (
-                                        <span className="block text-xs font-normal text-green-700/80 mt-1">
-                                            Add items above ₹999 and use CLUBVIORA for 10% extra off.
-                                        </span>
-                                    )}
-                                </div>
-                            </div>
-
-                            {/* Coupon */}
-                            <div className="border-t pt-4 mb-4">
-                                {couponApplied && appliedCouponCode ? (
-                                    <div className="rounded-lg border border-green-200 bg-green-50/60 p-3">
-                                        <div className="flex items-start justify-between gap-3">
-                                            <div className="flex items-center gap-2">
-                                                <svg className="w-4 h-4 text-green-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                                </svg>
-                                                <div>
-                                                    <p className="text-sm font-semibold text-green-800">
-                                                        Coupon &quot;{appliedCouponCode}&quot; applied
-                                                    </p>
-                                                    {wixCouponDiscount > 0 && (
-                                                        <p className="text-xs text-green-700/80">
-                                                            You save ₹{wixCouponDiscount.toFixed(0)}
-                                                        </p>
-                                                    )}
-                                                </div>
-                                            </div>
-                                            <button
-                                                type="button"
-                                                onClick={handleRemoveCoupon}
-                                                disabled={removingCoupon}
-                                                className="text-xs font-semibold uppercase tracking-wider text-red-600 hover:text-red-700 disabled:opacity-50"
-                                            >
-                                                {removingCoupon ? "Removing…" : "Remove"}
-                                            </button>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div>
-                                        <label className="text-xs font-semibold uppercase tracking-wider text-gray-600">
-                                            Have a coupon?
-                                        </label>
-                                        <div className="mt-2 flex gap-2">
-                                            <input
-                                                type="text"
-                                                value={couponCode}
-                                                onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === "Enter") {
-                                                        e.preventDefault();
-                                                        handleApplyCoupon();
-                                                    }
-                                                }}
-                                                placeholder="Enter code"
-                                                className="flex-1 min-w-0 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm tracking-wider uppercase outline-none focus:border-[#9B1B30] focus:ring-2 focus:ring-[#9B1B30]/20"
-                                            />
-                                            <button
-                                                type="button"
-                                                onClick={handleApplyCoupon}
-                                                disabled={applyingCoupon || !couponCode.trim()}
-                                                className="rounded-md bg-[#9B1B30] px-4 py-2 text-xs font-semibold uppercase tracking-wider text-white hover:bg-[#7d1527] disabled:cursor-not-allowed disabled:opacity-50"
-                                            >
-                                                {applyingCoupon ? "..." : "Apply"}
-                                            </button>
-                                        </div>
-                                        {couponError ? (
-                                            <p className="mt-2 text-xs text-red-600">{couponError}</p>
-                                        ) : (
-                                            <div className="mt-2 space-y-1">
-                                                {/* SHINE50 nudge DISABLED 2026-08-17 (deleted from Wix while Rakhi set is live). Re-enable on/after 30 Aug 2026.
-                                                {amountToUnlockShine > 0 ? (
-                                                    <p className="text-xs text-gray-500">
-                                                        Add ₹{amountToUnlockShine.toFixed(0)} more to use <span className="font-semibold tracking-wider">{SHINE_50_CODE}</span> (₹{SHINE_50_DISCOUNT} off).
-                                                    </p>
-                                                ) : (
-                                                    <p className="text-xs text-green-700">
-                                                        ✅ Eligible! Use <span className="font-semibold tracking-wider">{SHINE_50_CODE}</span> for ₹{SHINE_50_DISCOUNT} off.
-                                                    </p>
-                                                )}
-                                                */}
-                                                {amountToUnlockCoupon > 0 ? (
-                                                    <p className="text-xs text-gray-500">
-                                                        Add ₹{amountToUnlockCoupon.toFixed(0)} more to use <span className="font-semibold tracking-wider">{CLUB_VIORA_CODE}</span> (10% off).
-                                                    </p>
-                                                ) : (
-                                                    <p className="text-xs text-green-700">
-                                                        ✅ Eligible! Use <span className="font-semibold tracking-wider">{CLUB_VIORA_CODE}</span> for 10% off.
-                                                    </p>
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-
-                            <div className="border-t pt-4 mb-6">
-                                {couponApplied && wixCouponDiscount > 0 && (
-                                    <div className="mb-3 flex justify-between text-sm font-medium text-green-700">
-                                        <span>Coupon ({appliedCouponCode})</span>
-                                        <span>-₹{wixCouponDiscount.toFixed(2)}</span>
-                                    </div>
-                                )}
-                                <div className="flex justify-between text-lg font-semibold">
-                                    <span>Estimated Total</span>
-                                    <span>₹{finalTotal.toFixed(2)}</span>
-                                </div>
-                                <p className="text-xs text-gray-500 mt-1">
-                                    Taxes calculated at checkout
-                                </p>
-                            </div>
-
-                            <p className="italic text-sm text-red-600 mb-4 leading-relaxed">
-                                Note - (Every Viora piece is carefully inspected before it reaches you. If anything arrives damaged or incorrect, please reach out within 48 hours of delivery and we&apos;ll make it right)
-                            </p>
-
-                            {/* Gift Wrap Upsell — paused. Restore by uncommenting the import above and the block below.
-                            <div className="mb-4">
-                                <GiftWrapUpsell />
-                            </div>
-                            */}
-
-                            <button
-                                onClick={handleCheckout}
-                                disabled={isLoading}
-                                className="w-full bg-[#9B1B30] text-white py-3.5 rounded-md hover:bg-[#7d1527] transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-bold tracking-wide text-sm"
-                            >
-                                {isLoading ? "Processing..." : "ORDER NOW ⚡"}
-                            </button>
-
-                            {/* Payment Method Icons */}
-                            <div className="mt-3 flex items-center justify-center gap-3 text-[10px] text-gray-400 font-medium">
-                                <span className="border border-gray-200 rounded px-1.5 py-0.5">UPI</span>
-                                <span className="border border-gray-200 rounded px-1.5 py-0.5">Visa</span>
-                                <span className="border border-gray-200 rounded px-1.5 py-0.5">Mastercard</span>
-                                <span className="border border-gray-200 rounded px-1.5 py-0.5">RuPay</span>
-                            </div>
-
-                            {/* Trust Row */}
-                            <div className="mt-3 flex items-center justify-center gap-4 text-[10px] text-gray-500">
-                                <span className="flex items-center gap-1">
-                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-                                        <rect x="3" y="11" width="18" height="10" rx="2" />
-                                        <path d="M7 11V8a5 5 0 0110 0v3" />
-                                    </svg>
-                                    Secure
-                                </span>
-                                <span className="flex items-center gap-1">
-                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-                                        <path d="M3 12a9 9 0 109 9" />
-                                        <path d="M3 4v5h5" />
-                                    </svg>
-                                    Easy Exchange
-                                </span>
-                                <span className="flex items-center gap-1">
-                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-                                        <rect x="3" y="6" width="18" height="12" rx="2" />
-                                        <circle cx="12" cy="12" r="2.5" />
-                                        <path d="M6 12h.01M18 12h.01" />
-                                    </svg>
-                                    COD
-                                </span>
-                            </div>
-
-                            <Link
-                                href="/list"
-                                className="block text-center mt-4 text-gray-600 hover:text-black transition-colors"
-                            >
-                                Continue Shopping
-                            </Link>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            <CheckoutModal open={checkoutOpen} onClose={() => setCheckoutOpen(false)} />
-        </div>
-    );
+  return (
+    <div className="mx-auto min-h-[calc(100vh-180px)] max-w-6xl px-4 pb-28 pt-5 md:px-6 md:pb-12 md:pt-8 lg:px-8">
+      <div className="mb-4 flex items-baseline justify-between gap-4 md:mb-6">
+        <h1 className="font-playfair text-[28px] font-bold text-primary md:text-4xl">
+          Your bag
+          {pieces > 0 && (
+            <span className="ml-2 font-sans text-sm font-normal text-gray-500 md:text-base">
+              ({pieces} {pieces === 1 ? "piece" : "pieces"})
+            </span>
+          )}
+        </h1>
+        <Link href="/list" className="shrink-0 text-sm font-semibold text-accent underline-offset-4 hover:underline">
+          Continue shopping
+        </Link>
+      </div>
+      <CartContents variant="page" onCheckout={openCheckout} />
+    </div>
+  );
 };
 
 export default CartPage;

@@ -28,7 +28,7 @@ const Pagination = ({
   const buttonClass =
     "rounded-lg bg-primary text-white px-6 py-2.5 text-sm font-medium transition-all duration-200 hover:bg-primary-light hover:shadow-md";
   const disabledClass =
-    "rounded-lg bg-silver-muted px-6 py-2.5 text-sm font-medium text-gray-400 cursor-not-allowed";
+    "rounded-lg bg-platinum px-6 py-2.5 text-sm font-medium text-gray-400 cursor-not-allowed";
 
   return (
     <div className="mt-12 flex justify-between w-full">

@@ -4,13 +4,19 @@ import { products } from "@wix/stores";
 import Image from "next/image";
 import Link from "next/link";
 import { memo, useState } from "react";
-import nextDynamic from "next/dynamic";
 import { trackAddToWishlist } from "@/lib/metaPixel";
+import { trackMetaEvent } from "@/lib/metaEvents";
+import { rememberMetaCatalogId } from "@/lib/metaCatalogId";
+import { PREPAID_DISCOUNT } from "@/lib/checkoutPricing";
 import { useWixClient } from "@/hooks/useWixClient";
 import { useWishlistStore } from "@/hooks/useWishlistStore";
+import { useCartStore } from "@/hooks/useCartStore";
+import { useCommerceUi } from "@/hooks/useCommerceUi";
+import { useSocialProof } from "@/hooks/useSocialProof";
+import { PRODUCT_PROOF_MIN } from "@/lib/socialProof";
+import { useToast } from "@/components/Toast";
 
-// Modal JS is only needed when a logged-out user taps the heart — defer it.
-const LoginModal = nextDynamic(() => import("./LoginModal"), { ssr: false });
+const NO_VARIANT = "00000000-0000-0000-0000-000000000000";
 
 const ProductCard = ({
   product,
@@ -19,8 +25,12 @@ const ProductCard = ({
   product: products.Product;
   index: number;
 }) => {
-  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [adding, setAdding] = useState(false);
   const wixClient = useWixClient();
+  const { addItem, cart } = useCartStore();
+  const openDrawer = useCommerceUi((s) => s.openDrawer);
+  const { byProduct } = useSocialProof();
+  const { showToast } = useToast();
 
   const isWishlisted = useWishlistStore((s) =>
     product._id ? s.isWishlisted(product._id) : false
@@ -45,13 +55,10 @@ const ProductCard = ({
     }
   };
 
+  // The wishlist lives in this browser, so saving never needs a login.
   const handleWishlistToggle = (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    if (!wixClient.auth.loggedIn()) {
-      setShowLoginModal(true);
-      return;
-    }
     wishlistItem();
   };
 
@@ -60,11 +67,15 @@ const ProductCard = ({
   const hasDiscount = discountedPrice && discountedPrice < actualPrice;
   const currentSellingPrice = hasDiscount ? discountedPrice : actualPrice;
 
-  const isLowStock = product.stock?.quantity && product.stock.quantity < 5;
+  const stockQuantity = product.stock?.quantity;
+  const soldOut = product.stock?.inStock === false || stockQuantity === 0;
+  const isLowStock = !soldOut && typeof stockQuantity === "number" && stockQuantity < 5;
   const discountPercent = hasDiscount
     ? Math.round(((actualPrice - currentSellingPrice) / actualPrice) * 100)
     : 0;
   const saveAmount = hasDiscount ? actualPrice - currentSellingPrice : 0;
+  const prepaidPrice = Math.max(0, currentSellingPrice - PREPAID_DISCOUNT);
+  const weekOrders = product._id ? byProduct[product._id] || 0 : 0;
   // Optional merchandising ribbon set in Wix (e.g. "Bestseller", "New").
   const ribbon = (product.ribbon || "").trim();
   const href = "/" + product.slug;
@@ -72,9 +83,57 @@ const ProductCard = ({
   // Strip color suffix: "Base Name - Color" → "Base Name"
   const displayName = (product.name || "").split(" - ")[0].trim();
 
+  // One tap to the bag when there's nothing to choose (at most one choice per option).
+  const options = product.productOptions || [];
+  const canQuickAdd = !soldOut && options.every((o) => (o.choices?.length || 0) <= 1);
+  const inBag = (cart.lineItems || []).some(
+    (li) => li.catalogReference?.catalogItemId === product._id
+  );
+
   const handleProductLinkClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
     e.preventDefault();
     window.location.assign(href);
+  };
+
+  const handleAdd = async () => {
+    if (!product._id || adding) return;
+    if (inBag) {
+      openDrawer(product._id);
+      return;
+    }
+    setAdding(true);
+    const metaId = product.slug || product._id;
+    rememberMetaCatalogId(product._id, metaId);
+    // Fire before awaiting Wix, same as the product page's Add to Cart.
+    trackMetaEvent("AddToCart", {
+      currency: "INR",
+      value: currentSellingPrice,
+      content_ids: [metaId],
+      content_name: displayName,
+      content_type: "product",
+      contents: [{ id: metaId, quantity: 1, item_price: currentSellingPrice }],
+      num_items: 1,
+    });
+    const selected: Record<string, string> = {};
+    for (const o of options) {
+      const choice = o.choices?.[0]?.description;
+      if (o.name && choice) selected[o.name] = choice;
+    }
+    try {
+      await addItem(
+        wixClient,
+        product._id,
+        options.length ? product.variants?.[0]?._id || NO_VARIANT : NO_VARIANT,
+        1,
+        Object.keys(selected).length ? selected : undefined
+      );
+      openDrawer(product._id);
+    } catch (err) {
+      console.error("Quick add to bag failed:", err);
+      showToast((err as any)?.message === "SOLD_OUT" ? "Sorry, this piece just sold out." : "Couldn't add to bag. Please try again.", "error");
+    } finally {
+      setAdding(false);
+    }
   };
 
   return (
@@ -96,8 +155,13 @@ const ProductCard = ({
             quality={70}
             priority={index < 4}
             loading={index < 4 ? undefined : "lazy"}
-            className="object-cover transition-transform duration-300 md:group-hover:scale-[1.02]"
+            className={`object-cover transition-transform duration-300 md:group-hover:scale-[1.02] ${soldOut ? "opacity-60 grayscale-[40%]" : ""}`}
           />
+          {soldOut && (
+            <span className="absolute inset-x-0 bottom-0 bg-primary/85 py-1.5 text-center text-[11px] font-bold uppercase tracking-wider text-white">
+              Sold out
+            </span>
+          )}
         </div>
       </Link>
 
@@ -146,7 +210,7 @@ const ProductCard = ({
 
       <div className="p-3 md:p-4">
         <Link href={href} onClick={handleProductLinkClick} className="block">
-          <h3 className="font-medium text-xs md:text-base text-gray-800 group-hover:text-accent transition-colors line-clamp-1">
+          <h3 className="font-inter font-medium text-xs md:text-base text-gray-800 group-hover:text-accent transition-colors line-clamp-1">
             {displayName}
           </h3>
         </Link>
@@ -177,44 +241,53 @@ const ProductCard = ({
           )}
         </div>
 
-        <p className="mt-1 flex items-center gap-1 text-xs sm:text-sm font-medium text-green-700">
-          <svg
-            className="w-3.5 h-3.5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h11v10H3z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M14 10h4l3 3v4h-7" />
-          </svg>
-          Free Delivery
-        </p>
-
-        {isLowStock && (
-          <p className="text-xs text-orange-600 mt-1 flex items-center gap-1">
-            <span className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-pulse"></span>
-            Only {product.stock?.quantity} left
+        {!soldOut && (
+          <p className="mt-1 text-[11px] font-medium text-green-700 sm:text-xs">
+            ₹{prepaidPrice} paying online · free delivery
           </p>
         )}
 
-        {/* Visual CTA only — the stretched link above handles the actual
-            navigation. group-hover keeps the fill effect since this span
-            sits beneath the link and won't receive its own :hover. */}
-        <Link
-          href={href}
-          onClick={handleProductLinkClick}
-          className="mt-3 w-full py-2 md:py-2.5 text-xs md:text-sm font-medium text-center border border-accent text-accent rounded-full hover:bg-accent hover:text-white transition-all duration-300 flex items-center justify-center min-h-[44px]"
-        >
-          View Product
-        </Link>
+        {isLowStock ? (
+          <p className="text-xs text-orange-600 mt-1 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-pulse"></span>
+            Only {stockQuantity} left
+          </p>
+        ) : weekOrders >= PRODUCT_PROOF_MIN ? (
+          <p className="mt-1 text-xs font-medium text-orange-700">🔥 Ordered {weekOrders} times this week</p>
+        ) : null}
+
+        {soldOut ? (
+          <Link
+            href={href}
+            onClick={handleProductLinkClick}
+            className="mt-3 flex min-h-[44px] w-full items-center justify-center border border-gray-300 text-xs font-medium text-gray-500 md:text-sm"
+          >
+            View details
+          </Link>
+        ) : canQuickAdd ? (
+          <button
+            type="button"
+            onClick={handleAdd}
+            disabled={adding}
+            className={`mt-3 flex min-h-[44px] w-full items-center justify-center text-xs font-bold uppercase tracking-wide transition-colors md:text-sm ${
+              inBag
+                ? "bg-green-600 text-white"
+                : "bg-accent text-white hover:bg-[#7d1527] disabled:opacity-60"
+            }`}
+          >
+            {adding ? "Adding…" : inBag ? "✓ In your bag" : "Add to bag"}
+          </button>
+        ) : (
+          <Link
+            href={href}
+            onClick={handleProductLinkClick}
+            className="mt-3 flex min-h-[44px] w-full items-center justify-center border border-accent text-xs font-semibold text-accent transition-colors hover:bg-accent hover:text-white md:text-sm"
+          >
+            Choose options
+          </Link>
+        )}
       </div>
 
-      <LoginModal
-        open={showLoginModal}
-        onClose={() => setShowLoginModal(false)}
-        onLoggedIn={wishlistItem}
-      />
     </div>
   );
 };

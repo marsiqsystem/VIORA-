@@ -66,11 +66,18 @@ const ProductList = async ({
   // Case-insensitive substring search across the product name. Matches any
   // word (e.g. "blue" hits "Eternal Shine Jewelry Set - Blue").
   const searchTerm = (searchParams?.q || "").trim().toLowerCase();
-  const searchedItems = searchTerm
-    ? fetchedItems.filter((item) =>
-        (item.name || "").toLowerCase().includes(searchTerm)
-      )
-    : fetchedItems;
+  // Shop-by-price links (?under=499 / ?over=699) filter on the price the
+  // shopper actually pays, not the struck-through MRP Wix filters on.
+  const under = Number(searchParams?.under) || 0;
+  const over = Number(searchParams?.over) || 0;
+  const payPrice = (item: products.Product) =>
+    item.price?.discountedPrice || item.price?.price || 0;
+  const searchedItems = fetchedItems.filter(
+    (item) =>
+      (!searchTerm || (item.name || "").toLowerCase().includes(searchTerm)) &&
+      (!under || payPrice(item) <= under) &&
+      (!over || payPrice(item) > over)
+  );
 
   // Override which color variant is shown on the listing page for specific
   // products. Key = lowercase base name, value = lowercase color suffix.
@@ -157,7 +164,7 @@ const ProductList = async ({
 
       {dedupedItems.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 text-center">
-          <h3 className="text-xl font-medium text-gray-700 mb-2">
+          <h3 className="font-inter text-xl font-medium text-gray-700 mb-2">
             No products found
           </h3>
           <p className="text-gray-500 mb-6">

@@ -13,7 +13,15 @@ const CONTACT_RECIPIENT = "viorajewels6@gmail.com";
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { title, firstName, lastName, email, query } = body;
+    // The form sends `name` (+ optional `orderNumber`); title/first/last are still
+    // accepted from the old form in case a stale page submits.
+    const { title, firstName, lastName, name, orderNumber, email, query } = body;
+    const fullName = String(
+      name?.trim() ? name : [title, firstName, lastName].filter(Boolean).join(" ")
+    )
+      .trim()
+      .slice(0, 100);
+    const order = String(orderNumber || "").replace(/[^\w-]/g, "").slice(0, 30);
 
     // Bot filled the hidden honeypot field: pretend success, send nothing.
     if (isHoneypotFilled(body)) {
@@ -31,7 +39,7 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!firstName?.trim() || !lastName?.trim() || !email?.trim() || !query?.trim()) {
+    if (!fullName || !email?.trim() || !query?.trim()) {
       return NextResponse.json(
         { error: "Please fill in all required fields." },
         { status: 400 }
@@ -52,7 +60,6 @@ export async function POST(req: Request) {
       );
     }
 
-    const fullName = [title, firstName, lastName].filter(Boolean).join(" ").trim();
     const safeText = (s: string) => String(s).replace(/[\r\n]+/g, " ").trim();
     const escapeHtml = (s: string) =>
       String(s)
@@ -66,10 +73,11 @@ export async function POST(req: Request) {
       fromName: "Viora Jewels Website",
       to: CONTACT_RECIPIENT,
       replyTo: `"${safeText(fullName)}" <${safeText(email)}>`,
-      subject: `Website enquiry from ${safeText(fullName)}`,
+      subject: `Website enquiry from ${safeText(fullName)}${order ? ` · order #${order}` : ""}`,
       text: [
         `Name: ${fullName}`,
         `Email: ${email}`,
+        ...(order ? [`Order: #${order}`] : []),
         "",
         "Message:",
         query,
@@ -80,6 +88,7 @@ export async function POST(req: Request) {
           <table style="border-collapse:collapse;width:100%;margin-top:12px;">
             <tr><td style="padding:6px 8px;font-weight:bold;width:90px;">Name</td><td style="padding:6px 8px;">${escapeHtml(fullName)}</td></tr>
             <tr><td style="padding:6px 8px;font-weight:bold;">Email</td><td style="padding:6px 8px;">${escapeHtml(email)}</td></tr>
+            ${order ? `<tr><td style="padding:6px 8px;font-weight:bold;">Order</td><td style="padding:6px 8px;">#${escapeHtml(order)}</td></tr>` : ""}
           </table>
           <h3 style="margin-top:20px;margin-bottom:6px;">Message</h3>
           <div style="white-space:pre-wrap;background:#faf7f5;border:1px solid #eee;border-radius:8px;padding:12px;">${escapeHtml(query)}</div>

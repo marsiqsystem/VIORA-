@@ -2,6 +2,9 @@
 //
 // Ported from whatsapp-crm/routes/wixWebhook.js. Point your Wix Automation
 // ("Send via webhook") at:  https://<site>/api/wix-webhook
+// With WIX_WEBHOOK_SECRET set, add ?key=<secret> to that URL (or send it as
+// the x-wix-secret header) — anything else gets 401. Same for the
+// wix-abandoned and wix-cancel-webhook routes.
 //
 // Flow: parse order -> create Velocity shipment (AWB) -> push tracking back to
 // Wix -> send WF1 order_confirmation_v1 (idempotent via a Wix order flag).
@@ -25,7 +28,7 @@ const WF1_FLAG = "wa_wf1_sent";
 
 export async function POST(req: NextRequest) {
   const expected = process.env.WIX_WEBHOOK_SECRET;
-  if (expected && req.headers.get("x-wix-secret") !== expected) {
+  if (expected && req.headers.get("x-wix-secret") !== expected && req.nextUrl.searchParams.get("key") !== expected) {
     console.warn("[wix-webhook] rejected: bad or missing x-wix-secret");
     return new NextResponse(null, { status: 401 });
   }

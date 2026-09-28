@@ -14,7 +14,7 @@ export const maxDuration = 30;
 
 export async function POST(req: NextRequest) {
   const expected = process.env.WIX_WEBHOOK_SECRET;
-  if (expected && req.headers.get("x-wix-secret") !== expected) {
+  if (expected && req.headers.get("x-wix-secret") !== expected && req.nextUrl.searchParams.get("key") !== expected) {
     console.warn("[wix-abandoned] rejected: bad or missing x-wix-secret");
     return new NextResponse(null, { status: 401 });
   }

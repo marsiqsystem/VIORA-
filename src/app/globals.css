@@ -17,11 +17,11 @@
 
 /* ========================================
    VIORA JEWELS DESIGN SYSTEM
-   Ruby, ink, cream, and champagne palette
+   Ruby, ink and champagne-gold accents on an off-white (#F8F8F8) ground
    ======================================== */
 
 /* Fonts are loaded via next/font in src/app/layout.tsx
-   (Cormorant Garamond → --font-cormorant, Montserrat → --font-montserrat) */
+   (Noto Serif Display → --font-heading, Figtree → --font-body) */
 
 /* Color Palette */
 :root {
@@ -34,9 +34,9 @@
 
   /* Viora supporting palette */
   --color-silver: #C9A66B;
-  --color-silver-light: #EFE4CE;
+  --color-silver-light: #E8E8E8; /* neutral border (was beige #EFE4CE) */
   --color-silver-dark: #A9844C;
-  --color-silver-muted: #F5E8E2;
+  --color-silver-muted: #E8E8E8; /* neutral border (was blush beige #F5E8E2) */
   --color-platinum: #F8F8F8; /* off-white (was beach cream #F5F1EA) */
   --color-platinum-warm: #F8F8F8; /* off-white (was pinkish champagne #F5E8E2) */
   --color-smoke: #5C5450;
@@ -49,16 +49,16 @@
 
   /* Neutral Colors */
   --color-bg: #F8F8F8; /* off-white (was beach cream #F5F1EA) */
-  --color-bg-secondary: #EFE4CE;
-  --color-card: #FFFDF8;
-  --color-border: #D8C8B3;
+  --color-bg-secondary: #F8F8F8; /* was beige #EFE4CE */
+  --color-card: #FFFFFF; /* was warm white #FFFDF8 */
+  --color-border: #E5E5E5; /* was beige #D8C8B3 */
   --color-text: #1A1410;
   --color-text-muted: #5C5450;
   --color-text-light: #7A716C;
 
   /* Gradients */
-  --gradient-viora: linear-gradient(135deg, #F8F8F8 0%, #EFE4CE 55%, #F5E8E2 100%);
-  --gradient-viora-subtle: linear-gradient(135deg, #FFFDF8 0%, #F8F8F8 50%, #EFE4CE 100%);
+  --gradient-viora: linear-gradient(135deg, #FFFFFF 0%, #F8F8F8 100%);
+  --gradient-viora-subtle: linear-gradient(135deg, #FFFFFF 0%, #F8F8F8 100%);
   --gradient-dark: linear-gradient(135deg, #1A1410 0%, #2B211B 50%, #5A0A18 100%);
 
   /* Shadows */
@@ -68,7 +68,7 @@
   --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
   --shadow-premium: 0 4px 20px rgba(0, 0, 0, 0.08);
   --shadow-premium-hover: 0 8px 30px rgba(0, 0, 0, 0.12);
-  --shadow-silver: 0 4px 15px rgba(201, 166, 107, 0.24);
+  --shadow-silver: 0 4px 15px rgba(0, 0, 0, 0.08);
 
   /* Transitions */
   --transition-fast: 150ms ease;
@@ -87,7 +87,7 @@
 body {
   background-color: var(--color-bg);
   color: var(--color-text);
-  font-family: 'Montserrat', sans-serif;
+  font-family: var(--font-body), system-ui, sans-serif;
 }
 
 h1,
@@ -96,7 +96,7 @@ h3,
 h4,
 h5,
 h6 {
-  font-family: 'Cormorant Garamond', serif;
+  font-family: var(--font-heading), Georgia, serif;
 }
 
 /* ========================================
@@ -487,11 +487,11 @@ h6 {
   @apply focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent;
   @apply transition-all duration-200;
   @apply placeholder:text-gray-400;
-  font-family: 'Montserrat', sans-serif;
+  font-family: var(--font-body), system-ui, sans-serif;
 }
 
 .input:hover {
-  @apply border-silver-dark;
+  @apply border-gray-400;
 }
 
 .input-error {
@@ -499,7 +499,7 @@ h6 {
 }
 
 .input-premium {
-  @apply w-full px-4 py-3 bg-white border-b-2 border-silver;
+  @apply w-full px-4 py-3 bg-white border-b-2 border-gray-300;
   @apply focus:outline-none focus:border-primary;
   @apply transition-all duration-300;
   @apply placeholder:text-gray-400;
@@ -600,7 +600,7 @@ h6 {
 .announcement-bar {
   @apply bg-primary text-white text-sm py-2.5 text-center;
   @apply flex items-center justify-center gap-2;
-  font-family: 'Montserrat', sans-serif;
+  font-family: var(--font-body), system-ui, sans-serif;
   letter-spacing: 0.05em;
 }
 
@@ -614,7 +614,7 @@ h6 {
 
 .price-current {
   @apply text-2xl font-bold text-primary;
-  font-family: 'Montserrat', sans-serif;
+  font-family: var(--font-body), system-ui, sans-serif;
 }
 
 .price-original {
@@ -622,7 +622,7 @@ h6 {
 }
 
 .price-discount {
-  @apply text-sm font-semibold text-primary bg-silver-light px-2 py-1 rounded;
+  @apply text-sm font-semibold text-primary bg-platinum px-2 py-1 rounded;
 }
 
 /* ========================================
@@ -639,24 +639,6 @@ h6 {
 
 .stock-in {
   @apply text-green-600 text-sm font-medium flex items-center gap-1;
-}
-
-/* ========================================
-   QUANTITY SELECTOR
-   ======================================== */
-
-.quantity-selector {
-  @apply flex items-center border border-silver rounded-lg overflow-hidden;
-}
-
-.quantity-btn {
-  @apply w-12 h-12 flex items-center justify-center text-xl font-medium;
-  @apply hover:bg-silver-light transition-colors duration-200;
-  @apply disabled:opacity-40 disabled:cursor-not-allowed;
-}
-
-.quantity-value {
-  @apply w-16 text-center text-lg font-medium border-x border-silver;
 }
 
 /* ========================================
@@ -679,8 +661,10 @@ h6 {
    RESPONSIVE CONTAINER
    ======================================== */
 
+/* Slim side gutters site-wide: content runs the full width, with just enough
+   edge space that text never touches the screen. */
 .container-responsive {
-  @apply px-4 md:px-8 lg:px-16 xl:px-32 2xl:px-64;
+  @apply px-4 md:px-6 lg:px-8;
 }
 
 /* ========================================
@@ -734,7 +718,7 @@ h6 {
 
 .profile-dropdown-item {
   @apply flex items-center gap-3 px-4 py-3 text-sm text-gray-700;
-  @apply hover:bg-silver-light transition-colors duration-200;
+  @apply hover:bg-platinum transition-colors duration-200;
 }
 
 .profile-dropdown-item svg {
@@ -755,7 +739,7 @@ h6 {
 
 .search-input {
   @apply w-full pl-10 pr-4 py-3 bg-gray-50 border border-transparent rounded-lg;
-  @apply focus:bg-white focus:border-silver focus:ring-2 focus:ring-silver/30;
+  @apply focus:bg-white focus:border-gray-300 focus:ring-2 focus:ring-gray-300/30;
   @apply transition-all duration-200;
   @apply placeholder:text-gray-400;
 }
@@ -770,7 +754,7 @@ h6 {
 
 .filter-chip {
   @apply inline-flex items-center gap-2 px-4 py-2 bg-gray-100 rounded-full text-sm;
-  @apply hover:bg-silver-light transition-colors duration-200 cursor-pointer;
+  @apply hover:bg-platinum transition-colors duration-200 cursor-pointer;
 }
 
 .filter-chip.active {
@@ -799,7 +783,7 @@ h6 {
    ======================================== */
 
 .loading-spinner {
-  @apply w-6 h-6 border-2 border-silver border-t-primary rounded-full;
+  @apply w-6 h-6 border-2 border-gray-300 border-t-primary rounded-full;
   animation: spin 1s linear infinite;
 }
 

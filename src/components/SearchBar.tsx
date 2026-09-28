@@ -6,11 +6,13 @@ import { trackSearch } from "@/lib/metaPixel";
 type Props = {
   variant?: "desktop" | "mobile";
   onSubmit?: () => void;
+  defaultValue?: string;
+  autoFocus?: boolean;
 };
 
-const PLACEHOLDER = "Search for necklaces, rings, earrings...";
+const PLACEHOLDER = "Search necklace sets, earrings, colours...";
 
-const SearchBar = ({ variant = "desktop", onSubmit }: Props) => {
+const SearchBar = ({ variant = "desktop", onSubmit, defaultValue, autoFocus }: Props) => {
   const router = useRouter();
 
   const handleSearch = (e: React.FormEvent<HTMLFormElement>) => {
@@ -32,11 +34,15 @@ const SearchBar = ({ variant = "desktop", onSubmit }: Props) => {
         role="search"
       >
         <input
-          type="text"
+          key={defaultValue}
+          type="search"
           name="q"
+          defaultValue={defaultValue}
+          autoFocus={autoFocus}
+          enterKeyHint="search"
           placeholder={PLACEHOLDER}
           aria-label="Search the Viora catalogue"
-          className="w-full rounded-full bg-gray-100 px-4 py-2 pr-11 text-sm font-medium text-[#1A1410] placeholder:text-gray-500 outline-none transition focus:bg-white focus:ring-2 focus:ring-[#9B1B30]/30 min-h-[44px]"
+          className="w-full rounded-full bg-gray-100 px-4 py-2 pr-11 text-base font-medium text-[#1A1410] placeholder:text-gray-500 outline-none transition focus:bg-white focus:ring-2 focus:ring-[#9B1B30]/30 min-h-[44px]"
         />
         <button
           type="submit"
@@ -67,7 +73,7 @@ const SearchBar = ({ variant = "desktop", onSubmit }: Props) => {
       <button
         type="submit"
         aria-label="Submit search"
-        className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-full text-[#1A1410] hover:bg-silver-light transition-colors"
+        className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-full text-[#1A1410] hover:bg-platinum transition-colors"
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />

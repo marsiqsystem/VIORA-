@@ -132,7 +132,7 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
     const tokens = await withTimeout(
       wixClient.auth.getMemberTokensForDirectLogin(sessionToken)
     );
-    Cookies.set("refreshToken", JSON.stringify(tokens.refreshToken), { expires: 2 });
+    Cookies.set("refreshToken", JSON.stringify(tokens.refreshToken), { expires: 30, sameSite: "lax" });
     wixClient.auth.setTokens(tokens);
     if (justRegistered) trackCompleteRegistration("email");
     onLoggedIn?.();
@@ -254,7 +254,7 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
             // one would leave the user stuck. Point them to the Wix setting.
             if (isLocalhost() || mode === "LOGIN") {
               setError(
-                "Login is blocked by reCAPTCHA. In your Wix Dashboard go to Settings → Site Member Settings → Signup & Login Security → turn reCAPTCHA OFF (or re-check it), click Save, then click Publish at the top. After publishing, try again."
+                "We couldn't log you in right now. Please try again in a minute, or WhatsApp us and we'll help."
               );
             } else if (!isCaptchaRequired) {
               setIsCaptchaRequired(true);
@@ -308,7 +308,7 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
       if (isCaptchaError) {
         if (isLocalhost() || mode === "LOGIN") {
           setError(
-            "Login is blocked by reCAPTCHA. In your Wix Dashboard go to Settings → Site Member Settings → Signup & Login Security → turn reCAPTCHA OFF (or re-check it), click Save, then click Publish at the top. After publishing, try again."
+            "We couldn't log you in right now. Please try again in a minute, or WhatsApp us and we'll help."
           );
         } else if (!isCaptchaRequired) {
           setIsCaptchaRequired(true);
@@ -334,7 +334,7 @@ const LoginModal = ({ open, onClose, onLoggedIn }: LoginModalProps) => {
         /site is published/i.test(appDesc);
       if (isUnpublishedSite) {
         setError(
-          "Login is unavailable — the Wix site needs to be Published from the Wix dashboard before authentication will work."
+          "Login is temporarily unavailable. Please try again later — you can still check out without an account."
         );
       } else {
         const detail = code || raw || appDesc;

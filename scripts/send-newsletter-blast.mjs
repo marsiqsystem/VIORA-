@@ -80,7 +80,7 @@ const IG_URL = "https://www.instagram.com/_viorajewels_";
 
 // Inline attachments — most reliable across mail clients regardless of
 // whether /public assets are deployed at the moment of send.
-const HERO_PATH = "C:/Users/ASUS/Desktop/VIORA/VIORA/public/newsletter-hero.png";
+const HERO_PATH = "C:/Users/ASUS/Desktop/VIORA/VIORA/public/newsletter-hero.jpg";
 const FB_PATH = "C:/Users/ASUS/Desktop/VIORA/VIORA/public/facebook.png";
 const IG_PATH = "C:/Users/ASUS/Desktop/VIORA/VIORA/public/instagram.png";
 
@@ -219,7 +219,7 @@ const transporter = nodemailer.createTransport({
 });
 
 const attachments = [
-  { filename: "hero.png",     path: HERO_PATH, cid: "subscriber-hero", contentDisposition: "inline" },
+  { filename: "hero.jpg",     path: HERO_PATH, cid: "subscriber-hero", contentDisposition: "inline" },
   { filename: "facebook.png", path: FB_PATH,   cid: "fb-icon",         contentDisposition: "inline" },
   { filename: "instagram.png",path: IG_PATH,   cid: "ig-icon",         contentDisposition: "inline" },
 ];

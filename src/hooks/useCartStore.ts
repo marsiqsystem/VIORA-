@@ -8,6 +8,9 @@ type CartState = {
   counter: number;
   couponError: string;
   couponApplied: boolean;
+  /** Names of sold-out lines just taken out of the bag, for a one-time notice. */
+  soldOutRemoved: string[];
+  dismissSoldOut: () => void;
   getCart: (wixClient: WixClient) => Promise<void>;
   addItem: (
     wixClient: WixClient,
@@ -29,15 +32,40 @@ type CartState = {
 
 const EMPTY_CART = {} as currentCart.Cart;
 
+/** Lines Wix will no longer sell: sold out (or deleted) since they were added. */
+const isUnavailable = (li: any) =>
+  ["NOT_AVAILABLE", "NOT_FOUND"].includes(li?.availability?.status) || li?.quantity === 0;
+
+// Takes unavailable lines out of the Wix cart so the bag, the totals and
+// checkout only ever see pieces that can ship.
+const dropUnavailable = async (wixClient: WixClient, cart: currentCart.Cart) => {
+  const gone = (cart?.lineItems || []).filter(isUnavailable);
+  if (!gone.length) return { cart, removed: [] as string[], removedIds: [] as string[] };
+  try {
+    const res = await wixClient.currentCart.removeLineItemsFromCurrentCart(gone.map((li) => li._id!));
+    return {
+      cart: res.cart || EMPTY_CART,
+      removed: gone.map((li) => li.productName?.original || "An item"),
+      removedIds: gone.map((li) => li.catalogReference?.catalogItemId || ""),
+    };
+  } catch (err) {
+    console.error("Failed to remove sold-out items:", err);
+    return { cart, removed: [] as string[], removedIds: [] as string[] };
+  }
+};
+
 export const useCartStore = create<CartState>((set) => ({
   cart: EMPTY_CART,
   isLoading: true,
   counter: 0,
   couponError: "",
   couponApplied: false,
+  soldOutRemoved: [],
+  dismissSoldOut: () => set({ soldOutRemoved: [] }),
   getCart: async (wixClient) => {
     try {
-      const cart = await wixClient.currentCart.getCurrentCart();
+      const { cart, removed } = await dropUnavailable(wixClient, await wixClient.currentCart.getCurrentCart());
+      if (removed.length) set({ soldOutRemoved: removed });
       // Check if the fetched cart already has a coupon applied
       const hasAppliedCoupon = !!(cart as any)?.appliedDiscounts?.some(
         (d: any) => d.coupon
@@ -77,13 +105,19 @@ export const useCartStore = create<CartState>((set) => ({
       });
 
       // Fetch the updated cart state to ensure global UI sync
-      const updatedCart = await wixClient.currentCart.getCurrentCart();
-      
+      const { cart: updatedCart, removed, removedIds } = await dropUnavailable(
+        wixClient,
+        await wixClient.currentCart.getCurrentCart()
+      );
+
       set({
         cart: updatedCart || EMPTY_CART,
         counter: updatedCart?.lineItems?.length || 0,
         isLoading: false,
       });
+      // Wix accepts a sold-out piece at quantity 0 — tell the shopper instead.
+      if (removedIds.includes(productId)) throw new Error("SOLD_OUT");
+      if (removed.length) set({ soldOutRemoved: removed });
     } catch (err) {
       console.error("Failed to add item to cart in store:", err);
       set((state) => ({ ...state, isLoading: false }));

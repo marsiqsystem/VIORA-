@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/reviews",
       "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/checkout-reminders",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

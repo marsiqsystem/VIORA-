@@ -10,7 +10,6 @@ export const WIX_COLLECTION_IDS = {
 } as const;
 
 export const ALL_PRODUCTS_FEATURED_ORDER = [
-  "rakhi luxe gift set",
   "eternal shine jewelry set",
   "pearl whisper diamond style earrings",
   "emerald bloom ensemble jewelry set",
@@ -19,11 +18,9 @@ export const ALL_PRODUCTS_FEATURED_ORDER = [
 export const CATEGORY_LINKS = [
   { label: "All Products", slug: "all-products", id: WIX_COLLECTION_IDS.allProducts },
   { label: "Best Sellers", slug: "best-sellers", id: WIX_COLLECTION_IDS.bestSellers },
-  { label: "Ear Rings", slug: "ear-rings", id: WIX_COLLECTION_IDS.earrings },
-  { label: "Fresh From Viora", slug: "fresh-from-viora", id: WIX_COLLECTION_IDS.freshFromViora },
-  { label: "Wedding/Reception", slug: "wedding-reception", id: WIX_COLLECTION_IDS.weddingReception },
-  { label: "Office Parties", slug: "office-parties", id: WIX_COLLECTION_IDS.officeParties },
-  { label: "Gifting", slug: "gifting", id: WIX_COLLECTION_IDS.gifting },
+  { label: "Earrings", slug: "ear-rings", id: WIX_COLLECTION_IDS.earrings },
+  { label: "Wedding & Reception", slug: "wedding-reception", id: WIX_COLLECTION_IDS.weddingReception },
+  { label: "Office & Parties", slug: "office-parties", id: WIX_COLLECTION_IDS.officeParties },
   { label: "New Arrivals", slug: "new-arrivals", id: WIX_COLLECTION_IDS.newArrivals },
 ] as const;
 

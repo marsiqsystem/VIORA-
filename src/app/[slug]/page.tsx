@@ -1,20 +1,44 @@
 import type { Metadata } from "next";
+import type { products } from "@wix/stores";
 import ProductView from "@/components/ProductView";
 import { wixClientServer } from "@/lib/wixClientServer";
 import { fetchProductReviews } from "@/lib/reviewsActions";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { ColorSibling } from "@/components/ColorVariantSwatches";
+import type { PairItem } from "@/components/PairItWith";
+import type { ProductReel } from "@/components/ProductReels";
+import { PRODUCT_REELS, reelKey } from "@/data/productReels";
 import BackButton from "@/components/BackButton";
 import ProductJsonLd from "@/components/ProductJsonLd";
 import RelatedProducts from "@/components/RelatedProducts";
+import { loadReviewSnippets } from "@/lib/reviewSnippets";
 import { isDuplicateSlug } from "@/lib/duplicateProducts";
+import { htmlToText } from "@/lib/htmlToText";
 import { Suspense } from "react";
+import { baseKeyOf, bestSellerRank, dedupeDesigns, isInStock, sellingPrice } from "@/lib/catalogue";
+import { getRecentOrderCounts } from "@/lib/popularity";
 
 // Canonical site origin — kept in sync with sitemap.ts / robots.ts.
 const BASE_URL = (
   process.env.NEXT_PUBLIC_SITE_URL || "https://www.viorajewel.in"
 ).replace(/\/$/, "");
+
+const PAIR_WITH_LIMIT = 6;
+
+// Wix collections that describe an occasion, keyed by collection slug.
+const OCCASION_LABELS: Record<string, string> = {
+  weddingreception: "Weddings & receptions",
+  "office-parties": "Office parties",
+};
+
+type WixServerClient = Awaited<ReturnType<typeof wixClientServer>>;
+
+type Merchandising = {
+  isBestSeller: boolean;
+  occasions: string[];
+  pairWith: PairItem[];
+};
 
 // Year-ahead ISO date used for Offer.priceValidUntil so Google stops warning
 // about missing validity windows. Refreshed on each request (page is dynamic).
@@ -33,17 +57,121 @@ const splitBaseAndColor = (name: string): { base: string; color: string } => {
   };
 };
 
-function descriptionToPlainText(html: string): string {
-  return html
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
+/**
+ * Product videos uploaded to Wix media, for the reels row. Colour variants are
+ * separate Wix products, so a reel filmed on any colour is shown on all of them
+ * (the current product's own videos first).
+ */
+function extractReels(group: products.Product[]): ProductReel[] {
+  const seen = new Set<string>();
+  const reels: ProductReel[] = [];
+  for (const p of group) {
+    for (const m of p.media?.items || []) {
+      if (m.mediaType !== "video" || !m._id || seen.has(m._id)) continue;
+      const files = (m.video?.files || []).filter((f) => !!f.url);
+      if (files.length === 0) continue;
+      // ~720p is sharp on phones without the 1080p download.
+      const best = [...files].sort(
+        (a, b) => Math.abs((a.height || 0) - 720) - Math.abs((b.height || 0) - 720)
+      )[0];
+      seen.add(m._id);
+      reels.push({ id: m._id, src: best.url!, poster: m.thumbnail?.url || undefined });
+    }
+  }
+  return reels;
+}
+
+/**
+ * Best-seller badge, occasion labels and the "Add to your
+ * order" row (one card per design). Non-critical: on any Wix error the page
+ * renders without them.
+ */
+async function loadMerchandising(
+  wixClient: WixServerClient,
+  product: products.Product,
+  baseName: string
+): Promise<Merchandising> {
+  try {
+    const collections = await wixClient.collections.queryCollections().find();
+    const inCollection = (id?: string | null) =>
+      !!id && (product.collectionIds || []).includes(id);
+
+    const bestSellers = collections.items.find(
+      (c) =>
+        c.slug === "featured" ||
+        c.slug === "best-sellers" ||
+        (c.name || "").toLowerCase().includes("best seller")
+    );
+    const earrings = collections.items.find(
+      (c) => c.slug === "ear-rings" || /ear\s?-?rings?/i.test(c.name || "")
+    );
+
+    const isBestSeller = inCollection(bestSellers?._id);
+    const isEarrings = inCollection(earrings?._id);
+    const occasions = collections.items
+      .filter((c) => !!c.slug && !!OCCASION_LABELS[c.slug] && inCollection(c._id))
+      .map((c) => OCCASION_LABELS[c.slug!]);
+
+    // "Add to your order": sets already come with earrings, so a set page offers
+    // other sets (a second look) and an earrings page offers sets, then other
+    // earrings. Ranked by real orders so the row leads with proven designs.
+    const [res, orderCounts] = await Promise.all([
+      wixClient.products.queryProducts().limit(100).find(),
+      getRecentOrderCounts(),
+    ]);
+    const isEarringsProduct = (p: products.Product) =>
+      !!earrings?._id && (p.collectionIds || []).includes(earrings._id);
+    const ownBase = baseName.toLowerCase();
+    const candidates = dedupeDesigns(
+      res.items.filter(
+        (p) =>
+          p._id !== product._id &&
+          p.visible !== false &&
+          isInStock(p) &&
+          !(p.stock?.trackInventory === true && (p.stock?.quantity ?? 0) < 1) &&
+          baseKeyOf(p) !== ownBase &&
+          (isEarrings || !isEarringsProduct(p))
+      )
+    ).filter(isInStock);
+
+    const picked = candidates
+      .sort(
+        (a, b) =>
+          Number(isEarringsProduct(a)) - Number(isEarringsProduct(b)) ||
+          (orderCounts[baseKeyOf(b)] || 0) - (orderCounts[baseKeyOf(a)] || 0) ||
+          bestSellerRank(a) - bestSellerRank(b) ||
+          sellingPrice(a) - sellingPrice(b)
+      )
+      .slice(0, PAIR_WITH_LIMIT);
+
+    const pairWith: PairItem[] = picked.map((p) => {
+      const options = p.productOptions || [];
+      const selected: Record<string, string> = {};
+      for (const o of options) {
+        const choice = o.choices?.[0]?.description;
+        if (o.name && choice) selected[o.name] = choice;
+      }
+      const price = p.price?.discountedPrice || p.price?.price || 0;
+      const fullPrice = p.price?.price || 0;
+      return {
+        id: p._id!,
+        slug: p.slug || "",
+        name: splitBaseAndColor(p.name || "").base || p.name || "",
+        image: p.media?.mainMedia?.image?.url || undefined,
+        price,
+        compareAt: fullPrice > price ? fullPrice : undefined,
+        variantId: options.length ? p.variants?.[0]?._id || undefined : undefined,
+        options: Object.keys(selected).length ? selected : undefined,
+        // Single-choice options (e.g. one Color) can be added directly.
+        quickAdd: options.every((o) => (o.choices?.length || 0) <= 1),
+      };
+    });
+
+    return { isBestSeller, occasions, pairWith };
+  } catch (err) {
+    console.error("[product merchandising] failed:", err);
+    return { isBestSeller: false, occasions: [], pairWith: [] };
+  }
 }
 
 /**
@@ -74,12 +202,12 @@ export async function generateMetadata({
     const url = `${BASE_URL}/${product.slug || params.slug}`;
 
     const rawDescription = product.description
-      ? descriptionToPlainText(product.description)
+      ? htmlToText(product.description)
       : "";
     const description =
       rawDescription.length > 30
         ? rawDescription.slice(0, 160)
-        : `${baseName} from Viora Jewel — affordable Indian fashion jewellery with free shipping across India and an easy 48-hour exchange on damaged or incorrect items.`;
+        : `${baseName} from Viora Jewel — affordable Indian fashion jewellery with free delivery when you pay online, cash on delivery across India and a 48-hour exchange on damaged or incorrect items.`;
 
     const ogImage =
       product.media?.mainMedia?.image?.url ||
@@ -150,6 +278,8 @@ const SinglePage = async ({ params }: { params: { slug: string } }) => {
   const normalizedBase = baseName.toLowerCase();
 
   let siblings: ColorSibling[] = [];
+  // Full Wix products for the other colours — their videos feed the reels row.
+  const siblingProducts: products.Product[] = [];
 
   if (baseName) {
     // Wix `startsWith` is case-sensitive. Run two queries (raw + lowercased) and
@@ -178,11 +308,13 @@ const SinglePage = async ({ params }: { params: { slug: string } }) => {
       if (base.toLowerCase() !== normalizedBase) continue;
       // Skip non-siblings that share a prefix but no color suffix and aren't the current product.
       if (!color && p._id !== product._id) continue;
+      if (p._id !== product._id) siblingProducts.push(p);
       matched.push({
         id: p._id!,
         slug: p.slug || "",
         name: p.name || "",
         colorLabel: color || currentColor || "Original",
+        image: p.media?.mainMedia?.image?.url || undefined,
       });
     }
 
@@ -193,33 +325,28 @@ const SinglePage = async ({ params }: { params: { slug: string } }) => {
         slug: product.slug || params.slug,
         name: product.name || "",
         colorLabel: currentColor || "Original",
+        image: product.media?.mainMedia?.image?.url || undefined,
       });
     }
 
     siblings = matched;
   }
 
-  // Fetch real Wix Reviews for this product (server-side).
-  const initialReviews = product._id
-    ? await fetchProductReviews(product._id)
-    : [];
+  // Reels shipped in public/reels first, then any videos uploaded to Wix media.
+  const reels: ProductReel[] = [
+    ...(PRODUCT_REELS[reelKey(baseName)] || []).map((r) => ({ id: r.src, hasAudio: false, ...r })),
+    ...extractReels([product, ...siblingProducts]),
+  ];
 
-  // Check if product belongs to the "featured" (bestseller) collection.
-  let isBestSeller = false;
-  try {
-    const collections = await wixClient.collections.queryCollections().find();
-    const bestSellerCollection = collections.items.find(
-      (c) =>
-        c.slug === "featured" ||
-        c.slug === "best-sellers" ||
-        (c.name || "").toLowerCase().includes("best seller")
-    );
-    if (bestSellerCollection && product.collectionIds) {
-      isBestSeller = product.collectionIds.includes(bestSellerCollection._id!);
-    }
-  } catch (e) {
-    // Non-critical — badge just won't show
-  }
+  // Real Wix Reviews, review quotes for the top of the page and merchandising
+  // (badge, occasions, "Add to your order"), in parallel.
+  const [initialReviews, reviewSnippets, { isBestSeller, occasions, pairWith }] = await Promise.all([
+    product._id
+      ? fetchProductReviews(product._id)
+      : Promise.resolve([] as Awaited<ReturnType<typeof fetchProductReviews>>),
+    product._id ? loadReviewSnippets(product._id, baseName) : Promise.resolve([]),
+    loadMerchandising(wixClient, product, baseName),
+  ]);
 
   // ---- Structured data (JSON-LD) inputs, derived from the Wix product ----
   const productImages =
@@ -281,8 +408,10 @@ const SinglePage = async ({ params }: { params: { slug: string } }) => {
       {/* Breadcrumb with Back button — tight top/bottom padding so the product
           image sits high on the page. This matters for ads: platforms crop
           product-page screenshots from the top, and any extra top whitespace
-          used to push the price below the fold in the ad preview. */}
-      <div className="container-responsive py-1 border-b border-gray-100">
+          used to push the price below the fold in the ad preview. Side padding
+          is deliberately slim (not container-responsive) so the page uses the
+          full width. */}
+      <div className="px-4 py-1 md:px-6 lg:px-8 border-b border-gray-100">
         <nav className="flex items-center gap-2 text-sm text-gray-500">
           <BackButton className="-ml-2" />
           <Link href="/" className="hover:text-primary transition-colors">
@@ -299,8 +428,8 @@ const SinglePage = async ({ params }: { params: { slug: string } }) => {
         </nav>
       </div>
 
-      {/* Product Section — no top padding for the same "keep the price above the fold in ads" reason */}
-      <div className="container-responsive pb-8 lg:pb-12">
+      {/* Product Section — no top padding on mobile for the same "keep the price above the fold in ads" reason */}
+      <div className="px-4 pb-8 md:px-6 lg:px-8 lg:pb-12 lg:pt-6">
         <ProductView
           product={product}
           colorSiblings={siblings}
@@ -308,6 +437,10 @@ const SinglePage = async ({ params }: { params: { slug: string } }) => {
           displayName={baseName}
           isBestSeller={isBestSeller}
           initialReviews={initialReviews}
+          pairWith={pairWith}
+          reels={reels}
+          occasions={occasions}
+          reviewSnippets={reviewSnippets}
         />
       </div>
 
@@ -325,4 +458,3 @@ const SinglePage = async ({ params }: { params: { slug: string } }) => {
 };
 
 export default SinglePage;
-

@@ -79,6 +79,19 @@ const nextConfig = {
           },
         ],
       },
+      {
+        // Reels (public/reels): cache for a week so the floating reel and tiles
+        // don't re-download on every page — not immutable, because a video is
+        // sometimes replaced under the same name.
+        source: "/:all*(mp4|webm)",
+        locale: false,
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=604800, stale-while-revalidate=86400",
+          },
+        ],
+      },
     ];
   },
 };

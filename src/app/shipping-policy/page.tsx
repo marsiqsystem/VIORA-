@@ -1,113 +1,107 @@
 import type { Metadata } from "next";
-import BackButton from "@/components/BackButton";
+import Link from "next/link";
+import PolicyPage, { POLICY_EMAIL } from "@/components/policy/PolicyPage";
+import { COD_CHARGE, PREPAID_DISCOUNT } from "@/lib/checkoutPricing";
+import { whatsappLink } from "@/lib/contact";
 
 export const metadata: Metadata = {
   title: "Shipping Policy",
-  description:
-    "Shipping timelines, costs, and delivery partners for Viora Jewels orders.",
+  description: `Pan-India delivery from Viora Jewel: FREE + ₹${PREPAID_DISCOUNT} off when you pay online, ₹${COD_CHARGE} with cash on delivery. Orders before 8 pm ship the same day, Monday to Saturday.`,
+  alternates: { canonical: "/shipping-policy" },
 };
 
-const ShippingPolicyPage = () => {
-  return (
-    <main className="min-h-[calc(100vh-180px)] bg-platinum">
-      <div className="max-w-4xl mx-auto py-12 md:py-16 px-4 md:px-8">
-        <div className="mb-6 flex items-center gap-2">
-          <BackButton className="bg-white shadow-sm" />
-          <span className="text-sm font-medium text-gray-500">Back</span>
-        </div>
-        <header className="mb-10 border-b border-primary/10 pb-8">
-          <p className="text-xs uppercase tracking-[0.2em] text-accent">
-            Orders
-          </p>
-          <h1 className="mt-2 font-playfair text-4xl md:text-5xl font-bold text-primary">
-            Shipping Policy
-          </h1>
-          <p className="mt-3 text-sm text-gray-500">
-            Last updated: 13 May 2026
-          </p>
-        </header>
+// Keep in step with checkoutPricing, lib/deliveryEstimate and ProductJsonLd's shipping details.
+const ShippingPolicyPage = () => (
+  <PolicyPage
+    path="/shipping-policy"
+    eyebrow="Orders"
+    title="Shipping Policy"
+    updated="16 September 2026"
+    summary={[
+      "We deliver across India. International shipping isn't available yet.",
+      `Pay online: FREE delivery + ₹${PREPAID_DISCOUNT} off. Cash on delivery: ₹${COD_CHARGE} delivery & handling.`,
+      "Order before 8 pm and it ships the same day (Monday to Saturday), then usually 5–7 business days to arrive.",
+      "Order updates come on WhatsApp, and you can track your order any time without logging in.",
+    ]}
+  >
+    <p>Every Viora order is hand-checked, packed and dispatched from Kolkata. These are our shipping terms.</p>
 
-        <div className="space-y-8 text-[15px] leading-relaxed text-gray-700">
-          <p>
-            Every Viora Jewels order is hand-checked, packaged, and dispatched
-            with care. Below are our standard shipping terms.
-          </p>
+    <section id="coverage">
+      <h2>Where we deliver</h2>
+      <p>
+        We ship pan-India through trusted courier partners such as Bluedart, Delhivery and India Post. International
+        shipping isn&apos;t available at the moment.
+      </p>
+    </section>
 
-          <section>
-            <h2 className="font-playfair text-2xl font-semibold text-primary mb-3">
-              Delivery Coverage
-            </h2>
-            <p>
-              We currently ship pan-India through trusted courier partners such
-              as Bluedart, Delhivery, and India Post. International shipping is
-              not available at the moment.
-            </p>
-          </section>
+    <section id="charges">
+      <h2>Delivery charges</h2>
+      <ul>
+        <li>
+          <strong>Pay online (UPI, cards and more):</strong> FREE delivery, plus ₹{PREPAID_DISCOUNT} off your order.
+        </li>
+        <li>
+          <strong>Cash on delivery:</strong> a ₹{COD_CHARGE} delivery &amp; handling charge, shown at checkout before you
+          place the order.
+        </li>
+      </ul>
+      <p className="mt-3">There&apos;s no minimum order value for either.</p>
+    </section>
 
-          <section>
-            <h2 className="font-playfair text-2xl font-semibold text-primary mb-3">
-              Processing &amp; Delivery Time
-            </h2>
-            <ul className="list-disc pl-5 space-y-2">
-              <li>
-                <strong>Order processing:</strong> 1&ndash;2 business days.
-              </li>
-              <li>
-                <strong>Standard delivery:</strong> 5&ndash;7 business days
-                from dispatch.
-              </li>
-              <li>
-                <strong>Remote pin codes:</strong> may take up to 10 business
-                days.
-              </li>
-            </ul>
-          </section>
+    <section id="timelines">
+      <h2>How long delivery takes</h2>
+      <ul>
+        <li>
+          <strong>Dispatch:</strong> orders placed before 8 pm (IST) are packed and shipped the same day. Orders after 8 pm ship
+          the next working day. We pack Monday to Saturday, so Saturday-night and Sunday orders ship on Monday.
+        </li>
+        <li>
+          <strong>Delivery:</strong> usually 5–7 business days after shipping.
+        </li>
+        <li>
+          <strong>Remote pin codes:</strong> can take up to 10 business days.
+        </li>
+      </ul>
+      <p className="mt-3">
+        Sundays aren&apos;t counted as business days. The date shown on the product page and at checkout uses these same
+        timelines.
+      </p>
+    </section>
 
-          <section>
-            <h2 className="font-playfair text-2xl font-semibold text-primary mb-3">
-              Shipping Charges
-            </h2>
-            <p>
-              <strong>Free delivery on all orders</strong> across India. No
-              minimum cart value required. Any cash-on-delivery handling fee,
-              if applicable, will be shown clearly at checkout.
-            </p>
-          </section>
+    <section id="tracking">
+      <h2>Tracking your order</h2>
+      <p>
+        We send your order confirmation by email and WhatsApp, then a WhatsApp message with your tracking link when the
+        order is dispatched, when it&apos;s out for delivery and when it&apos;s delivered. You can also check it any time
+        on <Link href="/track">Track Order</Link> with your order number and phone number — no login needed — or in{" "}
+        <Link href="/account/orders">My Orders</Link> if you have an account.
+      </p>
+    </section>
 
-          <section>
-            <h2 className="font-playfair text-2xl font-semibold text-primary mb-3">
-              Order Tracking
-            </h2>
-            <p>
-              Once your order is dispatched, you will receive a tracking link
-              via email and SMS. You can also check the status from{" "}
-              <a className="text-accent underline" href="/orders">
-                My Orders
-              </a>
-              .
-            </p>
-          </section>
+    <section id="address">
+      <h2>Changing your address</h2>
+      <p>
+        Spotted a mistake? Message us on{" "}
+        <a href={whatsappLink("Hi Viora, I need to change the address on my order")} target="_blank" rel="noopener noreferrer">
+          WhatsApp
+        </a>{" "}
+        with your order number as soon as possible. We can usually update it before the order is dispatched, but not
+        after.
+      </p>
+    </section>
 
-          <section>
-            <h2 className="font-playfair text-2xl font-semibold text-primary mb-3">
-              Undelivered or Delayed Shipments
-            </h2>
-            <p>
-              If your order has not arrived within the estimated window, please
-              email{" "}
-              <a
-                className="text-accent underline"
-                href="mailto:mail@viorajewel.in"
-              >
-                mail@viorajewel.in
-              </a>{" "}
-              with your order ID and we&apos;ll investigate within 24 hours.
-            </p>
-          </section>
-        </div>
-      </div>
-    </main>
-  );
-};
+    <section id="delays">
+      <h2>Delayed or missing orders</h2>
+      <p>
+        If your order hasn&apos;t arrived within the window above, message us on{" "}
+        <a href={whatsappLink("Hi Viora, my order hasn't arrived yet")} target="_blank" rel="noopener noreferrer">
+          WhatsApp
+        </a>{" "}
+        or email <a href={`mailto:${POLICY_EMAIL}`}>{POLICY_EMAIL}</a> with your order number, and we&apos;ll look into
+        it within 24 hours.
+      </p>
+    </section>
+  </PolicyPage>
+);
 
 export default ShippingPolicyPage;

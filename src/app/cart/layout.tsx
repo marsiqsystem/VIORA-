@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 // content, and (per Google's own guidance) should be noindexed. follow:true so
 // link equity still flows through to the public pages they link to.
 export const metadata: Metadata = {
+  title: "Your bag",
   robots: { index: false, follow: true },
 };
 

@@ -1,6 +1,8 @@
 "use server";
 
 import { wixClientServer } from "@/lib/wixClientServer";
+import { wixAdminClientServer } from "@/lib/wixAdminClientServer";
+import { REVIEW_REWARD } from "@/lib/checkoutPricing";
 import type { PublicReview, CreateReviewResult } from "@/lib/reviewsTypes";
 
 const NAMESPACE = "stores";
@@ -14,6 +16,24 @@ function toHttpsImage(url: string | undefined): string | undefined {
   const match = url.match(/^wix:image:\/\/v1\/([^/#?]+)/);
   if (!match) return url;
   return `https://static.wixstatic.com/media/${match[1]}`;
+}
+
+// The photo-review reward is for people who have actually bought from us, so the
+// coupon can't be farmed by anyone who opens an account. Same member→orders
+// lookup as the My Orders page.
+async function hasOrderedBefore(member: any): Promise<boolean> {
+  try {
+    const res = await wixAdminClientServer().orders.searchOrders({
+      filter: member.contactId
+        ? { "buyerInfo.contactId": { $eq: member.contactId } }
+        : { "buyerInfo.memberId": { $eq: member._id } },
+      cursorPaging: { limit: 10 },
+    });
+    return (res.orders || []).some((o: any) => String(o.status || "").toUpperCase() !== "CANCELED");
+  } catch (err) {
+    console.error("[reviews] order lookup for photo reward failed:", err);
+    return false;
+  }
 }
 
 export async function fetchProductReviews(
@@ -135,6 +155,10 @@ export async function createProductReview(input: {
       },
     } as any);
 
+    // Reward any photo review from a past customer, whatever the rating.
+    const reward =
+      input.mediaUrl && (await hasOrderedBefore(member)) ? { ...REVIEW_REWARD } : undefined;
+
     return {
       ok: true,
       review: {
@@ -152,6 +176,7 @@ export async function createProductReview(input: {
             : input.mediaUrl
         ),
       },
+      ...(reward ? { reward } : {}),
     };
   } catch (err: any) {
     console.error("[reviews] createProductReview failed:", err);

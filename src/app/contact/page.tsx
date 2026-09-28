@@ -1,377 +1,167 @@
-"use client";
-import React, { useState } from "react";
-import Image from "next/image";
-import { trackContact, trackLead } from "@/lib/metaPixel";
-import BackButton from "@/components/BackButton";
-import { HONEYPOT_FIELD } from "@/lib/apiGuard";
+import Link from "next/link";
+import ContactForm from "@/components/contact/ContactForm";
+import ContactLink from "@/components/contact/ContactLink";
+import { COD_CHARGE, PREPAID_DISCOUNT } from "@/lib/checkoutPricing";
+import { whatsappLink } from "@/lib/contact";
 
 const CONTACT_EMAIL = "mail@viorajewel.in";
 
-const EMPTY_FORM = {
-  title: "",
-  firstName: "",
-  lastName: "",
-  email: "",
-  query: "",
-  // Honeypot: /api/contact rejects any submission where this is non-empty.
-  // Humans never see it; bots that fill every field do.
-  [HONEYPOT_FIELD]: "",
-};
+const icon = (d: string) => (
+  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d={d} />
+  </svg>
+);
 
-const ContactPage = () => {
-  const [formData, setFormData] = useState(EMPTY_FORM);
-  const [showPopup, setShowPopup] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState("");
+// Short answers to what people usually write in about — same facts as the policies and FAQ.
+const QUICK_ANSWERS = [
+  {
+    q: "When will my order arrive?",
+    a: "Order before 8 pm and it ships the same day (Mon–Sat), then usually 5–7 business days to arrive. Remote pin codes can take up to 10.",
+    href: "/track",
+    link: "Track your order",
+  },
+  {
+    q: "Damaged or wrong piece?",
+    a: "Tell us within 48 hours of delivery with a clear photo and we'll exchange it.",
+    href: "/exchange-policy",
+    link: "Exchange policy",
+  },
+  {
+    q: "Is there a delivery charge?",
+    a: `FREE when you pay online (plus ₹${PREPAID_DISCOUNT} off). Cash on delivery is ₹${COD_CHARGE}.`,
+    href: "/shipping-policy",
+    link: "Shipping policy",
+  },
+];
 
-  const handleChange = (
-    e: React.ChangeEvent<
-      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-    >
-  ) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
-  };
+/** Contact: the fastest channel first, self-serve for the common questions, then the form and the address. */
+const ContactPage = () => (
+  <div className="bg-platinum text-primary">
+    <section className="mx-auto max-w-6xl px-4 pt-4 md:px-6 md:pt-8 lg:px-8">
+      <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-xs text-gray-500">
+        <Link href="/" className="hover:text-accent">
+          Home
+        </Link>
+        <span aria-hidden="true">/</span>
+        <span className="font-medium text-primary">Contact</span>
+      </nav>
+      <h1 className="mt-2 font-playfair text-[32px] font-bold leading-tight md:text-5xl">How can we help?</h1>
+      <p className="mt-1 text-sm text-gray-600 md:text-base">
+        WhatsApp is the fastest way to reach us. For your order, tracking needs no login.
+      </p>
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (submitting) return;
-    setSubmitError("");
-    setSubmitting(true);
+      <ul className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <li>
+          <ContactLink
+            href={whatsappLink("Hi Viora, I need help with")}
+            external
+            className="flex h-full items-start gap-3 bg-[#1f7a4d] p-4 text-white hover:bg-[#19663f]"
+          >
+            <svg className="h-6 w-6 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M17.47 14.38c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.67-1.61-.92-2.21-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.8.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.88 1.21 3.08c.15.2 2.1 3.2 5.08 4.49.71.31 1.26.49 1.7.63.71.23 1.36.2 1.87.12.57-.09 1.76-.72 2-1.41.25-.7.25-1.29.17-1.41-.07-.13-.27-.2-.57-.35zM12.04 21.5a9.5 9.5 0 01-4.84-1.33l-.35-.2-3.6.94.96-3.5-.23-.36a9.46 9.46 0 01-1.45-5.05c0-5.24 4.27-9.5 9.52-9.5a9.5 9.5 0 010 19zm8.08-17.58A11.35 11.35 0 0012.04.5C5.74.5.62 5.62.61 11.92c0 2.01.53 3.98 1.53 5.71L.5 23.5l6.02-1.58a11.4 11.4 0 005.51 1.4c6.3 0 11.42-5.12 11.43-11.42a11.35 11.35 0 00-3.34-8.08z" />
+            </svg>
+            <span>
+              <span className="block font-semibold">WhatsApp us</span>
+              <span className="block text-sm text-white/85">+91 89103 50623</span>
+            </span>
+          </ContactLink>
+        </li>
+        <li>
+          <Link href="/track" className="flex h-full items-start gap-3 border border-silver-light bg-white p-4 hover:border-accent">
+            <span className="text-accent">{icon("M3 7h11v9H3zM14 10h4l3 3v3h-7M7 19a2 2 0 100-4 2 2 0 000 4zM17 19a2 2 0 100-4 2 2 0 000 4z")}</span>
+            <span>
+              <span className="block font-semibold">Track my order</span>
+              <span className="block text-sm text-gray-600">Status and courier updates</span>
+            </span>
+          </Link>
+        </li>
+        <li>
+          <Link href="/exchange-policy" className="flex h-full items-start gap-3 border border-silver-light bg-white p-4 hover:border-accent">
+            <span className="text-accent">{icon("M4 8h13l-3-3M20 16H7l3 3")}</span>
+            <span>
+              <span className="block font-semibold">Exchange a piece</span>
+              <span className="block text-sm text-gray-600">Within 48 hours of delivery</span>
+            </span>
+          </Link>
+        </li>
+        <li>
+          <ContactLink href={`mailto:${CONTACT_EMAIL}`} className="flex h-full items-start gap-3 border border-silver-light bg-white p-4 hover:border-accent">
+            <span className="text-accent">{icon("M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z")}</span>
+            <span className="min-w-0">
+              <span className="block font-semibold">Email us</span>
+              <span className="block truncate text-sm text-gray-600">{CONTACT_EMAIL}</span>
+            </span>
+          </ContactLink>
+        </li>
+      </ul>
+    </section>
 
-    try {
-      const res = await fetch("/api/contact", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data?.error || "Failed to send your message.");
-      }
-
-      trackLead();
-      setShowPopup(true);
-      setFormData(EMPTY_FORM);
-    } catch (err: any) {
-      setSubmitError(err?.message || "Failed to send. Please try again.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-platinum">
-      {/* Hero Section */}
-      <div className="relative h-[50vh] md:h-[60vh] overflow-hidden">
-        <Image
-          src="/contact-us-optimized.jpg"
-          alt="Contact Viora Jewels"
-          fill
-          sizes="100vw"
-          quality={70}
-          className="object-cover"
-          priority
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/40 to-transparent" />
-        <div className="absolute inset-0 flex items-center justify-center text-center">
-          <div className="max-w-3xl px-6">
-            <div className="mb-6 flex items-center justify-center gap-2">
-              <BackButton className="bg-white/80 shadow-sm backdrop-blur" />
-              <span className="text-sm font-medium text-white/80">Back</span>
-            </div>
-            <h1 className="text-4xl md:text-6xl lg:text-7xl font-playfair font-bold text-white mb-4 animate-fade-in-up">
-              Contact Us
-            </h1>
-            <p className="text-lg md:text-xl text-gray-200 animate-fade-in-up stagger-1">
-              We&apos;d love to hear from you
-            </p>
-          </div>
-        </div>
+    <section className="mx-auto grid max-w-6xl gap-8 px-4 py-10 md:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] md:px-6 md:py-14 lg:gap-12 lg:px-8">
+      <div className="border border-silver-light bg-white p-5 md:p-8">
+        <h2 className="font-playfair text-2xl font-bold md:text-3xl">Send us a message</h2>
+        <p className="mb-5 mt-1 text-sm text-gray-600">For anything that needs detail or photos, write to us here.</p>
+        <ContactForm />
       </div>
 
-      {/* Introduction */}
-      <div className="container-responsive py-12 md:py-16">
-        <div className="max-w-3xl mx-auto text-center">
-          <p className="text-lg text-gray-600 leading-relaxed">
-            The Viora Jewels team is here for order support, gift guidance,
-            product questions, and custom shopping help.
-          </p>
+      <aside className="space-y-6">
+        <div>
+          <h2 className="font-playfair text-2xl font-bold">Quick answers</h2>
+          <ul className="mt-3 divide-y divide-silver-light border-y border-silver-light">
+            {QUICK_ANSWERS.map((item) => (
+              <li key={item.q} className="py-3">
+                <p className="text-sm font-semibold">{item.q}</p>
+                <p className="mt-0.5 text-sm text-gray-600">{item.a}</p>
+                <Link href={item.href} className="mt-1 inline-block text-sm font-semibold text-accent underline-offset-4 hover:underline">
+                  {item.link} →
+                </Link>
+              </li>
+            ))}
+          </ul>
         </div>
-      </div>
 
-      {/* Main Content */}
-      <div className="container-responsive pb-16 md:pb-24">
-        <div className="grid md:grid-cols-2 gap-12 lg:gap-16">
-          {/* Contact Form */}
-          <div className="bg-platinum rounded-lg p-8 shadow-premium border border-silver-light">
-            <h2 className="text-2xl font-playfair font-bold text-primary mb-2">
-              Send us a message
-            </h2>
-            <p className="text-gray-600 mb-8">
-              Fill in the form below and our team will get back to you as soon as possible.
-            </p>
-
-            <form onSubmit={handleSubmit} className="space-y-5">
-              {/* Honeypot. Off-screen rather than display:none — some bots skip
-                  hidden fields but still fill positioned ones. Never focusable,
-                  never announced to screen readers. */}
-              <input
-                type="text"
-                name={HONEYPOT_FIELD}
-                value={formData[HONEYPOT_FIELD]}
-                onChange={handleChange}
-                tabIndex={-1}
-                autoComplete="off"
-                aria-hidden="true"
-                style={{
-                  position: "absolute",
-                  left: "-9999px",
-                  width: "1px",
-                  height: "1px",
-                  opacity: 0,
-                }}
-              />
-
-              {/* Title */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Title
-                </label>
-                <select
-                  name="title"
-                  value={formData.title}
-                  onChange={handleChange}
-                  required
-                  className="input"
-                >
-                  <option value="" disabled>Select Title</option>
-                  <option value="Mr">Mr</option>
-                  <option value="Mrs">Mrs</option>
-                  <option value="Ms">Ms</option>
-                  <option value="Dr">Dr</option>
-                </select>
-              </div>
-
-              {/* Name Fields */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    First Name
-                  </label>
-                  <input
-                    name="firstName"
-                    value={formData.firstName}
-                    onChange={handleChange}
-                    required
-                    className="input"
-                    placeholder="John"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Last Name
-                  </label>
-                  <input
-                    name="lastName"
-                    value={formData.lastName}
-                    onChange={handleChange}
-                    required
-                    className="input"
-                    placeholder="Doe"
-                  />
-                </div>
-              </div>
-
-              {/* Email */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Email Address
-                </label>
-                <input
-                  type="email"
-                  name="email"
-                  value={formData.email}
-                  onChange={handleChange}
-                  required
-                  className="input"
-                  placeholder="john@example.com"
-                />
-              </div>
-
-              {/* Query */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Your Message
-                </label>
-                <textarea
-                  name="query"
-                  value={formData.query}
-                  onChange={handleChange}
-                  required
-                  className="input min-h-[120px] resize-none"
-                  placeholder="How can we help you?"
-                  rows={4}
-                ></textarea>
-              </div>
-
-              {/* Submit Button */}
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full btn-primary disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {submitting ? "Sending..." : "Send Message"}
-              </button>
-
-              {submitError && (
-                <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-                  {submitError}
-                </p>
-              )}
-            </form>
-          </div>
-
-          {/* Contact Info */}
-          <div className="space-y-8">
-            <div>
-              <h2 className="text-2xl font-playfair font-bold text-primary mb-2">
-                Get in Touch
-              </h2>
-              <p className="text-gray-600">
-                Connect with us through your preferred channel. We&apos;re always here to help.
-              </p>
-            </div>
-
-            {/* Contact Cards */}
-            <div className="space-y-4">
-              {/* Instagram */}
-              <a
-                href="https://www.instagram.com/_viorajewels_?igsh=bGV3eTFjazIwejNs"
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => trackContact()}
-                className="block p-6 bg-viora-gradient rounded-xl hover:shadow-premium transition-all duration-300 group"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-500 mb-1">Follow us on</p>
-                    <p className="text-xl font-playfair font-bold text-primary">Instagram</p>
-                  </div>
-                  <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-md group-hover:scale-110 transition-transform">
-                    <Image
-                      src="/instagram.png"
-                      width={24}
-                      height={24}
-                      alt="Instagram"
-                    />
-                  </div>
-                </div>
-              </a>
-
-              {/* Facebook */}
-              <a
-                href="https://www.facebook.com/profile.php?id=61589962820647"
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => trackContact()}
-                className="block p-6 bg-viora-gradient rounded-xl hover:shadow-premium transition-all duration-300 group"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-500 mb-1">Like us on</p>
-                    <p className="text-xl font-playfair font-bold text-primary">Facebook</p>
-                  </div>
-                  <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-md group-hover:scale-110 transition-transform">
-                    <svg className="w-6 h-6 text-[#1877F2]" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-                    </svg>
-                  </div>
-                </div>
-              </a>
-
-              {/* Email */}
-              <a
-                href={`mailto:${CONTACT_EMAIL}`}
-                onClick={() => trackContact()}
-                className="block p-6 bg-viora-gradient rounded-xl hover:shadow-premium transition-all duration-300 group"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-500 mb-1">Send us an email</p>
-                    <p className="text-xl font-playfair font-bold text-primary">{CONTACT_EMAIL}</p>
-                  </div>
-                  <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-md group-hover:scale-110 transition-transform">
-                    <svg className="w-6 h-6 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                    </svg>
-                  </div>
-                </div>
-              </a>
-            </div>
-
-            {/* Registered Address */}
-            <div className="bg-silver-light rounded-lg p-6">
-              <h3 className="font-playfair font-bold text-primary mb-4">Registered Address</h3>
-              <address className="not-italic text-sm text-gray-700 leading-relaxed">
-                <strong className="text-primary">Viora Jewel</strong>
-                <br />
-                38C B.T. Road (Kalpana Apartment), 1st Floor, Flat 1A
-                <br />
-                Kolkata &ndash; 700056
-                <br />
-                West Bengal, India
-              </address>
-            </div>
-
-            {/* Business Hours */}
-            <div className="bg-silver-light rounded-lg p-6">
-              <h3 className="font-playfair font-bold text-primary mb-4">Business Hours</h3>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Monday - Friday</span>
-                  <span className="text-primary font-medium">9:00 AM - 6:00 PM</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Saturday</span>
-                  <span className="text-primary font-medium">10:00 AM - 4:00 PM</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Sunday</span>
-                  <span className="text-gray-400">Closed</span>
-                </div>
-              </div>
-            </div>
-          </div>
+        <div className="border border-silver-light bg-white p-5">
+          <h2 className="font-playfair text-lg font-bold">Registered address</h2>
+          <address className="mt-2 text-sm not-italic leading-relaxed text-gray-700">
+            <strong className="text-primary">Viora Jewel</strong>
+            <br />
+            38C B.T. Road (Kalpana Apartment), 1st Floor, Flat 1A
+            <br />
+            Kolkata – 700056, West Bengal, India
+          </address>
         </div>
-      </div>
 
-      {/* Thank-You Popup */}
-      {showPopup && (
-        <div className="fixed inset-0 flex justify-center items-center bg-black/50 z-50 p-4">
-          <div className="bg-white p-8 rounded-2xl shadow-premium-hover text-center max-w-md w-full animate-scale-in">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
-            <h3 className="text-2xl font-playfair font-bold text-primary mb-2">Thank You!</h3>
-            <p className="text-gray-600 mb-6">
-              Your message has been delivered to our team. We&apos;ll get back to you shortly.
-            </p>
-            <button
-              onClick={() => setShowPopup(false)}
-              className="btn-primary"
-            >
-              Close
-            </button>
-          </div>
+        <div className="border border-silver-light bg-white p-5">
+          <h2 className="font-playfair text-lg font-bold">Business hours</h2>
+          <dl className="mt-2 space-y-1.5 text-sm">
+            {[
+              ["Monday – Friday", "9:00 AM – 6:00 PM"],
+              ["Saturday", "10:00 AM – 4:00 PM"],
+              ["Sunday", "Closed"],
+            ].map(([day, hours]) => (
+              <div key={day} className="flex justify-between gap-4">
+                <dt className="text-gray-600">{day}</dt>
+                <dd className={hours === "Closed" ? "text-gray-400" : "font-medium"}>{hours}</dd>
+              </div>
+            ))}
+          </dl>
         </div>
-      )}
-    </div>
-  );
-};
+
+        <p className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+          <span className="text-gray-600">Follow us:</span>
+          <ContactLink href="https://www.instagram.com/_viorajewels_" external className="font-semibold text-accent underline-offset-4 hover:underline">
+            Instagram
+          </ContactLink>
+          <ContactLink
+            href="https://www.facebook.com/profile.php?id=61589962820647"
+            external
+            className="font-semibold text-accent underline-offset-4 hover:underline"
+          >
+            Facebook
+          </ContactLink>
+        </p>
+      </aside>
+    </section>
+  </div>
+);
 
 export default ContactPage;

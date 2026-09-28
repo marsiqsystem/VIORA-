@@ -4,16 +4,12 @@ import Image from "next/image";
 import { useEffect, useState } from "react";
 import { useCartStore } from "@/hooks/useCartStore";
 import { useWixClient } from "@/hooks/useWixClient";
+import { useCommerceUi } from "@/hooks/useCommerceUi";
 import { useToast } from "@/components/Toast";
 import { trackMetaEvent } from "@/lib/metaEvents";
-import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import type { AbandonedCartItem } from "@/components/BuyNowConfirmModal";
 import { media as wixMedia } from "@wix/sdk";
-
-const CheckoutModal = dynamic(() => import("@/components/CheckoutModal"), {
-  ssr: false,
-});
 
 const BuyNowConfirmModal = dynamic(
   () => import("@/components/BuyNowConfirmModal"),
@@ -27,6 +23,10 @@ type Props = {
   variantId: string;
   productName: string;
   productPrice: number;
+  /** Full (MRP) price — shown struck through with the % off when higher than productPrice. */
+  compareAtPrice?: number;
+  /** Price after the prepaid discount — keeps the pay-online nudge in view while scrolling. */
+  prepaidPrice?: number;
   productImage?: string;
   isOutOfStock: boolean;
   hasUnselectedVariants: boolean;
@@ -40,6 +40,8 @@ const StickyAddToCart = ({
   variantId,
   productName,
   productPrice,
+  compareAtPrice,
+  prepaidPrice,
   productImage,
   isOutOfStock,
   hasUnselectedVariants,
@@ -47,12 +49,11 @@ const StickyAddToCart = ({
   selectedOptions,
 }: Props) => {
   const wixClient = useWixClient();
-  const router = useRouter();
   const { addItem, cart, getCart } = useCartStore();
+  const openCheckout = useCommerceUi((s) => s.openCheckout);
   const { showToast } = useToast();
   const [visible, setVisible] = useState(false);
   const [isBuyingNow, setIsBuyingNow] = useState(false);
-  const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [abandonedItems, setAbandonedItems] = useState<AbandonedCartItem[]>([]);
 
@@ -78,6 +79,11 @@ const StickyAddToCart = ({
     contents: [{ id: metaId, quantity: 1, item_price: productPrice }],
     num_items: 1,
   };
+
+  const discountPercent =
+    compareAtPrice && compareAtPrice > productPrice
+      ? Math.round(((compareAtPrice - productPrice) / compareAtPrice) * 100)
+      : 0;
 
   const collectAbandonedItems = (): AbandonedCartItem[] => {
     const lineItems = (cart as any)?.lineItems || [];
@@ -116,7 +122,7 @@ const StickyAddToCart = ({
     }
 
     trackMetaEvent("InitiateCheckout", baseEvent);
-    setCheckoutOpen(true);
+    openCheckout();
   };
 
   const handleBuyNow = async () => {
@@ -145,7 +151,7 @@ const StickyAddToCart = ({
         err?.details?.applicationError?.description ||
         err?.message ||
         "Please try again.";
-      showToast(`Buy Now failed: ${cause}`, "error");
+      showToast(err?.message === "SOLD_OUT" ? "Sorry, this piece just sold out." : `Buy Now failed: ${cause}`, "error");
     } finally {
       setIsBuyingNow(false);
     }
@@ -169,7 +175,7 @@ const StickyAddToCart = ({
         err?.details?.applicationError?.description ||
         err?.message ||
         "Please try again.";
-      showToast(`Buy Now failed: ${cause}`, "error");
+      showToast(err?.message === "SOLD_OUT" ? "Sorry, this piece just sold out." : `Buy Now failed: ${cause}`, "error");
     } finally {
       setIsBuyingNow(false);
     }
@@ -185,7 +191,7 @@ const StickyAddToCart = ({
     >
       <div className="mx-3 mb-3 rounded-2xl border border-white/10 bg-[#1A1410] shadow-[0_-8px_30px_rgba(0,0,0,0.35)]">
         <div className="flex items-center gap-3 p-3">
-          <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-xl bg-white/5">
+          <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden bg-white/5">
             {productImage ? (
               <Image
                 src={productImage}
@@ -198,12 +204,23 @@ const StickyAddToCart = ({
           </div>
 
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[13px] font-medium text-white/90 font-playfair">
+            <p className="truncate text-[13px] font-medium text-white/90 font-inter">
               {productName}
             </p>
-            <p className="text-base font-semibold text-white">
-              ₹{productPrice}
+            <p className="flex flex-wrap items-baseline gap-x-1.5">
+              <span className="text-base font-semibold text-white">₹{productPrice}</span>
+              {discountPercent > 0 && (
+                <>
+                  <span className="text-xs text-white/50 line-through">₹{compareAtPrice}</span>
+                  <span className="text-xs font-semibold text-silver">{discountPercent}% OFF</span>
+                </>
+              )}
             </p>
+            {prepaidPrice !== undefined && prepaidPrice < productPrice && (
+              <p className="text-[11px] font-medium text-green-300">
+                ₹{prepaidPrice} if paid online · FREE delivery
+              </p>
+            )}
           </div>
 
           <button
@@ -238,8 +255,6 @@ const StickyAddToCart = ({
           </button>
         </div>
       </div>
-
-      <CheckoutModal open={checkoutOpen} onClose={() => setCheckoutOpen(false)} />
 
       <BuyNowConfirmModal
         open={confirmOpen}

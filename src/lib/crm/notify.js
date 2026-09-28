@@ -68,7 +68,9 @@ const TRACK_BASE = brandTrack(process.env.VELOCITY_TRACK_URL_BASE || `${BRAND_TR
   .replace(/\/$/, "");
 const trackingLink = (o) =>
   brandTrack(String(o.trackingUrl || "").trim()) ||
-  (o.awb ? `${TRACK_BASE}/${o.awb}` : "https://viorajewel.in/orders");
+  // No AWB yet: the order-number + phone lookup works without an account
+  // (/orders needed a login, which guest buyers don't have).
+  (o.awb ? `${TRACK_BASE}/${o.awb}` : `https://viorajewel.in/track${o.orderId ? `?order=${o.orderId}` : ""}`);
 
 const render = {
   orderConfirmation: (o) =>

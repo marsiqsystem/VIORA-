@@ -46,7 +46,9 @@ function extractProductImages(product: any): {
   // media.mainMedia — primary
   const mm = product?.media?.mainMedia;
   if (mm?.image?.url) candidates.push(mm.image.url);
-  if (mm?.thumbnail?.url) candidates.push(mm.thumbnail.url);
+  // The thumbnail is a 50x50 copy of the main image — only use it when there's
+  // nothing else, or Google/Meta get a too-small duplicate as an extra image.
+  else if (mm?.thumbnail?.url) candidates.push(mm.thumbnail.url);
   if (mm?.video?.posters?.[0]?.url) candidates.push(mm.video.posters[0].url);
 
   // media.items[] — gallery

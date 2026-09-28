@@ -131,7 +131,7 @@ export const sendNewsletterEmail = async (to: string): Promise<boolean> => {
       text,
       html,
       attachments: [
-        { filename: "hero.png",      path: publicPath("newsletter-hero.png"), cid: "subscriber-hero", contentDisposition: "inline" },
+        { filename: "hero.jpg",      path: publicPath("newsletter-hero.jpg"), cid: "subscriber-hero", contentDisposition: "inline" },
         { filename: "facebook.png",  path: publicPath("facebook.png"),         cid: "fb-icon",         contentDisposition: "inline" },
         { filename: "instagram.png", path: publicPath("instagram.png"),        cid: "ig-icon",         contentDisposition: "inline" },
       ],

@@ -4,6 +4,10 @@ import { sendOrderConfirmationEmail } from "@/lib/orderEmail";
 import { sendServerCapi } from "@/lib/metaCapiServer";
 import { readCookieRaw } from "@/lib/metaFbc";
 import { slugFromUrl } from "@/lib/metaCatalogId";
+import { PREPAID_DISCOUNT } from "@/lib/checkoutPricing";
+import { fetchRazorpayPayment } from "@/lib/razorpayVerify";
+import { claimOnce, release } from "@/lib/crm/idempotency";
+import * as checkoutLeads from "@/lib/crm/checkoutLeads";
 
 type CheckoutAddressPayload = {
   email: string;
@@ -16,6 +20,8 @@ type CheckoutAddressPayload = {
   postalCode: string;
   paymentMethod: "COD" | "PREPAID";
   razorpayPaymentId?: string;
+  // Sent by the browser for reference only. What was actually paid is always
+  // read from Razorpay (see fetchRazorpayPayment below).
   razorpayAmount?: string;
   // COD delivery + handling charge to add onto the order so the courier
   // collects subtotal + this amount. Sent by the checkout for COD orders.
@@ -24,6 +30,10 @@ type CheckoutAddressPayload = {
   // order as a custom field so the CRM/Velocity read it race-proof.
   codAmount?: string;
 };
+
+// A payment id may pay for exactly one order.
+const PAYMENT_USED_TTL_S = 60 * 60 * 24 * 180;
+const paymentUsedKey = (paymentId: string) => `rzp_payment_used:${paymentId}`;
 
 const getWixErrorMessage = (err: any) =>
   err?.details?.applicationError?.description ||
@@ -139,6 +149,10 @@ const createOrderWithCouponFallback = async (wixClient: any, checkoutId: string)
 };
 
 export async function POST(req: Request) {
+  // Set once a Razorpay payment is claimed for this request, and cleared once
+  // the Wix order exists — so a failure in between frees the payment for a retry.
+  let pendingPaymentClaim = "";
+
   try {
     const body = await req.json();
     const checkoutId = normalizeCheckoutId(body?.checkoutId);
@@ -162,7 +176,6 @@ export async function POST(req: Request) {
     const postalCode = normalizeText(details?.postalCode);
     const paymentMethod = details?.paymentMethod === "PREPAID" ? "PREPAID" : "COD";
     const razorpayPaymentId = normalizeText(details?.razorpayPaymentId);
-    const razorpayAmount = normalizeText(details?.razorpayAmount);
     // COD delivery + handling charge. Clamp to a sane range so a bad client
     // value can never inflate an order (0 disables the fee).
     const codChargeRaw = Number(details?.codCharge);
@@ -186,8 +199,47 @@ export async function POST(req: Request) {
       );
     }
 
+    // PREPAID: never take the browser's word for a payment. Ask Razorpay what was
+    // actually paid, and make sure one payment can't be replayed for a second order.
+    let verifiedPaid: number | null = null;
+    let paymentUnverified = false;
+    if (paymentMethod === "PREPAID") {
+      if (!razorpayPaymentId) {
+        return NextResponse.json({ error: "Missing payment reference." }, { status: 400 });
+      }
+      const payment = await fetchRazorpayPayment(razorpayPaymentId);
+      if (payment.ok) {
+        if (payment.notes?.purpose === "cod-switch") {
+          return NextResponse.json({ error: "This payment belongs to another order." }, { status: 409 });
+        }
+        const claim = await claimOnce(paymentUsedKey(razorpayPaymentId), PAYMENT_USED_TTL_S);
+        if (!claim.claimed) {
+          return NextResponse.json(
+            { error: "This payment has already been used for an order." },
+            { status: 409 }
+          );
+        }
+        if (!claim.degraded) pendingPaymentClaim = paymentUsedKey(razorpayPaymentId);
+        verifiedPaid = payment.paid;
+      } else if (payment.reason === "unreachable" || payment.reason === "not-configured") {
+        // Razorpay couldn't be asked. Don't lose a real customer's order — place
+        // it, but flag it and don't mark it paid until someone checks Razorpay.
+        paymentUnverified = true;
+        console.error(`[checkout] Razorpay unreachable — order will be flagged, payment ${razorpayPaymentId}.`);
+      } else {
+        return NextResponse.json(
+          {
+            error:
+              "We couldn't verify your payment. If money was deducted it will be refunded automatically.",
+          },
+          { status: 402 }
+        );
+      }
+    }
+
     const wixClient = wixAdminClientServer();
     const contactDetails = splitName(fullName);
+
     const address = {
       country: "IN",
       addressLine1,
@@ -196,6 +248,25 @@ export async function POST(req: Request) {
       subdivision: normalizeIndiaSubdivision(state),
       postalCode,
     };
+
+    const customFields: { title: string; value: string }[] = [
+      { title: "Payment Method", value: paymentMethod === "COD" ? "Cash on Delivery" : "Prepaid (Razorpay)" },
+      { title: "Customer Phone", value: phone },
+      ...(razorpayPaymentId
+        ? [{ title: "Razorpay Payment ID", value: razorpayPaymentId }]
+        : []),
+      ...(verifiedPaid != null
+        ? [{ title: "Amount Paid (Razorpay)", value: `₹${verifiedPaid.toFixed(2)}` }]
+        : []),
+      ...(paymentUnverified
+        ? [{ title: "Payment Check", value: "UNVERIFIED — confirm this payment in Razorpay before shipping" }]
+        : []),
+      // COD collection amount, stamped at creation so the CRM/Velocity read
+      // the ₹49-inclusive figure race-proof (see extractBillableAmount).
+      ...(codAmount
+        ? [{ title: "COD Amount to Collect", value: `₹${codAmount}` }]
+        : []),
+    ];
 
     let updatedCheckout = await wixClient.checkout.updateCheckout(
       checkoutId,
@@ -216,22 +287,8 @@ export async function POST(req: Request) {
             ? `Payment: Cash on Delivery (COD). Phone: ${phone}. Pincode: ${postalCode}.`
             : `Payment: Prepaid (Razorpay). Phone: ${phone}. Pincode: ${postalCode}.${
                 razorpayPaymentId ? ` Razorpay Payment ID: ${razorpayPaymentId}.` : ""
-              }${razorpayAmount ? ` Amount paid via Razorpay: ₹${razorpayAmount}.` : ""}`,
-        customFields: [
-          { title: "Payment Method", value: paymentMethod === "COD" ? "Cash on Delivery" : "Prepaid (Razorpay)" },
-          { title: "Customer Phone", value: phone },
-          ...(razorpayPaymentId
-            ? [{ title: "Razorpay Payment ID", value: razorpayPaymentId }]
-            : []),
-          ...(razorpayAmount
-            ? [{ title: "Amount Paid (Razorpay)", value: `₹${razorpayAmount}` }]
-            : []),
-          // COD collection amount, stamped at creation so the CRM/Velocity read
-          // the ₹49-inclusive figure race-proof (see extractBillableAmount).
-          ...(codAmount
-            ? [{ title: "COD Amount to Collect", value: `₹${codAmount}` }]
-            : []),
-        ],
+              }${verifiedPaid != null ? ` Amount paid via Razorpay: ₹${verifiedPaid.toFixed(2)}.` : ""}`,
+        customFields,
       } as any
     );
 
@@ -251,6 +308,8 @@ export async function POST(req: Request) {
     const calculationErrors = updatedCheckout?.calculationErrors;
     const calculationErrorMessages = Array.from(new Set(flattenCalculationErrors(calculationErrors)));
     if (calculationErrorMessages.length > 0) {
+      if (pendingPaymentClaim) await release(pendingPaymentClaim);
+      pendingPaymentClaim = "";
       return NextResponse.json(
         {
           error: `Wix checkout has calculation errors: ${calculationErrorMessages.join("; ")}`,
@@ -258,6 +317,36 @@ export async function POST(req: Request) {
         },
         { status: 422 }
       );
+    }
+
+    // The payment must cover the Wix total minus the pay-online discount. A
+    // shortfall (a tampered amount, or a price that changed mid-checkout) still
+    // becomes an order — the customer did pay something — but it is flagged, gets
+    // no silent discount, and is not marked fully paid.
+    const checkoutTotal = Number((updatedCheckout as any)?.priceSummary?.total?.amount);
+    const paymentShortfall =
+      verifiedPaid != null &&
+      Number.isFinite(checkoutTotal) &&
+      verifiedPaid < checkoutTotal - PREPAID_DISCOUNT - 1;
+    if (paymentShortfall) {
+      console.error(
+        `[checkout] PAYMENT SHORTFALL on checkout ${checkoutId}: paid ₹${verifiedPaid}, expected ₹${(
+          checkoutTotal - PREPAID_DISCOUNT
+        ).toFixed(2)} (payment ${razorpayPaymentId}).`
+      );
+      try {
+        updatedCheckout = await wixClient.checkout.updateCheckout(checkoutId, {
+          customFields: [
+            ...customFields,
+            {
+              title: "Payment Check",
+              value: `SHORTFALL — paid ₹${verifiedPaid!.toFixed(2)}, expected ₹${(checkoutTotal - PREPAID_DISCOUNT).toFixed(2)}. Do not ship before checking.`,
+            },
+          ],
+        } as any);
+      } catch (flagErr) {
+        console.error("[checkout] could not flag the payment shortfall on the order:", flagErr);
+      }
     }
 
     const orderResult = await createOrderWithCouponFallback(wixClient, checkoutId);
@@ -272,21 +361,26 @@ export async function POST(req: Request) {
         { status: 502 }
       );
     }
+    // The payment now belongs to this order for good.
+    pendingPaymentClaim = "";
+
+    // No reminder for a shopper who just ordered.
+    await checkoutLeads.removeByPhone(phone);
 
     const approvedOrderResult = await (wixClient.orders as any).updateOrderStatus(
       orderId,
       "APPROVED"
     );
 
-    // The total Wix computed for the order (already reflects any coupon like
-    // SHINE50). This is the pre-prepaid-discount figure.
+    // The total Wix computed for the order (already reflects any coupon or
+    // automatic discount). This is the pre-prepaid-discount figure.
     const wixOrderTotal = Number(
       (updatedCheckout as any)?.priceSummary?.total?.amount ??
         (approvedOrderResult as any)?.order?.priceSummary?.total?.amount ??
         (orderResult as any)?.order?.priceSummary?.total?.amount
     );
 
-    // For PREPAID orders the customer pays online via Razorpay, after a flat ₹50
+    // For PREPAID orders the customer pays online via Razorpay, after the flat
     // "pay online" discount that Wix's coupon system can't represent (it stacks
     // on top of any coupon). To make the Wix order TOTAL equal what was actually
     // charged — so the admin amount, the My Orders total, and the email all show
@@ -358,10 +452,11 @@ export async function POST(req: Request) {
       }
     }
 
-    if (paymentMethod === "PREPAID" && razorpayPaymentId) {
-      const amountPaid = Number(razorpayAmount);
+    // Only a verified, complete payment earns the pay-online discount — at most
+    // the gap between the Wix total and what Razorpay says was paid.
+    if (paymentMethod === "PREPAID" && verifiedPaid != null && !paymentShortfall) {
+      const amountPaid = verifiedPaid;
       if (
-        Number.isFinite(amountPaid) &&
         Number.isFinite(wixOrderTotal) &&
         amountPaid > 0 &&
         amountPaid < wixOrderTotal
@@ -411,14 +506,17 @@ export async function POST(req: Request) {
       }
     }
 
-    // Record the payment so the order shows as paid for `finalTotal`.
+    // Record the payment Razorpay confirmed. A shortfall records only what was
+    // really paid, so the order shows the balance; an unverified payment records
+    // nothing until someone checks Razorpay.
     let paymentMarkedPaid = false;
-    if (paymentMethod === "PREPAID" && razorpayPaymentId) {
+    if (paymentMethod === "PREPAID" && verifiedPaid != null) {
+      const recordAmount = paymentShortfall ? verifiedPaid : finalTotal;
       try {
-        if (Number.isFinite(finalTotal) && finalTotal > 0) {
+        if (Number.isFinite(recordAmount) && recordAmount > 0) {
           await (wixClient.orderTransactions as any).addPayments(orderId, [
             {
-              amount: { amount: finalTotal.toFixed(2) },
+              amount: { amount: recordAmount.toFixed(2) },
               regularPaymentDetails: {
                 offlinePayment: true,
                 status: "APPROVED",
@@ -427,7 +525,7 @@ export async function POST(req: Request) {
               },
             },
           ]);
-          paymentMarkedPaid = true;
+          paymentMarkedPaid = !paymentShortfall;
         } else {
           console.warn(
             "Prepaid order: could not resolve a total to mark as paid for order",
@@ -652,6 +750,9 @@ export async function POST(req: Request) {
       order: committedOrder || approvedOrderResult?.order || (orderResult as any)?.order,
     });
   } catch (err: any) {
+    // No order was created — free the payment so the shopper can retry with it.
+    if (pendingPaymentClaim) await release(pendingPaymentClaim);
+
     // Log the FULL Wix error so the exact rule/code is visible in Vercel logs.
     console.error("Wix checkout finalization failed:", err);
     try {

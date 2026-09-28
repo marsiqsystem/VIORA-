@@ -77,7 +77,7 @@ const Footer = () => {
                 Join The Viora List
               </h3>
               <p className="text-white/65">
-                Early access to new drops, gifting edits, and private offers.
+                Early access to new drops and private offers.
               </p>
             </div>
             <div className="w-full min-w-0 max-w-md md:w-auto">
@@ -173,7 +173,6 @@ const Footer = () => {
               <li><Link href="/list" className="hover:text-white">All Jewellery</Link></li>
               <li><Link href="/list?cat=new-arrivals#product-grid" className="hover:text-white">New Arrivals</Link></li>
               <li><Link href="/list?cat=best-sellers#product-grid" className="hover:text-white">Best Sellers</Link></li>
-              <li><Link href="/list?cat=gifting#product-grid" className="hover:text-white">Gifting</Link></li>
             </ul>
           </div>
 
@@ -202,7 +201,7 @@ const Footer = () => {
             <ul className="space-y-3 text-sm text-white/65">
               <li><Link href="/contact" className="hover:text-white">Customer Service</Link></li>
               <li><Link href="/profile" className="hover:text-white">My Account</Link></li>
-              <li><Link href="/orders" className="hover:text-white">Track Order</Link></li>
+              <li><Link href="/track" className="hover:text-white">Track Order</Link></li>
               <li><Link href="/shipping-policy" className="hover:text-white">Shipping Policy</Link></li>
               <li><Link href="/exchange-policy" className="hover:text-white">Exchange Policy</Link></li>
             </ul>
@@ -233,7 +232,8 @@ const Footer = () => {
         onClick={scrollToTop}
         aria-hidden={!showBackToTop}
         tabIndex={showBackToTop ? 0 : -1}
-        className={`fixed bottom-24 md:bottom-8 right-4 md:right-8 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-accent text-white shadow-premium-hover transition-opacity duration-300 hover:scale-110 hover:bg-silver hover:text-primary ${
+        // Desktop only: on phones it sat on top of product cards' Add to bag buttons, in the same colour.
+        className={`fixed bottom-8 right-8 z-40 hidden md:flex h-12 w-12 items-center justify-center rounded-full bg-accent text-white shadow-premium-hover transition-opacity duration-300 hover:scale-110 hover:bg-silver hover:text-primary ${
           showBackToTop ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
         aria-label="Back to top"

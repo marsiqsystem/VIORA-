@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import { format } from "timeago.js";
 import ReviewModal from "./ReviewModal";
 import type { PublicReview } from "@/lib/reviewsTypes";
+import { REVIEW_REWARD } from "@/lib/checkoutPricing";
+import { wixThumb } from "@/lib/wixThumb";
 
 type Props = {
   productId?: string;
@@ -52,16 +54,16 @@ const ReviewsSection = ({ productId, productName, reviews = [] }: Props) => {
   }, [productId]);
 
   return (
-    <div className="border-t border-gray-100 pt-6">
+    <div id="reviews" className="scroll-mt-24">
       <details className="group" open>
         <summary className="flex items-center justify-between cursor-pointer list-none">
-          <h4 className="font-semibold text-lg text-primary font-playfair">
-            REVIEWS {localReviews.length > 0 && (
+          <h2 className="font-semibold text-lg text-primary font-playfair">
+            Customer Reviews {localReviews.length > 0 && (
               <span className="text-gray-400 font-normal text-base">
                 ({localReviews.length})
               </span>
             )}
-          </h4>
+          </h2>
           <svg
             className="w-5 h-5 text-gray-400 group-open:rotate-180 transition-transform"
             fill="none"
@@ -74,34 +76,10 @@ const ReviewsSection = ({ productId, productName, reviews = [] }: Props) => {
 
         <div className="mt-4 space-y-5">
           {localReviews.length === 0 && (
-            <div
-              className="relative rounded-2xl border border-accent/20 bg-gradient-to-br from-platinum/40 via-white to-platinum/30 px-8 py-8 text-center shadow-sm"
-              style={{
-                backgroundImage:
-                  "linear-gradient(135deg, rgba(183,110,121,0.04) 0%, transparent 60%)",
-              }}
-            >
-              <p
-                className="font-playfair italic leading-relaxed text-primary/80"
-                style={{ fontSize: "0.95rem", letterSpacing: "0.01em" }}
-              >
-                ✨ Viora is a new chapter in timeless elegance. Our reviews are
-                yet to be written, but our promise already stands — every jewel
-                is carefully checked and delivered with the quality and finish
-                showcased.
-              </p>
-              <span
-                className="mt-4 inline-block h-px w-16 bg-accent/30"
-                aria-hidden="true"
-              />
-              <p
-                className="mt-5 font-playfair italic leading-relaxed text-primary/60"
-                style={{ fontSize: "0.88rem", letterSpacing: "0.015em" }}
-              >
-                Your journey with Viora is special to us. We invite you to share
-                your experience and become a part of our story.
-              </p>
-            </div>
+            <p className="text-sm text-gray-600">
+              No reviews yet. Bought this piece? Tell other shoppers how it
+              looks and feels.
+            </p>
           )}
 
           {localReviews.map((r) => (
@@ -120,9 +98,9 @@ const ReviewsSection = ({ productId, productName, reviews = [] }: Props) => {
                   <Stars value={r.rating} />
                 </div>
                 {r.mediaUrl && (
-                  <div className="relative w-16 h-16 rounded-md overflow-hidden flex-shrink-0 border border-gray-200">
+                  <div className="relative w-16 h-16 overflow-hidden flex-shrink-0 border border-gray-200">
                     <Image
-                      src={r.mediaUrl}
+                      src={wixThumb(r.mediaUrl, 192) || r.mediaUrl}
                       alt={`${r.authorName}'s photo`}
                       fill
                       sizes="64px"
@@ -144,6 +122,11 @@ const ReviewsSection = ({ productId, productName, reviews = [] }: Props) => {
               )}
             </div>
           ))}
+
+          <p className="border-l-2 border-accent bg-accent/5 px-3 py-2 text-xs text-primary">
+            📸 Bought from Viora? Post a review with a photo and get{" "}
+            <b>₹{REVIEW_REWARD.amount} off your next order</b>.
+          </p>
 
           <button
             type="button"

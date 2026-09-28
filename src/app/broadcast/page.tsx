@@ -39,7 +39,7 @@ const C = {
 };
 const HEADER_BG = "linear-gradient(135deg, #1A1410 0%, #5A0A18 100%)";
 const GOLD_BG = "linear-gradient(135deg, #C9A66B 0%, #A9844C 100%)";
-const SERIF = "var(--font-cormorant), Georgia, 'Times New Roman', serif";
+const SERIF = "var(--font-heading), Georgia, 'Times New Roman', serif";
 
 type Template = {
   name: string;

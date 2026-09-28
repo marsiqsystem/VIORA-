@@ -7,6 +7,8 @@
 // through the common locations defensively. Pure functions — no I/O — so they
 // can be tested against sample payloads.
 
+import { COD_CHARGE, COD_SWITCH_DISCOUNT_LABEL } from "../checkoutPricing";
+
 /**
  * Turn whatever Wix gives us into digits-only international format for WhatsApp.
  * If the number has no country code, prepend defaultCountryCode.
@@ -124,6 +126,30 @@ const deepFindItems = (root) =>
  * and sometimes an explicit method. We treat a fully-paid order as PREPAID and
  * everything else as COD (cash collected on delivery).
  */
+/**
+ * A COD order the customer later paid online from the success page (see
+ * src/lib/codSwitch.ts). The switch waives the COD charge, so the order is fully
+ * paid with a total exactly COD_CHARGE below the "COD Amount to Collect" stamped
+ * at checkout. A COD order marked paid after cash collection keeps its full
+ * total, so it is never mistaken for a switch.
+ */
+function isSwitchedToOnline(order = {}, body = {}) {
+  try {
+    if (JSON.stringify(order).includes(COD_SWITCH_DISCOUNT_LABEL)) return true;
+  } catch {
+    /* non-serialisable payload — fall through to the totals check */
+  }
+  const status = String(firstDefined(order.paymentStatus, body.paymentStatus) || "").toUpperCase();
+  if (status !== "PAID") return false;
+  const collect = Number(
+    String(
+      firstDefined(customFieldValue(order, "cod amount to collect"), customFieldValue(body, "cod amount to collect")) ?? ""
+    ).replace(/[^\d.]/g, "")
+  );
+  const total = Number(extractAmount(order, body));
+  return collect > 0 && Number.isFinite(total) && total <= collect - COD_CHARGE + 0.5;
+}
+
 function normalizePaymentMode(order = {}, body = {}) {
   // 1) DEFINITIVE — the "Payment Method" custom field + buyerNote our checkout
   //    stamps at updateCheckout. These are on the order from the moment it's
@@ -139,7 +165,9 @@ function normalizePaymentMode(order = {}, body = {}) {
   const definitive = `${cf || ""} ${note}`.toUpperCase();
   if (definitive.includes("PREPAID") || definitive.includes("RAZORPAY") || definitive.includes("ONLINE"))
     return "PREPAID";
-  if (definitive.includes("COD") || definitive.includes("CASH")) return "COD";
+  if (definitive.includes("COD") || definitive.includes("CASH")) {
+    return isSwitchedToOnline(order, body) ? "PREPAID" : "COD";
+  }
 
   // 2) Explicit paymentMode/paymentMethod fields (other Wix shapes).
   const explicit = firstDefined(

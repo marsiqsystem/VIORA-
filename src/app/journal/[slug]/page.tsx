@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MDXRemote } from "next-mdx-remote/rsc";
-import BackButton from "@/components/BackButton";
+import remarkGfm from "remark-gfm";
 import ShopPicks from "@/components/journal/ShopPicks";
+import { COD_CHARGE, PREPAID_DISCOUNT } from "@/lib/checkoutPricing";
 import { getJournalCatalog } from "@/lib/journalCatalog";
 import {
   getAllJournalSlugs,
@@ -185,9 +186,14 @@ export default async function JournalArticlePage({
     ],
   };
 
-  const related = getAllJournalPosts()
-    .filter((p) => p.slug !== post.slug)
-    .slice(0, 2);
+  // Same topic first, then the newest of the rest.
+  const others = getAllJournalPosts().filter((p) => p.slug !== post.slug);
+  const related = [
+    ...others.filter((p) => p.category === post.category),
+    ...others.filter((p) => p.category !== post.category),
+  ].slice(0, 3);
+
+  const updated = post.updatedAt && post.updatedAt !== post.publishedAt ? post.updatedAt : null;
 
   return (
     <main className="min-h-screen bg-white">
@@ -200,77 +206,114 @@ export default async function JournalArticlePage({
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbSchema) }}
       />
 
-      <div className="bg-platinum">
-        <div className="max-w-3xl mx-auto px-4 md:px-8 pt-8 pb-4">
-          <div className="flex items-center gap-2 mb-6">
-            <BackButton className="bg-white shadow-sm" />
-            <span className="text-sm font-medium text-gray-500">
-              <Link href="/journal" className="hover:text-primary">
-                ← All articles
-              </Link>
-            </span>
-          </div>
-        </div>
-      </div>
+      <article className="mx-auto max-w-3xl px-4 pb-8 pt-4 md:px-8 md:pb-12 md:pt-8">
+        <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
+          <Link href="/" className="hover:text-accent">
+            Home
+          </Link>
+          <span aria-hidden="true">/</span>
+          <Link href="/journal" className="hover:text-accent">
+            Journal
+          </Link>
+          <span aria-hidden="true">/</span>
+          <span className="font-medium text-primary">{post.category}</span>
+        </nav>
 
-      <article className="max-w-3xl mx-auto px-4 md:px-8 py-8 md:py-12">
-        <header className="mb-10 pb-8 border-b border-silver-light">
-          <p className="text-xs uppercase tracking-[0.25em] text-accent mb-3">
-            {post.category}
-          </p>
-          <h1 className="font-playfair text-3xl md:text-5xl font-bold text-primary leading-tight">
+        <header className="mb-8 mt-4 border-b border-silver-light pb-6">
+          <h1 className="font-playfair text-[30px] font-bold leading-tight text-primary md:text-5xl">
             {post.title}
           </h1>
-          <p className="mt-5 text-lg text-gray-600 leading-relaxed">
+          <p className="mt-4 text-base leading-relaxed text-gray-600 md:text-lg">
             {post.description}
           </p>
-          <div className="mt-6 flex flex-wrap items-center gap-3 text-sm text-gray-500">
+          <p className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
             <span>
               <strong className="text-primary">{post.author}</strong>
-              {post.authorRole && (
-                <span className="text-gray-500"> · {post.authorRole}</span>
-              )}
+              {post.authorRole && <span> · {post.authorRole}</span>}
             </span>
-            <span className="text-gray-300">•</span>
-            <time dateTime={post.publishedAt}>
-              {formatDate(post.publishedAt)}
-            </time>
+            <span className="text-gray-300" aria-hidden="true">
+              •
+            </span>
+            <time dateTime={post.publishedAt}>{formatDate(post.publishedAt)}</time>
+            {updated && (
+              <>
+                <span className="text-gray-300" aria-hidden="true">
+                  •
+                </span>
+                <span>
+                  Updated <time dateTime={updated}>{formatDate(updated)}</time>
+                </span>
+              </>
+            )}
             {post.readingMinutes && (
               <>
-                <span className="text-gray-300">•</span>
+                <span className="text-gray-300" aria-hidden="true">
+                  •
+                </span>
                 <span>{post.readingMinutes} min read</span>
               </>
             )}
-          </div>
+          </p>
         </header>
 
         <div className="prose-viora">
-          <MDXRemote source={post.content} components={components as any} />
+          <MDXRemote
+            source={post.content}
+            components={components as any}
+            // GFM for the tables many guides use (MDX alone leaves them as raw pipes).
+            options={{ mdxOptions: { remarkPlugins: [remarkGfm] } }}
+          />
         </div>
       </article>
 
+      <section aria-labelledby="journal-shop-title" className="bg-primary px-4 py-10 text-white md:px-8">
+        <div className="mx-auto flex max-w-5xl flex-col gap-5 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 id="journal-shop-title" className="font-playfair text-2xl font-bold md:text-3xl">
+              Ready to find your piece?
+            </h2>
+            <p className="mt-1 text-sm text-white/75">
+              Diamond-style sets and earrings · FREE delivery + ₹{PREPAID_DISCOUNT} off paying online · COD ₹{COD_CHARGE} ·
+              48-hour exchange on damaged pieces
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/list?cat=best-sellers#product-grid"
+              className="inline-flex h-12 items-center bg-white px-6 text-sm font-bold uppercase tracking-wider text-primary hover:bg-platinum"
+            >
+              Shop best sellers
+            </Link>
+            <Link
+              href="/list#product-grid"
+              className="inline-flex h-12 items-center border border-white/60 px-6 text-sm font-bold uppercase tracking-wider text-white hover:bg-white/10"
+            >
+              All jewellery
+            </Link>
+          </div>
+        </div>
+      </section>
+
       {related.length > 0 && (
         <section className="bg-platinum">
-          <div className="max-w-5xl mx-auto px-4 md:px-8 py-12 md:py-16">
-            <h2 className="font-playfair text-2xl md:text-3xl font-bold text-primary mb-6">
+          <div className="mx-auto max-w-5xl px-4 py-12 md:px-8 md:py-16">
+            <h2 className="mb-6 font-playfair text-2xl font-bold text-primary md:text-3xl">
               Keep reading
             </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3 md:gap-6">
               {related.map((r) => (
                 <Link
                   key={r.slug}
                   href={`/journal/${r.slug}`}
-                  className="block rounded-2xl border border-silver-light bg-white p-6 shadow-sm hover:shadow-premium transition-all"
+                  className="block border border-silver-light bg-white p-5 transition-shadow hover:shadow-premium"
                 >
-                  <p className="text-xs uppercase tracking-[0.2em] text-accent mb-2">
+                  <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.2em] text-accent">
                     {r.category}
                   </p>
-                  <h3 className="font-playfair text-xl font-bold text-primary leading-snug">
+                  <h3 className="font-playfair text-lg font-bold leading-snug text-primary">
                     {r.title}
                   </h3>
-                  <p className="mt-2 text-sm text-gray-600 line-clamp-2">
-                    {r.description}
-                  </p>
+                  <p className="mt-2 line-clamp-2 text-sm text-gray-600">{r.description}</p>
                 </Link>
               ))}
             </div>

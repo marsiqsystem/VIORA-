@@ -30,7 +30,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const expected = process.env.WIX_WEBHOOK_SECRET;
-  if (expected && req.headers.get("x-wix-secret") !== expected) {
+  if (expected && req.headers.get("x-wix-secret") !== expected && req.nextUrl.searchParams.get("key") !== expected) {
     console.warn("[wix-cancel-webhook] rejected: bad or missing x-wix-secret");
     return new NextResponse(null, { status: 401 });
   }

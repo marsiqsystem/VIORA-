@@ -7,6 +7,8 @@ import Cookies from "js-cookie";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { trackCompleteRegistration } from "@/lib/metaPixel";
 import BackButton from "@/components/BackButton";
+import Link from "next/link";
+import { REVIEW_REWARD } from "@/lib/checkoutPricing";
 import {
   getInvisibleCaptchaToken,
   getVisibleCaptchaResponse,
@@ -20,6 +22,9 @@ enum MODE {
   RESET_PASSWORD = "RESET_PASSWORD",
   EMAIL_VERIFICATION = "EMAIL_VERIFICATION",
 }
+
+const FRIENDLY_FAILURE =
+  "We couldn't log you in right now. Please try again in a minute, or WhatsApp us and we'll help. You can always check out without an account.";
 
 // Helper: detect if running on localhost (where reCAPTCHA keys won't work)
 const isLocalhost = (): boolean => {
@@ -148,9 +153,7 @@ const LoginContent = () => {
       (mode === MODE.LOGIN || mode === MODE.REGISTER || mode === MODE.RESET_PASSWORD) &&
       isPhoneNumber(identifier)
     ) {
-      setError(
-        "An email address is required for authentication. Please enter your email instead of a phone number."
-      );
+      setError("Accounts use your email address — please enter your email instead of a phone number.");
       setIsLoading(false);
       return;
     }
@@ -256,9 +259,9 @@ const LoginContent = () => {
               response.data.sessionToken!
             )
           );
-          Cookies.set("refreshToken", JSON.stringify(tokens.refreshToken), {
-            expires: 2,
-          });
+          // 30 days, like the visitor session the middleware issues — at 2 days
+          // members were silently logged out before most repeat visits.
+          Cookies.set("refreshToken", JSON.stringify(tokens.refreshToken), { expires: 30, sameSite: "lax" });
           wixClient.auth.setTokens(tokens);
           if (mode === MODE.REGISTER) {
             trackCompleteRegistration("email");
@@ -268,20 +271,17 @@ const LoginContent = () => {
           break;
         }
         case LoginState.FAILURE:
-          // TASK 4 FIX: Log the full error object for debugging
-          console.log("WIX AUTH ERROR:", response);
-          console.log("Error Code:", response.errorCode);
-          console.log("Error Details:", JSON.stringify(response, null, 2));
+          console.error("[login] Wix auth failure:", response.errorCode);
 
           if (
             response.errorCode === "invalidEmail" ||
             response.errorCode === "invalidPassword"
           ) {
-            setError("Invalid email or password!");
+            setError("That email and password don't match. Try again, or tap Forgot password.");
           } else if (response.errorCode === "emailAlreadyExists") {
-            setError("Email already exists!");
+            setError("You already have an account with this email — log in instead.");
           } else if (response.errorCode === "resetPassword") {
-            setError("You need to reset your password!");
+            setError("Please reset your password to continue (tap Forgot password).");
           } else if (
             response.errorCode === "missingCaptchaToken" ||
             response.errorCode === "invalidCaptchaToken"
@@ -290,9 +290,8 @@ const LoginContent = () => {
               // Login uses INVISIBLE reCAPTCHA (no checkbox the user can solve),
               // so if Wix still demands a token but the key won't validate, the
               // only fix is in the Wix dashboard. Same guidance on localhost.
-              setError(
-                "Login is blocked by reCAPTCHA. In your Wix Dashboard go to Settings → Login & Security (Site Members) → turn reCAPTCHA OFF (or re-check it), click Save, then click Publish at the top. After publishing, try logging in again."
-              );
+              console.error("[login] reCAPTCHA rejected — check Wix Site Members → Signup & Login Security.");
+              setError(FRIENDLY_FAILURE);
             } else if (!isCaptchaRequired) {
               setIsCaptchaRequired(true);
               setError("Security check required. Please complete the checkbox below and click Register again.");
@@ -302,10 +301,7 @@ const LoginContent = () => {
               );
             }
           } else {
-            // Show the actual error code in the UI for better debugging
-            setError(
-              `Authentication failed: ${response.errorCode || "Unknown error"}. Check the browser console for details.`
-            );
+            setError(FRIENDLY_FAILURE);
           }
           break; // TASK 4 FIX: Added missing break (was falling through to EMAIL_VERIFICATION)
         case LoginState.EMAIL_VERIFICATION_REQUIRED:
@@ -345,9 +341,8 @@ const LoginContent = () => {
 
       if (isCaptchaError) {
         if (isLocalhost() || mode === MODE.LOGIN) {
-          setError(
-            "Login is blocked by reCAPTCHA. In your Wix Dashboard go to Settings → Login & Security (Site Members) → turn reCAPTCHA OFF (or re-check it), click Save, then click Publish at the top. After publishing, try logging in again."
-          );
+          console.error("[login] reCAPTCHA rejected — check Wix Site Members → Signup & Login Security.");
+          setError(FRIENDLY_FAILURE);
         } else if (!isCaptchaRequired) {
           setIsCaptchaRequired(true);
           setError("Security check required. Please complete the checkbox below and click Register again.");
@@ -361,9 +356,7 @@ const LoginContent = () => {
 
       // The auth request never settled within the timeout window.
       if (raw === "AUTH_TIMEOUT") {
-        setError(
-          "This is taking longer than expected. Please check your internet connection and try again. If it keeps happening, the Wix site may need to be republished."
-        );
+        setError("This is taking longer than expected. Please check your internet connection and try again.");
         return;
       }
 
@@ -377,13 +370,9 @@ const LoginContent = () => {
         /site is published/i.test(appDesc);
 
       if (isUnpublishedSite) {
-        setError(
-          "Authentication is unavailable because the Wix site backing this client has not been published yet. Open the Wix dashboard and click Publish, then try again."
-        );
-      } else {
-        const errMessage = raw || appDesc || "Unknown error";
-        setError(`Authentication error: ${errMessage}.`);
+        console.error("[login] Wix site not published — auth unavailable.");
       }
+      setError(FRIENDLY_FAILURE);
     } finally {
       setIsLoading(false);
       // reCAPTCHA tokens are single-use — clear the checkbox so a retry after
@@ -432,7 +421,7 @@ const LoginContent = () => {
         const tokens = await withTimeout(
           wixClient.auth.getMemberTokensForDirectLogin(response.data.sessionToken!)
         );
-        Cookies.set("refreshToken", JSON.stringify(tokens.refreshToken), { expires: 2 });
+        Cookies.set("refreshToken", JSON.stringify(tokens.refreshToken), { expires: 30, sameSite: "lax" });
         wixClient.auth.setTokens(tokens);
         trackCompleteRegistration("email");
         setMessage("Successful! You are being redirected.");
@@ -453,7 +442,7 @@ const LoginContent = () => {
   };
 
   return (
-    <div className="min-h-[calc(100vh-64px)] bg-platinum px-4 md:px-8 lg:px-16 xl:px-32 2xl:px-64 flex items-center justify-center relative">
+    <div className="min-h-[calc(100vh-64px)] bg-platinum px-4 md:px-6 lg:px-8 flex items-center justify-center relative">
       {/* TASK 1 FIX: Back arrow button at top-left */}
       <div className="absolute top-4 left-4 md:left-8 lg:left-16 xl:left-32 2xl:left-64">
         <BackButton className="bg-white shadow-md hover:shadow-lg" />
@@ -474,11 +463,12 @@ const LoginContent = () => {
 
         {mode === MODE.REGISTER ? (
           <div className="flex flex-col gap-2">
-            <label className="text-sm font-medium text-gray-700">Username</label>
+            <label className="text-sm font-medium text-gray-700">Your name</label>
             <input
               type="text"
               name="username"
-              placeholder="john"
+              placeholder="Priya Sharma"
+              autoComplete="name"
               className="input"
               onChange={(e) => setUsername(e.target.value)}
             />
@@ -491,18 +481,12 @@ const LoginContent = () => {
             <input
               type="email"
               name="identifier"
-              placeholder="john@example.com"
+              placeholder="you@example.com"
+              autoComplete="email"
+              inputMode="email"
               className="input"
               onChange={(e) => setIdentifier(e.target.value)}
             />
-            {mode !== MODE.RESET_PASSWORD && (
-              <div className="mt-1.5 flex items-start gap-2 rounded-lg border border-silver-light/35 bg-platinum/40 p-2.5 text-[11px] text-gray-600 font-medium leading-relaxed">
-                <svg className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span>An email address is required for authentication.</span>
-              </div>
-            )}
           </div>
         ) : (
           <div className="flex flex-col gap-2">
@@ -541,6 +525,7 @@ const LoginContent = () => {
               type="password"
               name="password"
               placeholder="Enter your password"
+              autoComplete={mode === MODE.REGISTER ? "new-password" : "current-password"}
               className="input"
               onChange={(e) => setPassword(e.target.value)}
             />
@@ -608,6 +593,23 @@ const LoginContent = () => {
           </div>
         )}
         {message && <div className="text-green-600 text-sm bg-green-50 p-3 rounded-lg border border-green-200">{message}</div>}
+
+        {(mode === MODE.LOGIN || mode === MODE.REGISTER) && (
+          <div className="-mx-8 -mb-8 border-t border-silver-light bg-platinum/60 px-8 py-5 text-sm text-gray-600">
+            <p className="font-semibold text-primary">With an account you can</p>
+            <ul className="mt-2 space-y-1">
+              <li>✓ See and track all your orders in one place</li>
+              <li>✓ Get ₹{REVIEW_REWARD.amount} off by posting a photo review</li>
+              <li>✓ Check out faster with saved details</li>
+            </ul>
+            <p className="mt-3">
+              Just want to track an order?{" "}
+              <Link href="/track" className="font-semibold text-accent hover:underline">
+                No account needed
+              </Link>
+            </p>
+          </div>
+        )}
       </form>
     </div>
   );

@@ -10,7 +10,8 @@ import {
   removePendingReviewForProduct,
 } from "@/lib/pendingReviews";
 import { trackReviewLoginPrompt, trackReviewSubmitted } from "@/lib/metaPixel";
-import type { PublicReview } from "@/lib/reviewsTypes";
+import { REVIEW_REWARD } from "@/lib/checkoutPricing";
+import type { PublicReview, ReviewReward } from "@/lib/reviewsTypes";
 
 const LoginModal = dynamic(() => import("./LoginModal"), { ssr: false });
 
@@ -40,6 +41,8 @@ const ReviewModal = ({
   const [showLogin, setShowLogin] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [reward, setReward] = useState<ReviewReward | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -58,6 +61,8 @@ const ReviewModal = ({
     setFile(null);
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(null);
+    setReward(null);
+    setCopied(false);
   };
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -107,6 +112,16 @@ const ReviewModal = ({
     onClose();
   };
 
+  const copyRewardCode = async () => {
+    if (!reward) return;
+    try {
+      await navigator.clipboard.writeText(reward.code);
+      setCopied(true);
+    } catch {
+      // Clipboard blocked — the code is shown to type in.
+    }
+  };
+
   // Actually post the review to Wix. Assumes the customer is logged in.
   // `recovered` = the review was written while logged out and is being posted
   // after login. Returns true on success.
@@ -148,9 +163,14 @@ const ReviewModal = ({
       trackReviewSubmitted([productId], productName, recovered);
       onSubmitted?.(result.review);
       setSubmitted(true);
-      setTimeout(() => {
-        close();
-      }, 1400);
+      if (result.reward) {
+        // Keep the modal open so the customer can copy their code.
+        setReward(result.reward);
+      } else {
+        setTimeout(() => {
+          close();
+        }, 1400);
+      }
       return true;
     } catch (err: any) {
       setError(err?.message || "Something went wrong.");
@@ -227,6 +247,39 @@ const ReviewModal = ({
               <p className="text-sm text-gray-500 mt-1">
                 It may take a moment to appear after moderation.
               </p>
+
+              {reward && (
+                <div className="mx-auto mt-6 max-w-sm border-2 border-dashed border-accent/50 bg-accent/5 p-4">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-accent">
+                    Your photo review reward
+                  </p>
+                  <p className="mt-1 text-lg font-bold text-primary">
+                    ₹{reward.amount} OFF your next order
+                  </p>
+                  <button
+                    type="button"
+                    onClick={copyRewardCode}
+                    className="mt-3 w-full border border-accent bg-white px-3 py-2"
+                  >
+                    <span className="block font-mono text-base font-bold tracking-widest text-accent">
+                      {reward.code}
+                    </span>
+                    <span className="block text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                      {copied ? "Copied ✓" : "Tap to copy"}
+                    </span>
+                  </button>
+                  <p className="mt-2 text-[11px] text-gray-500">
+                    One use, on orders above ₹{reward.minimum}.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={close}
+                    className="mt-3 text-sm font-semibold text-accent underline-offset-2 hover:underline"
+                  >
+                    Done
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-5">
@@ -294,6 +347,10 @@ const ReviewModal = ({
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Add a Photo (optional)
                 </label>
+                <p className="mb-2 text-xs text-accent">
+                  📸 Ordered from Viora before? Add a photo and get ₹{REVIEW_REWARD.amount} off your next
+                  order — whatever your rating.
+                </p>
                 <input
                   type="file"
                   accept="image/*"
@@ -301,7 +358,7 @@ const ReviewModal = ({
                   className="block w-full text-sm text-gray-600 file:mr-4 file:rounded-md file:border-0 file:bg-primary file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-primary-light cursor-pointer"
                 />
                 {previewUrl && (
-                  <div className="mt-3 relative w-24 h-24 rounded-md overflow-hidden border border-gray-200">
+                  <div className="mt-3 relative w-24 h-24 overflow-hidden border border-gray-200">
                     <Image
                       src={previewUrl}
                       alt="preview"

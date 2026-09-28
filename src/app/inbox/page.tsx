@@ -97,8 +97,8 @@ const C = {
 const HEADER_BG = "linear-gradient(135deg, #1A1410 0%, #5A0A18 100%)";
 // Champagne-gold gradient for avatars / accents.
 const GOLD_BG = "linear-gradient(135deg, #C9A66B 0%, #A9844C 100%)";
-// Serif display face (Cormorant) supplied by the root layout.
-const SERIF = "var(--font-cormorant), Georgia, 'Times New Roman', serif";
+// Serif display face (Noto Serif Display) supplied by the root layout.
+const SERIF = "var(--font-heading), Georgia, 'Times New Roman', serif";
 
 // --- mock seed data ----------------------------------------------------------
 const now = Date.now();
