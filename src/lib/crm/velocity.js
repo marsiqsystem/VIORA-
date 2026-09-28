@@ -6,10 +6,17 @@
 // Velocity's tracking-webhook spec hasn't been provided yet — so they keep their
 // TODO(velocity) markers.
 //
-// Auth model (real): POST /custom/api/v1/auth-token with {username, password}
-// returns {token, expires_at}. The token goes in a *bare* Authorization header
-// (NOT "Bearer <token>") on every subsequent call. We cache it in-module and
-// only refetch when it is missing, near expiry, or the API answers 401.
+// Auth model:
+//   NEW (Velocity migration, effective 2026-09-30): generate a long-lived key in
+//   the dashboard (Settings -> API Keys, expiry up to 365 days) and set it as
+//   VELOCITY_API_TOKEN. It's used verbatim on every call — no auth-token request,
+//   no caching. Rotate it in the dashboard before it expires.
+//   LEGACY (disabled by Velocity on 2026-09-30): POST /custom/api/v1/auth-token
+//   with {username, password} returns {token, expires_at}; cached in-module and
+//   refetched when missing, near expiry, or on a 401.
+// Either way the token goes in a *bare* Authorization header (NOT "Bearer
+// <token>") on every subsequent call — unless VELOCITY_TOKEN_SCHEME=bearer.
+// getToken() prefers VELOCITY_API_TOKEN whenever it is set.
 //
 // Two safety gates mirror lib/whatsapp.js so nothing hits the real carrier by
 // accident:
@@ -19,6 +26,7 @@
 //   VELOCITY_ENABLED=false -> even if not mocking, treat as dry-run.
 
 import { withRetry } from "./reliability";
+import { PACKAGE_BOX, parcelWeightKg, parcelHeightCm } from "./packageBox";
 
 // Refresh the token this many ms before its stated expiry so an in-flight
 // request never races the expiry boundary.
@@ -33,6 +41,16 @@ function cfg() {
     // dashboard would otherwise silently 401 the auth-token call.
     username: (process.env.VELOCITY_USERNAME || "").trim(), // registered mobile number
     password: (process.env.VELOCITY_PASSWORD || "").trim(),
+    // NEW auth (Velocity migration, effective 2026-09-30): a long-lived key
+    // generated in the Velocity dashboard (Settings -> API Keys, expiry up to
+    // 365 days). When set it REPLACES username/password — the old auth-token
+    // endpoint is disabled on 2026-09-30. Rotate it in the dashboard before it
+    // expires (up to 5 active keys). See getToken().
+    apiToken: (process.env.VELOCITY_API_TOKEN || "").trim(),
+    // How the dashboard token is sent. Velocity's docs say "Bearer <token>", but
+    // the legacy auth-token value went in bare — so default to bare (unchanged
+    // behaviour) and flip to "bearer" only if a raw dashboard token 401s.
+    tokenScheme: (process.env.VELOCITY_TOKEN_SCHEME || "").trim().toLowerCase(),
     warehouseId: (process.env.VELOCITY_WAREHOUSE_ID || "").trim(), // pre-registered pickup warehouse
     pickupLocation: (process.env.VELOCITY_PICKUP_LOCATION || "").trim(), // warehouse display name (API requires it)
     trackBase: (process.env.VELOCITY_TRACK_URL_BASE || "https://viorajewel.velocityshipping.in/track")
@@ -44,16 +62,11 @@ function cfg() {
       .replace(/https?:\/\/(www\.)?shipfastt?\.in/gi, "https://www.velocityshipping.in")
       .replace(/https?:\/\/(www\.)?velocityshipping\.in/gi, "https://viorajewel.velocityshipping.in")
       .replace(/\/$/, ""),
-    // Viora's standard jewellery package — FIXED. Hardcoded (not env) so a wrong
-    // VELOCITY_DEFAULT_* value in a dashboard can't silently change it (a stale
-    // env was sending breadth 10 instead of 12). Height & weight scale with
+    // Viora's standard jewellery package — from the single source of truth
+    // (packageBox.js), shared by all three couriers + rate-compare. NOT env, so a
+    // stale dashboard value can't silently change it. Height & weight scale with
     // quantity in buildShipmentPayload; length & breadth stay constant.
-    dims: {
-      length: 18, // cm
-      breadth: 12, // cm
-      height: 4, // cm (per unit)
-      weight: 0.2, // kg (per unit)
-    },
+    dims: { ...PACKAGE_BOX },
     enabled: String(process.env.VELOCITY_ENABLED).trim().toLowerCase() === "true",
     mock: String(process.env.VELOCITY_MOCK).trim().toLowerCase() === "true",
   };
@@ -74,12 +87,30 @@ function parseExpiry(expiresAt) {
   return Date.now() + TOKEN_DEFAULT_TTL_MS;
 }
 
+/** True when we have some way to authenticate: the new dashboard key OR the
+ *  legacy username/password pair. */
+function hasAuth(c) {
+  return !!(c.apiToken || (c.username && c.password));
+}
+
 /**
  * Return a valid auth token, using the cache while it's comfortably in-date.
  * `forceRefresh` bypasses the cache (used after a 401). Throws on auth failure.
  */
 async function getToken(forceRefresh = false) {
   const c = cfg();
+
+  // Preferred path (post-2026-09-30): a dashboard-generated key, used verbatim.
+  // No network auth call and no expiry handling here — the operator sets the
+  // expiry in the Velocity dashboard and rotates the key there. The value goes
+  // into the Authorization header exactly as the legacy token did (bare by
+  // default; "Bearer <token>" if VELOCITY_TOKEN_SCHEME=bearer).
+  if (c.apiToken) {
+    return c.tokenScheme === "bearer" ? `Bearer ${c.apiToken}` : c.apiToken;
+  }
+
+  // LEGACY path — username/password -> auth-token. Velocity disables this
+  // endpoint on 2026-09-30; set VELOCITY_API_TOKEN before then to cut over.
   if (
     !forceRefresh &&
     tokenCache &&
@@ -153,11 +184,18 @@ function buildShipmentPayload(o) {
     productItems.length
       ? productItems.map((it, i) => ({
           name: it.name || o.product || "Jewellery",
-          sku: it.sku || `SKU-${i + 1}`,
+          sku: it.sku || o.dCode || "",
           units: Number(it.quantity) || 1,
-          selling_price: Number(it.price) || Number(o.amount) || 0,
+          // Respect an EXPLICIT price — including 0 (e.g. a combined shipment where
+          // the already-paid/prepaid item rides along at ₹0). Only fall back to the
+          // order amount when no price was supplied at all (`0 || amount` would
+          // wrongly turn a real ₹0 into the full amount).
+          selling_price:
+            it.price != null && it.price !== ""
+              ? Number(it.price) || 0
+              : Number(o.amount) || 0,
         }))
-      : [{ name: o.product || "Jewellery", sku: "SKU-1", units: 1, selling_price: amount }];
+      : [{ name: o.product || "Jewellery", sku: o.dCode || "", units: 1, selling_price: amount }];
 
   // Package dimensions scale with quantity. The default box (18 x 12 x 4 cm,
   // 0.2 kg) holds ONE unit; every extra unit is stacked on top, so only the
@@ -175,7 +213,7 @@ function buildShipmentPayload(o) {
     order_id: o.orderId ? `VJ-#${o.orderId}` : o.orderGuid,
     order_date: formatOrderDate(new Date()),
     billing_customer_name: o.name || "Customer",
-    billing_address: address.line1 || "",
+    billing_address: [address.line1, address.line2, address.line3].filter(Boolean).join(", ") || "",
     billing_city: address.city || "",
     billing_pincode: address.postalCode || "",
     billing_state: address.state || "",
@@ -188,8 +226,8 @@ function buildShipmentPayload(o) {
     cod_collectible: isCOD ? amount : 0,
     length: c.dims.length,
     breadth: c.dims.breadth,
-    height: c.dims.height * totalUnits,
-    weight: Number((c.dims.weight * totalUnits).toFixed(3)),
+    height: parcelHeightCm(totalUnits),
+    weight: parcelWeightKg(totalUnits),
     warehouse_id: c.warehouseId,
     order_items: items,
   };
@@ -216,9 +254,9 @@ async function createShipment(o) {
     return { ok: true, dryRun: true, awb, trackingUrl, raw: { mock: true } };
   }
 
-  if (!c.baseUrl || !c.username || !c.password || !c.warehouseId) {
+  if (!c.baseUrl || !hasAuth(c) || !c.warehouseId) {
     console.error(
-      "[velocity] VELOCITY_BASE_URL / VELOCITY_USERNAME / VELOCITY_PASSWORD / VELOCITY_WAREHOUSE_ID not fully set."
+      "[velocity] not configured — need VELOCITY_BASE_URL + VELOCITY_WAREHOUSE_ID and either VELOCITY_API_TOKEN or VELOCITY_USERNAME/VELOCITY_PASSWORD."
     );
     return { ok: false, dryRun: false, error: "velocity not configured" };
   }
@@ -311,7 +349,7 @@ async function createOrderOnly(o) {
     };
   }
 
-  if (!c.baseUrl || !c.username || !c.password || !c.warehouseId) {
+  if (!c.baseUrl || !hasAuth(c) || !c.warehouseId) {
     console.error("[velocity] creds not fully set — cannot create order.");
     return { ok: false, dryRun: false, error: "velocity not configured" };
   }
@@ -514,6 +552,13 @@ async function trackShipment(awb) {
             null,
           activities: rec.shipment_track_activities || [],
           trackUrl: brandTrackUrl(rec.track_url) || `${c.trackBase}/${awb}`,
+          // Estimated delivery date, if the courier exposes one (best-effort).
+          edd:
+            rec.etd ||
+            rec.expected_delivery_date ||
+            rec.edd ||
+            rec.shipment_track?.[0]?.edd ||
+            null,
           raw: data,
         };
       },
@@ -537,11 +582,108 @@ function verifyWebhook(secretHeader) {
   return secretHeader === secret;
 }
 
+// ===========================================================================
+// RATE CHECK  (read-only — never books, never charges)
+// ===========================================================================
+
+/**
+ * Per-courier freight quotes WITHOUT booking — POST /custom/api/v1/rates (read-only,
+ * documented at github.com/Velocity-Engineering/shipping-faq). Mirrors ithink/
+ * shiprocket.checkRate's signature & return shape so the compare endpoint treats all
+ * couriers uniformly. Origin pincode comes from VELOCITY_PICKUP_PINCODE / PICKUP_PINCODE.
+ * Never throws.
+ * @param {{toPincode, weightKg, dims?, paymentMode, amount, fromPincode?}} o
+ * @returns {Promise<{ok, rates?:Array<{courier,serviceType,rate,cod,prepaid,tat,zone}>, zone?, edd?, error?}>}
+ */
+async function checkRate({ toPincode, weightKg, dims, paymentMode, amount, fromPincode }) {
+  const c = cfg();
+  if (c.mock || !c.enabled) {
+    return { ok: true, dryRun: true, rates: [{ courier: "Velocity (mock)", serviceType: "standard", rate: 0, cod: "Y", prepaid: "Y", tat: "-" }] };
+  }
+  if (!hasAuth(c)) return { ok: false, error: "velocity not configured" };
+
+  const to = String(toPincode || "").replace(/\D/g, "");
+  if (!to) return { ok: false, error: "destination pincode required" };
+  const from = String(fromPincode || process.env.VELOCITY_PICKUP_PINCODE || process.env.PICKUP_PINCODE || "").replace(/\D/g, "");
+  if (!from) return { ok: false, error: "pickup pincode unknown (set VELOCITY_PICKUP_PINCODE)" };
+
+  const d = dims || c.dims || { ...PACKAGE_BOX };
+  const isCOD = paymentMode !== "PREPAID";
+  const weightKgNum = weightKg || d.weight || 0.5;
+  // Velocity's /rates wants dead_weight in GRAMS (all others take kg).
+  const body = {
+    journey_type: "forward",
+    origin_pincode: from,
+    destination_pincode: to,
+    dead_weight: Math.round(weightKgNum * 1000),
+    length: d.length,
+    width: d.breadth,
+    height: d.height,
+    payment_method: isCOD ? "cod" : "prepaid",
+    ...(isCOD ? { shipment_value: Number(amount) || 0 } : {}),
+  };
+
+  try {
+    return await withRetry(
+      async () => {
+        const post = (token) =>
+          fetch(`${c.baseUrl}/custom/api/v1/rates`, {
+            method: "POST",
+            headers: { Authorization: token, "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+        let token = await getToken();
+        let res = await post(token);
+        if (res.status === 401) {
+          tokenCache = null;
+          token = await getToken(true);
+          res = await post(token);
+        }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return { ok: false, error: `velocity rate HTTP ${res.status}`, raw: data };
+
+        const arr = Array.isArray(data?.result?.serviceable_couriers) ? data.result.serviceable_couriers : [];
+        if (String(data?.status).toUpperCase() !== "SUCCESS" || !arr.length) {
+          return { ok: false, error: data?.message || data?.error || "no rates (unserviceable pincode?)", raw: data };
+        }
+        // Days-in-transit from the pickup->delivery dates when both are present.
+        const tatDays = (ed) => {
+          const p = ed?.pickup ? new Date(ed.pickup).getTime() : NaN;
+          const dv = ed?.delivery ? new Date(ed.delivery).getTime() : NaN;
+          if (!Number.isFinite(p) || !Number.isFinite(dv) || dv < p) return null;
+          return Math.max(1, Math.round((dv - p) / 86400000));
+        };
+        const rates = arr
+          .map((r) => {
+            const ch = r.charges || {};
+            const rate = (Number(ch.total_forward_charges) || 0) + (Number(r.platform_fee) || 0);
+            return {
+              courier: r.carrier_name || r.carrier_code || "Velocity",
+              serviceType: r.service_level || "",
+              rate,
+              cod: isCOD ? "Y" : "N",
+              prepaid: isCOD ? "N" : "Y",
+              tat: tatDays(r.expected_delivery),
+              zone: data?.result?.zone || null,
+            };
+          })
+          .sort((a, b) => a.rate - b.rate);
+        return { ok: true, rates, zone: data?.result?.zone || null, edd: arr[0]?.expected_delivery?.delivery || null, raw: data };
+      },
+      { label: "velocity.checkRate", retries: 1 }
+    );
+  } catch (e) {
+    console.error("[velocity] checkRate failed:", e?.message || e);
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
 export {
   createShipment,
   createOrderOnly,
   buildShipmentPayload,
   getToken,
+  checkRate,
   trackShipment,
   normalizeStatus,
   parseStatusWebhook,

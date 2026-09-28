@@ -9,6 +9,7 @@ import { trackCompleteRegistration } from "@/lib/metaPixel";
 import BackButton from "@/components/BackButton";
 import Link from "next/link";
 import { REVIEW_REWARD } from "@/lib/checkoutPricing";
+import GoogleSignInButton from "@/components/GoogleSignInButton";
 import {
   getInvisibleCaptchaToken,
   getVisibleCaptchaResponse,
@@ -23,8 +24,6 @@ enum MODE {
   EMAIL_VERIFICATION = "EMAIL_VERIFICATION",
 }
 
-const FRIENDLY_FAILURE =
-  "We couldn't log you in right now. Please try again in a minute, or WhatsApp us and we'll help. You can always check out without an account.";
 
 // Helper: detect if running on localhost (where reCAPTCHA keys won't work)
 const isLocalhost = (): boolean => {
@@ -287,21 +286,36 @@ const LoginContent = () => {
             response.errorCode === "invalidCaptchaToken"
           ) {
             if (isLocalhost() || mode === MODE.LOGIN) {
-              // Login uses INVISIBLE reCAPTCHA (no checkbox the user can solve),
-              // so if Wix still demands a token but the key won't validate, the
-              // only fix is in the Wix dashboard. Same guidance on localhost.
-              console.error("[login] reCAPTCHA rejected — check Wix Site Members → Signup & Login Security.");
-              setError(FRIENDLY_FAILURE);
+              // Login uses INVISIBLE reCAPTCHA (no checkbox the customer can
+              // solve), so a failing security check can't be fixed by the user.
+              // Owner-facing note: if this persists, check reCAPTCHA in the Wix
+              // Dashboard (Settings → Login & Security). Customer sees a friendly
+              // message instead.
+              console.warn(
+                "[auth] reCAPTCHA blocked login — review reCAPTCHA setting in Wix Dashboard (Settings → Login & Security)."
+              );
+              setError(
+                "We couldn't complete the security check. Please refresh the page and try again, or turn off any ad-blocker. Still stuck? Message us on WhatsApp and we'll sign you in."
+              );
             } else if (!isCaptchaRequired) {
               setIsCaptchaRequired(true);
-              setError("Security check required. Please complete the checkbox below and click Register again.");
+              setError("Quick security check — please tick the box below, then tap Register again.");
             } else {
               setError(
-                "Security check failed. Please try again or contact support."
+                "The security check didn't go through. Please try once more, or message us on WhatsApp for help."
               );
             }
+          } else if (mode === MODE.EMAIL_VERIFICATION) {
+            setError(
+              "That code didn't work — it may have expired or been entered incorrectly. Tap “Resend code” above to get a fresh one, then enter it here."
+            );
           } else {
-            setError(FRIENDLY_FAILURE);
+            // Keep the technical detail in the console for the owner; show the
+            // customer something they can actually act on.
+            console.warn("[auth] login failed:", response.errorCode, response);
+            setError(
+              "We couldn't sign you in. Please double-check your email and password, or tap “Forgot Password?” to reset it."
+            );
           }
           break; // TASK 4 FIX: Added missing break (was falling through to EMAIL_VERIFICATION)
         case LoginState.EMAIL_VERIFICATION_REQUIRED:
@@ -341,14 +355,18 @@ const LoginContent = () => {
 
       if (isCaptchaError) {
         if (isLocalhost() || mode === MODE.LOGIN) {
-          console.error("[login] reCAPTCHA rejected — check Wix Site Members → Signup & Login Security.");
-          setError(FRIENDLY_FAILURE);
+          console.warn(
+            "[auth] reCAPTCHA blocked login — review reCAPTCHA setting in Wix Dashboard (Settings → Login & Security)."
+          );
+          setError(
+            "We couldn't complete the security check. Please refresh the page and try again, or turn off any ad-blocker. Still stuck? Message us on WhatsApp and we'll sign you in."
+          );
         } else if (!isCaptchaRequired) {
           setIsCaptchaRequired(true);
-          setError("Security check required. Please complete the checkbox below and click Register again.");
+          setError("Quick security check — please tick the box below, then tap Register again.");
         } else {
           setError(
-            "Security check failed. Please try again or contact support."
+            "The security check didn't go through. Please try once more, or message us on WhatsApp for help."
           );
         }
         return;
@@ -356,7 +374,26 @@ const LoginContent = () => {
 
       // The auth request never settled within the timeout window.
       if (raw === "AUTH_TIMEOUT") {
-        setError("This is taking longer than expected. Please check your internet connection and try again.");
+        setError(
+          "This is taking longer than expected. Please check your internet connection and try again."
+        );
+        return;
+      }
+
+      // OTP step: Wix rejects the code with a raw INVALID_ARGUMENT / MIN_LENGTH
+      // validation error (e.g. the code expired, was mistyped, or the session
+      // lost the code). Never dump the raw JSON at the customer — point them at
+      // the Resend button instead.
+      const blob = `${raw} ${appDesc} ${code}`;
+      const isVerificationCodeError =
+        mode === MODE.EMAIL_VERIFICATION &&
+        (/INVALID_ARGUMENT|MIN_LENGTH|fieldViolations|VALIDATION|'code'|verificationCode/i.test(
+          blob
+        ));
+      if (isVerificationCodeError) {
+        setError(
+          "That code didn't work — it may have expired or been entered incorrectly. Tap “Resend code” above to get a fresh one, then enter it here."
+        );
         return;
       }
 
@@ -370,9 +407,18 @@ const LoginContent = () => {
         /site is published/i.test(appDesc);
 
       if (isUnpublishedSite) {
-        console.error("[login] Wix site not published — auth unavailable.");
+        // Owner-facing cause: the Wix site needs to be published. Customers just
+        // see that sign-in is temporarily down.
+        console.warn("[auth] Wix site appears unpublished — publish it from the Wix dashboard.");
+        setError(
+          "Sign-in is temporarily unavailable. Please try again in a few minutes, or message us on WhatsApp and we'll help you."
+        );
+      } else {
+        console.warn("[auth] unexpected auth error:", raw || appDesc);
+        setError(
+          "Something went wrong on our side. Please try again in a moment, or message us on WhatsApp for help."
+        );
       }
-      setError(FRIENDLY_FAILURE);
     } finally {
       setIsLoading(false);
       // reCAPTCHA tokens are single-use — clear the checkbox so a retry after
@@ -452,7 +498,20 @@ const LoginContent = () => {
         className="flex flex-col gap-6 w-full max-w-md bg-white rounded-xl p-8 shadow-premium"
         onSubmit={handleSubmit}
       >
-        <h1 className="text-2xl font-playfair font-bold text-primary">{formTitle}</h1>
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-playfair font-bold text-primary">{formTitle}</h1>
+          {(mode === MODE.LOGIN || mode === MODE.REGISTER) && (
+            <p className="text-sm text-gray-500">
+              {mode === MODE.LOGIN
+                ? "Welcome back to Viora."
+                : "Join Viora — it only takes a moment."}
+            </p>
+          )}
+        </div>
+
+        {(mode === MODE.LOGIN || mode === MODE.REGISTER) && (
+          <GoogleSignInButton redirectTo={redirectTo} onError={setError} />
+        )}
 
         {mode === MODE.RESET_PASSWORD && (
           <p className="-mt-3 text-sm text-gray-600 leading-relaxed">

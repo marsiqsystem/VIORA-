@@ -4,9 +4,12 @@
 // are interchangeable behind the dashboard picker / assign-courier route:
 //   - createShipment(o)   -> create the order AND generate a waybill (AWB) in one
 //                            call (iThink's order/add.json does both — there is no
-//                            "New Orders without AWB" state like Shiprocket's, so
-//                            createOrderOnly delegates here for interface parity).
-//   - createOrderOnly(o)  -> alias of createShipment (see above).
+//                            "New Orders without AWB" state like Shiprocket's). THIS
+//                            is the call that debits the iThink wallet.
+//   - createOrderOnly(o)  -> SAFE, NON-CHARGING no-op: iThink can't hold a draft, so
+//                            create-only records the choice WITHOUT calling the API,
+//                            and the order is booked later via createShipment. This
+//                            is what keeps courier selection from charging the wallet.
 //   - trackShipment(awb)  -> live tracking for the storefront timeline.
 //   - parseStatusWebhook  -> map iThink's status webhook to our internal enum.
 //
@@ -24,6 +27,7 @@
 //   ITHINK_ENABLED=false -> even if not mocking, treat as dry-run.
 
 import { withRetry } from "./reliability";
+import { PACKAGE_BOX, parcelWeightKg, parcelHeightCm } from "./packageBox";
 
 function cfg() {
   return {
@@ -50,14 +54,10 @@ function cfg() {
     // Customer-facing tracking page. Set a branded URL later (as we did for
     // Velocity); default to iThink's public tracker.
     trackBase: (process.env.ITHINK_TRACK_URL_BASE || "https://ithinklogistics.com/track").replace(/\/$/, ""),
-    // Viora's standard jewellery package — FIXED (mirrors shiprocket/velocity).
-    // Height & weight scale with quantity; length & breadth are const.
-    dims: {
-      length: 18, // cm
-      breadth: 12, // cm
-      height: 4, // cm (per unit)
-      weight: 0.2, // kg (per unit)
-    },
+    // Viora's standard jewellery package — from the single source of truth
+    // (packageBox.js), shared by all three couriers + rate-compare so the box is
+    // identical everywhere. Height & weight scale with quantity at build time.
+    dims: { ...PACKAGE_BOX },
     enabled: String(process.env.ITHINK_ENABLED).trim().toLowerCase() === "true",
     mock: String(process.env.ITHINK_MOCK).trim().toLowerCase() === "true",
   };
@@ -105,17 +105,28 @@ function buildOrderPayload(o) {
   };
   const productItems = Array.isArray(o.items) ? o.items.filter((it) => !isFeeItem(it)) : [];
 
-  // iThink add.json takes ONE product summary per shipment (products / _sku /
-  // _quantity / _price). Collapse our line items into a single representative
-  // product + total quantity so the box + weight math still scales.
-  const firstItem = productItems[0] || null;
+  // v3 `products` is an ARRAY — send EVERY product with its own quantity + price so
+  // a multi-product order shows each item (not just the first) and the totals add
+  // up. Total units drives the parcel weight/height below.
   const totalUnits =
     (productItems.length
       ? productItems.reduce((sum, it) => sum + (Number(it.quantity) || 1), 0)
       : 1) || 1;
-  const productName = firstItem?.name || o.product || "Jewellery";
-  const productSku = firstItem?.sku || "SKU-1";
-  const productPrice = Number(firstItem?.price) || amount || 0;
+  const products = productItems.length
+    ? productItems.map((it, i) => ({
+        product_name: it.name || o.product || "Jewellery",
+        product_sku: it.sku || o.dCode || "",
+        product_quantity: String(Number(it.quantity) || 1),
+        product_price: String(Number(it.price) || 0),
+      }))
+    : [
+        {
+          product_name: o.product || "Jewellery",
+          product_sku: o.dCode || "",
+          product_quantity: String(totalUnits),
+          product_price: String(amount || 0),
+        },
+      ];
 
   // order = "VJ-#<Wix number>" (same convention as Velocity/Shiprocket) so the
   // courier dashboard id matches the Wix/site/email order and the status webhook
@@ -137,7 +148,7 @@ function buildOrderPayload(o) {
     company_name: "",
     add: address.line1 || "",
     add2: address.line2 || "",
-    add3: "",
+    add3: address.line3 || "",
     pin: address.postalCode || "",
     city: address.city || "",
     state: address.state || "",
@@ -158,18 +169,11 @@ function buildOrderPayload(o) {
     billing_phone: "",
     billing_alt_phone: "",
     billing_email: "",
-    products: [
-      {
-        product_name: productName,
-        product_sku: productSku,
-        product_quantity: String(totalUnits),
-        product_price: String(productPrice),
-      },
-    ],
+    products,
     shipment_length: String(c.dims.length),
     shipment_width: String(c.dims.breadth),
-    shipment_height: String(c.dims.height * totalUnits),
-    weight: String(Number((c.dims.weight * totalUnits).toFixed(3))),
+    shipment_height: String(parcelHeightCm(totalUnits)),
+    weight: String(parcelWeightKg(totalUnits)),
     shipping_charges: "0",
     giftwrap_charges: "0",
     transaction_charges: "0",
@@ -189,14 +193,28 @@ function buildOrderPayload(o) {
     store_id: c.storeId,
   };
 
+  // Which carrier + service to book. Prefer the courier the operator CHOSE in the
+  // rate-compare table (o.logistics / o.serviceType — the option's logistic_name /
+  // logistic_service_type). Fall back to the account default only when no choice
+  // was passed. THIS is the fix for "picked Shadowfax but it booked Delhivery".
+  //
+  // add.json expects the SHORT lowercase carrier token (this account's allowed
+  // values: delhivery, xpressbees, dtdc, bluedart, shadowfax) and s_type air|surface,
+  // but rate/check.json returns a display name like "Delhivery Surface". Normalise
+  // to the first lowercase word so a chosen "Shadowfax"/"Delhivery Surface" maps to
+  // "shadowfax"/"delhivery" and s_type to "surface"/"air".
+  const toToken = (s) => String(s || "").trim().toLowerCase().split(/\s+/)[0] || "";
+  const logistics = toToken(o.logistics) || String(c.logistics || "").trim();
+  const s_type = toToken(o.serviceType) || String(c.serviceType || "").trim();
+
   return {
     data: {
       shipments: [shipment],
       pickup_address_id: c.pickupAddressId,
       access_token: c.accessToken,
       secret_key: c.secretKey,
-      logistics: c.logistics,
-      s_type: c.serviceType,
+      logistics,
+      s_type,
       order_type: "",
     },
   };
@@ -246,9 +264,9 @@ async function createShipment(o) {
 
   if (c.mock || !c.enabled) {
     const awb = `MOCK-IT-${o.orderId}`;
-    console.log(`[ithink] MOCK createShipment (ITHINK_MOCK/ENABLED gate) -> awb=${awb}`);
+    console.log(`[ithink] MOCK createShipment (ITHINK_MOCK/ENABLED gate) -> awb=${awb}, logistics=${body?.data?.logistics}, s_type=${body?.data?.s_type}`);
     console.log("[ithink] would POST /order/add.json:", JSON.stringify(body, null, 2));
-    return { ok: true, dryRun: true, awb, trackingUrl: `${c.trackBase}/${awb}`, raw: { mock: true } };
+    return { ok: true, dryRun: true, awb, courierName: body?.data?.logistics || c.logistics, trackingUrl: `${c.trackBase}/${awb}`, raw: { mock: true } };
   }
 
   if (!c.accessToken || !c.secretKey || !c.pickupAddressId) {
@@ -280,7 +298,9 @@ async function createShipment(o) {
           ok: true,
           dryRun: false,
           awb: result.waybill,
-          courierName: c.logistics,
+          // Report the carrier actually booked (operator's chosen courier), not
+          // the fixed account default.
+          courierName: body?.data?.logistics || c.logistics,
           courierOrderId: result.refnum,
           trackingUrl: `${c.trackBase}/${result.waybill}`,
           raw: data,
@@ -295,11 +315,127 @@ async function createShipment(o) {
 }
 
 /**
- * Interface parity with velocity/shiprocket. iThink's add.json always generates
- * an AWB (there is no create-without-AWB state), so this is an alias.
+ * CREATE-ONLY — the safe, NON-CHARGING action behind the dashboard picker.
+ *
+ * iThink's add.json has NO draft state: it books the shipment AND debits the
+ * wallet the instant it runs (unlike Velocity/Shiprocket, whose create-only leaves
+ * the order in "New Orders" with no charge). So to give iThink the SAME safe
+ * "create the order, decide the courier + pay later" behaviour the operator wants,
+ * create-only here deliberately does NOT touch the iThink API at all — it just
+ * confirms the choice. The order is recorded on our side (dashboard) with no AWB;
+ * the operator books + charges it later with the explicit createShipment() action
+ * (the "Book on iThink" button), after checking rates. This is what stops the
+ * accidental wallet charge on courier selection.
+ *
+ * Returns a benign success with `deferred:true` and NO awb, so the caller records
+ * status "created" (not "dispatched") without a network call.
  */
 async function createOrderOnly(o) {
-  return createShipment(o);
+  console.log(
+    `[ithink] createOrderOnly is a NO-OP by design (no draft state) — order ${o?.orderId} recorded, NOT booked/charged. Use createShipment to book.`
+  );
+  return { ok: true, dryRun: false, deferred: true, awb: null };
+}
+
+// ===========================================================================
+// RATE CHECK  (rate/check.json — read-only, NO booking, NO wallet charge)
+// ===========================================================================
+
+// The pickup pincode drives rate quotes. It isn't in the shipment payload (that
+// uses the numeric pickup_address_id), so resolve it once from warehouse/get.json
+// (or ITHINK_PICKUP_PINCODE if set) and cache it in-module.
+let _pickupPincode = null;
+async function getPickupPincode() {
+  const envPin = (process.env.ITHINK_PICKUP_PINCODE || "").trim();
+  if (envPin) return envPin;
+  if (_pickupPincode) return _pickupPincode;
+  const c = cfg();
+  if (!c.accessToken || !c.secretKey) return null;
+  try {
+    const { res, data } = await post("/warehouse/get.json", {
+      data: { access_token: c.accessToken, secret_key: c.secretKey },
+    });
+    if (!res.ok) return null;
+    const list = Array.isArray(data?.data)
+      ? data.data
+      : data?.data && typeof data.data === "object"
+        ? Object.values(data.data)
+        : [];
+    const match =
+      list.find(
+        (w) => String(w?.id ?? w?.address_id ?? w?.warehouse_id ?? "") === String(c.pickupAddressId)
+      ) || list[0];
+    const pin = match?.pincode || match?.pin || match?.postal_code || match?.zip || null;
+    if (pin) _pickupPincode = String(pin).replace(/\D/g, "");
+    return _pickupPincode;
+  } catch (e) {
+    console.warn("[ithink] getPickupPincode failed:", e?.message || e);
+    return null;
+  }
+}
+
+/**
+ * Get per-courier freight quotes for a shipment WITHOUT booking anything. Calls
+ * rate/check.json — read-only, does NOT touch the wallet. Never throws.
+ * @param {{toPincode, weightKg, dims?, paymentMode, amount, fromPincode?}} o
+ * @returns {Promise<{ok, rates?:Array<{courier,serviceType,rate,cod,prepaid,tat,zone}>, zone?, edd?, error?}>}
+ */
+async function checkRate({ toPincode, weightKg, dims, paymentMode, amount, fromPincode }) {
+  const c = cfg();
+  if (c.mock || !c.enabled) {
+    return {
+      ok: true,
+      dryRun: true,
+      rates: [{ courier: c.logistics, serviceType: c.serviceType, rate: 0, cod: "Y", prepaid: "Y", tat: "-" }],
+    };
+  }
+  if (!c.accessToken || !c.secretKey) return { ok: false, error: "ithink not configured" };
+  const to = String(toPincode || "").replace(/\D/g, "");
+  if (!to) return { ok: false, error: "destination pincode required" };
+  const from = String(fromPincode || (await getPickupPincode()) || "").replace(/\D/g, "");
+  if (!from) return { ok: false, error: "pickup pincode unknown (set ITHINK_PICKUP_PINCODE)" };
+
+  const d = dims || c.dims;
+  const isCOD = paymentMode !== "PREPAID";
+  const body = {
+    data: {
+      from_pincode: from,
+      to_pincode: to,
+      shipping_length_cms: String(d.length),
+      shipping_width_cms: String(d.breadth),
+      shipping_height_cms: String(d.height),
+      shipping_weight_kg: String(weightKg || d.weight || 0.5),
+      order_type: "forward",
+      payment_method: isCOD ? "COD" : "Prepaid",
+      product_mrp: String(Number(amount) || 0),
+      access_token: c.accessToken,
+      secret_key: c.secretKey,
+    },
+  };
+
+  try {
+    const { res, data } = await post("/rate/check.json", body);
+    if (!res.ok) return { ok: false, error: `ithink rate HTTP ${res.status}`, raw: data };
+    const arr = Array.isArray(data?.data) ? data.data : [];
+    if (!arr.length) {
+      return { ok: false, error: data?.message || "no rates (unserviceable pincode?)", raw: data };
+    }
+    const rates = arr
+      .map((r) => ({
+        courier: r.logistic_name || "?",
+        serviceType: r.logistic_service_type || "",
+        rate: Number(r.rate) || 0,
+        cod: r.cod,
+        prepaid: r.prepaid,
+        tat: r.delivery_tat || null,
+        zone: r.logistics_zone || null,
+      }))
+      .sort((a, b) => a.rate - b.rate);
+    return { ok: true, rates, zone: data?.zone || null, edd: data?.expected_delivery_date || null, raw: data };
+  } catch (e) {
+    console.error("[ithink] checkRate failed:", e?.message || e);
+    return { ok: false, error: e?.message || String(e) };
+  }
 }
 
 // ===========================================================================
@@ -409,6 +545,13 @@ async function trackShipment(awb) {
           status: rec.current_status || rec.last_scan_details?.status || null,
           activities: rec.scan_details || [],
           trackUrl: `${c.trackBase}/${awb}`,
+          // Estimated delivery date, if iThink exposes one (best-effort).
+          edd:
+            rec.expected_delivery_date ||
+            rec.edd ||
+            rec.expected_date ||
+            rec.edd_date ||
+            null,
           raw: data,
         };
       },
@@ -435,6 +578,8 @@ export {
   createOrderOnly,
   createShipment,
   buildOrderPayload,
+  checkRate,
+  getPickupPincode,
   trackShipment,
   normalizeStatus,
   parseStatusWebhook,

@@ -5,7 +5,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCartStore } from "@/hooks/useCartStore";
 import { useCommerceUi } from "@/hooks/useCommerceUi";
 import { useWixClient } from "@/hooks/useWixClient";
-import { useWishlistStore } from "@/hooks/useWishlistStore";
 
 type Tab = {
   id: string;
@@ -32,12 +31,11 @@ const MobileBottomNav = () => {
   const { counter } = useCartStore();
   const openDrawer = useCommerceUi((s) => s.openDrawer);
   const drawerOpen = useCommerceUi((s) => s.drawerOpen);
-  const wishlistCount = useWishlistStore((s) => s.items.length);
   const wixClient = useWixClient();
   if (HIDDEN_ON.some((p) => pathname.startsWith(p))) return null;
 
-  const wishlistActive = pathname.startsWith("/wishlist");
-  const accountActive = ["/profile", "/account", "/login", "/orders", "/track"].some((p) => pathname.startsWith(p));
+  const trackActive = ["/track", "/orders", "/account/orders"].some((p) => pathname.startsWith(p));
+  const accountActive = !trackActive && ["/profile", "/account", "/login", "/wishlist"].some((p) => pathname.startsWith(p));
 
   const tabs: Tab[] = [
     {
@@ -55,13 +53,13 @@ const MobileBottomNav = () => {
       icon: () => svg("M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v6H4zM14 15h6v6h-6z"),
     },
     {
-      id: "wishlist",
-      label: "Wishlist",
-      href: "/wishlist",
-      active: wishlistActive && !drawerOpen,
-      icon: (a) =>
-        svg("M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z", a),
-      badge: wishlistCount,
+      // Order number + phone, no login needed; signed-in shoppers also find
+      // their orders under Account. (Wishlist is in the menu and Account.)
+      id: "track",
+      label: "Track Order",
+      href: "/track",
+      active: trackActive && !drawerOpen,
+      icon: () => svg("M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"),
     },
     {
       id: "account",
@@ -98,7 +96,7 @@ const MobileBottomNav = () => {
                   </span>
                 )}
               </span>
-              <span className="text-[11px] font-medium tracking-wide">{t.label}</span>
+              <span className="whitespace-nowrap text-[11px] font-medium tracking-wide">{t.label}</span>
               <span
                 aria-hidden
                 className={`absolute left-1/2 top-0 h-0.5 w-8 -translate-x-1/2 rounded-b-full bg-[#9B1B30] transition-opacity ${t.active ? "opacity-100" : "opacity-0"}`}

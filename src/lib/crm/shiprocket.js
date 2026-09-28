@@ -21,6 +21,7 @@
 //   SHIPROCKET_ENABLED=false  -> even if not mocking, treat as dry-run.
 
 import { withRetry } from "./reliability";
+import { PACKAGE_BOX, parcelWeightKg, parcelHeightCm } from "./packageBox";
 
 // Shiprocket JWTs live ~10 days. Cache for 9 to leave a safe margin, and always
 // refetch on a 401/403 mid-life (rotated/expired token).
@@ -39,14 +40,10 @@ function cfg() {
     // Customer-facing tracking page. Shiprocket's public tracker is
     // shiprocket.co/tracking/<AWB>; a branded domain can override via env later.
     trackBase: (process.env.SHIPROCKET_TRACK_URL_BASE || "https://shiprocket.co/tracking").replace(/\/$/, ""),
-    // Viora's standard jewellery package — FIXED (mirrors velocity.js). Height &
+    // Viora's standard jewellery package — from the single source of truth
+    // (packageBox.js), shared by all three couriers + rate-compare. Height &
     // weight scale with quantity in buildOrderPayload; length & breadth are const.
-    dims: {
-      length: 18, // cm
-      breadth: 12, // cm
-      height: 4, // cm (per unit)
-      weight: 0.2, // kg (per unit)
-    },
+    dims: { ...PACKAGE_BOX },
     enabled: String(process.env.SHIPROCKET_ENABLED).trim().toLowerCase() === "true",
     mock: String(process.env.SHIPROCKET_MOCK).trim().toLowerCase() === "true",
   };
@@ -135,11 +132,11 @@ function buildOrderPayload(o) {
     productItems.length
       ? productItems.map((it, i) => ({
           name: it.name || o.product || "Jewellery",
-          sku: it.sku || `SKU-${i + 1}`,
+          sku: it.sku || o.dCode || "",
           units: Number(it.quantity) || 1,
           selling_price: Number(it.price) || amount || 0,
         }))
-      : [{ name: o.product || "Jewellery", sku: "SKU-1", units: 1, selling_price: amount }];
+      : [{ name: o.product || "Jewellery", sku: o.dCode || "", units: 1, selling_price: amount }];
 
   // Package dimensions scale with quantity (same rule as Velocity): the default
   // box holds ONE unit; each extra unit stacks on top, so only HEIGHT grows and
@@ -162,7 +159,7 @@ function buildOrderPayload(o) {
     pickup_location: c.pickupLocation, // the registered pickup nickname
     billing_customer_name: firstName,
     billing_last_name: lastName,
-    billing_address: address.line1 || "",
+    billing_address: [address.line1, address.line2, address.line3].filter(Boolean).join(", ") || "",
     billing_city: address.city || "",
     billing_pincode: address.postalCode || "",
     billing_state: address.state || "",
@@ -175,8 +172,8 @@ function buildOrderPayload(o) {
     sub_total: amount,
     length: c.dims.length,
     breadth: c.dims.breadth,
-    height: c.dims.height * totalUnits,
-    weight: Number((c.dims.weight * totalUnits).toFixed(3)),
+    height: parcelHeightCm(totalUnits),
+    weight: parcelWeightKg(totalUnits),
   };
 }
 
@@ -196,6 +193,26 @@ async function authedPost(path, body) {
     tokenCache = null;
     token = await getToken(true);
     res = await post(token);
+  }
+  const data = await res.json().catch(() => ({}));
+  return { res, data };
+}
+
+/** Authed GET with the same 401/403 -> refresh-once retry as authedPost. */
+async function authedGet(path) {
+  const c = cfg();
+  const get = (token) =>
+    fetch(`${c.baseUrl}${path}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    });
+
+  let token = await getToken();
+  let res = await get(token);
+  if (res.status === 401 || res.status === 403) {
+    tokenCache = null;
+    token = await getToken(true);
+    res = await get(token);
   }
   const data = await res.json().catch(() => ({}));
   return { res, data };
@@ -349,6 +366,96 @@ function firstError(data) {
 }
 
 // ===========================================================================
+// RATE CHECK  (serviceability — read-only, never books)
+// ===========================================================================
+
+// Pickup pincode drives the serviceability/rate quote. Resolve it once from the
+// registered pickup address (matched by nickname) — or SHIPROCKET_PICKUP_PINCODE
+// / PICKUP_PINCODE if set — and cache in-module.
+let _pickupPincode = null;
+async function getPickupPincode() {
+  const envPin = (process.env.SHIPROCKET_PICKUP_PINCODE || process.env.PICKUP_PINCODE || "").trim();
+  if (envPin) return envPin.replace(/\D/g, "");
+  if (_pickupPincode) return _pickupPincode;
+  const c = cfg();
+  if (!c.email || !c.password) return null;
+  try {
+    const { res, data } = await authedGet("/settings/company/pickup");
+    if (!res.ok) return null;
+    const list =
+      data?.data?.shipping_address ||
+      data?.data?.pickup_address ||
+      (Array.isArray(data?.data) ? data.data : []);
+    const arr = Array.isArray(list) ? list : [];
+    const match =
+      arr.find((a) => String(a?.pickup_location || "").trim().toLowerCase() === c.pickupLocation.toLowerCase()) ||
+      arr[0];
+    const pin = match?.pin_code || match?.pincode || match?.pin || null;
+    if (pin) _pickupPincode = String(pin).replace(/\D/g, "");
+    return _pickupPincode;
+  } catch (e) {
+    console.warn("[shiprocket] getPickupPincode failed:", e?.message || e);
+    return null;
+  }
+}
+
+/**
+ * Per-courier freight quotes for a shipment WITHOUT booking — GET
+ * /courier/serviceability. Read-only, never assigns an AWB. Never throws.
+ * Mirrors ithink.checkRate's signature & return shape so the compare endpoint
+ * can treat all couriers uniformly.
+ * @param {{toPincode, weightKg, dims?, paymentMode, amount, fromPincode?}} o
+ * @returns {Promise<{ok, rates?:Array<{courier,serviceType,rate,cod,prepaid,tat,zone}>, edd?, error?}>}
+ */
+async function checkRate({ toPincode, weightKg, dims, paymentMode, amount, fromPincode }) {
+  const c = cfg();
+  if (c.mock || !c.enabled) {
+    return { ok: true, dryRun: true, rates: [{ courier: "Shiprocket (mock)", serviceType: "surface", rate: 0, cod: "Y", prepaid: "Y", tat: "-" }] };
+  }
+  if (!c.email || !c.password) return { ok: false, error: "shiprocket not configured" };
+  const to = String(toPincode || "").replace(/\D/g, "");
+  if (!to) return { ok: false, error: "destination pincode required" };
+  const from = String(fromPincode || (await getPickupPincode()) || "").replace(/\D/g, "");
+  if (!from) return { ok: false, error: "pickup pincode unknown (set SHIPROCKET_PICKUP_PINCODE)" };
+
+  const isCOD = paymentMode !== "PREPAID";
+  const d = dims || c.dims;
+  const weight = weightKg || d.weight || 0.5;
+  const qs = new URLSearchParams({
+    pickup_postcode: from,
+    delivery_postcode: to,
+    weight: String(weight),
+    cod: isCOD ? "1" : "0",
+    declared_value: String(Number(amount) || 0),
+  });
+
+  try {
+    const { res, data } = await authedGet(`/courier/serviceability/?${qs.toString()}`);
+    if (!res.ok) return { ok: false, error: `shiprocket rate HTTP ${res.status}`, raw: data };
+    const arr = data?.data?.available_courier_companies;
+    if (!Array.isArray(arr) || !arr.length) {
+      return { ok: false, error: data?.message || firstError(data) || "no rates (unserviceable pincode?)", raw: data };
+    }
+    const rates = arr
+      .map((r) => ({
+        courier: r.courier_name || "?",
+        serviceType: r.is_surface ? "surface" : "air",
+        // `rate` is the all-in charge (freight + COD + other); fall back to the sum.
+        rate: Number(r.rate) || (Number(r.freight_charge) || 0) + (isCOD ? Number(r.cod_charges) || 0 : 0),
+        cod: r.cod ? "Y" : "N",
+        prepaid: "Y",
+        tat: r.estimated_delivery_days || r.etd || null,
+        zone: r.zone || null,
+      }))
+      .sort((a, b) => a.rate - b.rate);
+    return { ok: true, rates, edd: arr[0]?.etd || null, raw: data };
+  } catch (e) {
+    console.error("[shiprocket] checkRate failed:", e?.message || e);
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
+// ===========================================================================
 // STATUS WEBHOOK  (WF2/WF3)
 // ===========================================================================
 
@@ -470,6 +577,13 @@ async function trackShipment(awb) {
           status: rec.shipment_status || rec.shipment_track?.[0]?.current_status || null,
           activities: rec.shipment_track_activities || [],
           trackUrl: rec.track_url || `${c.trackBase}/${awb}`,
+          // Estimated delivery date, if Shiprocket exposes one (best-effort).
+          edd:
+            rec.etd ||
+            rec.expected_delivery_date ||
+            rec.edd ||
+            rec.shipment_track?.[0]?.edd ||
+            null,
           raw: data,
         };
       },
@@ -497,6 +611,7 @@ export {
   createShipment,
   buildOrderPayload,
   getToken,
+  checkRate,
   trackShipment,
   normalizeStatus,
   parseStatusWebhook,

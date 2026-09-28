@@ -24,6 +24,7 @@ const LINKS = [
   { href: "/list?cat=best-sellers", label: "Best Sellers", from: "lg" },
   { href: "/new-arrivals", label: "New Arrivals", from: "lg" },
   { href: "/list?cat=wedding-reception", label: "Wedding", from: "xl" },
+  { href: "/track", label: "Track Order", from: "lg" },
 ] as const;
 
 /**

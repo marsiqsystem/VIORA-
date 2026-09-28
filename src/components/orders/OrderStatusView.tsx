@@ -57,6 +57,12 @@ const OrderStatusView = ({ status, showFullAddress, backHref, backLabel }: Props
               <OrderTimeline currentIndex={status.stageIndex} timestamps={{ CONFIRMED: status.placedAt }} canceled={status.canceled} />
             </div>
 
+            {status.edd && (
+              <p className="mt-4 text-sm text-gray-700">
+                Expected delivery: <b className="text-primary">{status.edd}</b>
+              </p>
+            )}
+
             {status.latestUpdate && (
               <p className="mt-4 bg-platinum px-4 py-3 text-xs text-gray-600">
                 <span className="font-semibold text-primary">Latest update: </span>

@@ -972,6 +972,12 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                 />
               </div>
               <FieldError message={errors.phone} />
+              {/* The courier calls this number before delivery — a wrong one means a
+                  failed / RTO'd order. */}
+              <p className="mt-1.5 flex items-start gap-1.5 bg-amber-50 px-2.5 py-2 text-[11px] leading-snug text-amber-800">
+                <span aria-hidden="true">⚠️</span>
+                <span>Please double-check your number: our courier calls it before delivery. If it&apos;s wrong or unreachable, we can&apos;t deliver your order.</span>
+              </p>
               <label className="mt-1.5 flex items-start gap-2 text-[11px] text-gray-500">
                 <input
                   type="checkbox"

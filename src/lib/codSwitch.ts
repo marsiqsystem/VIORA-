@@ -31,7 +31,12 @@ const razorpayClient = () => {
   return { keyId, keySecret, instance: new Razorpay({ key_id: keyId, key_secret: keySecret }) };
 };
 
+// The ₹49 is an additional fee on new orders; older orders carry it as a
+// SERVICE line item instead.
 const hasCodChargeLine = (order: any) =>
+  (order?.additionalFees || []).some((fee: any) =>
+    String(fee?.name || fee?.translatedName || "").toLowerCase().includes("cod charge")
+  ) ||
   (order?.lineItems || []).some((li: any) =>
     String(li?.productName?.original || li?.productName?.translated || "")
       .toLowerCase()

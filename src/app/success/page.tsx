@@ -10,6 +10,9 @@ import { loadRazorpayScript } from "@/lib/razorpayClient";
 import { COD_CHARGE, REVIEW_REWARD } from "@/lib/checkoutPricing";
 import { deliveryWindowLabel, latestDeliveryLabel } from "@/lib/deliveryEstimate";
 import { whatsappLink } from "@/lib/contact";
+import { useWixClient } from "@/hooks/useWixClient";
+import LoginModal from "@/components/LoginModal";
+import { promptGoogleOneTap } from "@/components/GoogleOneTap";
 
 type OrderSummary = {
   orderNumber: string;
@@ -196,6 +199,18 @@ const SuccessContent = () => {
   const [loading, setLoading] = useState(!!orderId);
   const [switchedToOnline, setSwitchedToOnline] = useState(false);
   const [size, setSize] = useState({ width: 0, height: 0 });
+  const wixClient = useWixClient();
+  // null until checked, so signed-in shoppers never see the sign-in card flash.
+  const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
+  const [loginOpen, setLoginOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      setLoggedIn(wixClient.auth.loggedIn());
+    } catch {
+      setLoggedIn(false);
+    }
+  }, [wixClient]);
 
   // Confetti canvas locked to the viewport (a fixed 2000px canvas once broke phones).
   useEffect(() => {
@@ -307,7 +322,8 @@ const SuccessContent = () => {
                 </Step>
               )}
               <Step n={2} title="Packed & shipped in 1–2 days">
-                Every piece is checked before it&apos;s packed. Your tracking link comes on WhatsApp.
+                Every piece is checked before it&apos;s packed. Your tracking link comes on WhatsApp. Questions about your
+                piece? Just reply to our WhatsApp message.
               </Step>
               {isCod ? (
                 <Step n={3} title={`Keep ${summary?.codCollect ? inr(summary.codCollect) : "the amount"} ready`}>
@@ -319,6 +335,10 @@ const SuccessContent = () => {
                 </Step>
               )}
             </ol>
+            <p className="mt-4 bg-platinum px-3 py-2.5 text-[13px] leading-snug text-gray-700">
+              📞 <b className="text-primary">Expect a quick call from us today or tomorrow.</b> Our team personally confirms
+              every order. Please pick up; it takes a minute and gets your order to you safely and on time.
+            </p>
             {summary?.hasEmail !== false && (
               <p className="mt-4 border-t border-silver-light pt-3 text-xs text-gray-500">
                 A confirmation email is on its way too — check Promotions or Spam if you don&apos;t see it.
@@ -367,6 +387,39 @@ const SuccessContent = () => {
           </section>
         ) : null}
 
+        {/* Sign-in nudge: keeps every order in one place and unlocks the photo-review reward */}
+        {loggedIn === false && !summary?.cancelled && (
+          <section className="border border-silver-light bg-white p-5 text-center shadow-sm">
+            <p className="font-playfair text-lg font-bold text-primary">Save this order to your account</p>
+            <p className="mx-auto mt-1 max-w-sm text-sm text-gray-600">
+              One quick sign-in keeps all your orders and tracking in one place, and lets you post a photo review later.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                // Google one-tap; the email modal if the prompt can't show (cooldown / not signed into Google).
+                if (!promptGoogleOneTap()) setLoginOpen(true);
+              }}
+              className="mx-auto mt-4 flex min-h-[48px] w-full max-w-xs items-center justify-center gap-3 border border-gray-300 bg-white px-5 text-sm font-semibold text-gray-700 shadow-sm hover:shadow-md"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 48 48" aria-hidden="true">
+                <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.3 6.1 29.4 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.3-.4-3.5z" />
+                <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.3 6.1 29.4 4 24 4 16.3 4 9.7 8.3 6.3 14.7z" />
+                <path fill="#4CAF50" d="M24 44c5.2 0 10-2 13.6-5.2l-6.3-5.3C29.2 35 26.7 36 24 36c-5.2 0-9.6-3.3-11.2-7.9l-6.5 5C9.6 39.6 16.2 44 24 44z" />
+                <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.1-4 5.5l6.3 5.3C41.4 36 44 30.5 44 24c0-1.3-.1-2.3-.4-3.5z" />
+              </svg>
+              Continue with Google
+            </button>
+            <button
+              type="button"
+              onClick={() => setLoginOpen(true)}
+              className="mt-3 text-xs font-medium text-accent underline hover:text-primary"
+            >
+              or log in with email
+            </button>
+          </section>
+        )}
+
         {/* Retention: the photo-review reward (applied after a logged-in photo review) */}
         <section className="bg-accent p-5 text-white">
           <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/70">After it arrives</p>
@@ -401,6 +454,17 @@ const SuccessContent = () => {
           </Link>
         )}
       </div>
+
+      <LoginModal
+        open={loginOpen}
+        onClose={() => setLoginOpen(false)}
+        onLoggedIn={() => {
+          setLoggedIn(true);
+          setLoginOpen(false);
+        }}
+        noteTitle="🚚 Save your order"
+        noteBody="Sign in to keep all your orders and tracking in one place, even after you close the website."
+      />
     </div>
   );
 };
