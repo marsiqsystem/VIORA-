@@ -387,6 +387,18 @@ const SuccessContent = () => {
           </section>
         ) : null}
 
+        {/* Trust: real numbers (owner-confirmed 2026-09-28) */}
+        <section className="border border-accent/20 bg-white p-5 text-center shadow-sm">
+          <p className="font-playfair text-lg font-bold text-primary">You&apos;re part of the Viora Family now ❤️</p>
+          <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-gray-700">
+            Out of <b>300+ orders</b>, only 2–3 ever needed an exchange. Every other customer received their piece
+            exactly as shown and loved it. You&apos;ll get your piece exactly as pictured, with no surprises.
+          </p>
+          <p className="mt-3 text-[11px] font-semibold uppercase tracking-wider text-accent">
+            Handpicked · Quality checked · Delivered with care
+          </p>
+        </section>
+
         {/* Sign-in nudge: keeps every order in one place and unlocks the photo-review reward */}
         {loggedIn === false && !summary?.cancelled && (
           <section className="border border-silver-light bg-white p-5 text-center shadow-sm">
