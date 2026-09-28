@@ -35,10 +35,13 @@ const MobileBottomNav = () => {
       ),
     },
     {
-      id: "wishlist",
-      label: "Wishlist",
-      href: "/profile?tab=wishlist",
-      match: (p) => p.startsWith("/profile") && p.includes("wishlist"),
+      id: "track",
+      label: "Track Order",
+      // /account/orders shows the member's orders (each links to live tracking).
+      // When signed out it redirects to /login?redirectTo=/account/orders, where
+      // Google One-Tap / "Continue with Google" lets them sign in and land back here.
+      href: "/account/orders",
+      match: (p) => p.startsWith("/account/orders") || p.startsWith("/orders"),
       icon: (active) => (
         <svg
           className="w-6 h-6"
@@ -47,7 +50,7 @@ const MobileBottomNav = () => {
           stroke="currentColor"
           strokeWidth={1.6}
         >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
         </svg>
       ),
     },
@@ -102,7 +105,7 @@ const MobileBottomNav = () => {
                   </span>
                 )}
               </span>
-              <span className="text-[11px] font-medium tracking-wide">
+              <span className="text-[11px] font-medium tracking-wide whitespace-nowrap">
                 {tab.label}
               </span>
               <span
