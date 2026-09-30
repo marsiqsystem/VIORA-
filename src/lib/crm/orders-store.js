@@ -194,6 +194,63 @@ async function updateOrder(orderId, patch) {
   }
 }
 
+// A courier webhook reports a CANONICAL status (velocity/shiprocket/ithink share
+// the same vocabulary). Map it to our flat store vocabulary. UNDELIVERED / OTHER
+// are intentionally absent — a failed attempt must NOT rewind the timeline, so we
+// leave the last real status in place.
+const CANON_TO_STORE = {
+  DISPATCHED: "dispatched",
+  OUT_FOR_DELIVERY: "out_for_delivery",
+  DELIVERED: "delivered",
+  RTO: "rto",
+  CANCELLED: "cancelled",
+};
+
+// Forward progress rank, so a late/duplicate courier event (e.g. a "dispatched"
+// arriving after "delivered") can never DOWNGRADE the customer-facing status.
+const STATUS_RANK = { new: 0, created: 1, dispatched: 2, out_for_delivery: 3, delivered: 4 };
+
+/**
+ * Persist a courier status update from a status webhook onto the stored order, so
+ * the storefront order-tracking page advances in lock-step with the WhatsApp
+ * updates. (Before this, the webhooks only messaged the customer and left the
+ * store — hence the tracking page — stuck at "Confirmed" while WhatsApp already
+ * said "out for delivery".) Maps the canonical status to our vocabulary, refuses
+ * to downgrade a non-terminal status, and opportunistically fills awb/trackingUrl/
+ * courier without clobbering values already set. Never throws.
+ * @param {string} orderId  the human order NUMBER (the store key)
+ * @param {string} canonical DISPATCHED|OUT_FOR_DELIVERY|DELIVERED|RTO|CANCELLED|…
+ * @param {{awb?:string, trackingUrl?:string, courier?:string}} [extra]
+ * @returns {Promise<{ok:boolean, status?:string}>}
+ */
+async function applyCourierStatus(orderId, canonical, extra = {}) {
+  const next = CANON_TO_STORE[String(canonical || "").toUpperCase()];
+  if (!isConfigured() || !orderId || !next) return { ok: false };
+  try {
+    const existing = await getOrder(orderId);
+    const cur = String(existing?.status || "").toLowerCase();
+    const patch = { statusAt: Date.now() };
+    // Fill what the webhook learned, but never overwrite a value already stored.
+    if (extra.awb && !existing?.awb) patch.awb = String(extra.awb);
+    if (extra.trackingUrl && !existing?.trackingUrl) patch.trackingUrl = String(extra.trackingUrl);
+    if (extra.courier && !existing?.courier) patch.courier = String(extra.courier).toLowerCase();
+    // rto/cancelled are terminal — always record them. Otherwise only move FORWARD,
+    // and never override an already-terminal state with a lower one.
+    const nextTerminal = next === "rto" || next === "cancelled";
+    const curTerminal = cur === "delivered" || cur === "cancelled" || cur === "rto";
+    if (nextTerminal) {
+      patch.status = next;
+    } else if (!curTerminal && (STATUS_RANK[next] ?? 0) >= (STATUS_RANK[cur] ?? 0)) {
+      patch.status = next;
+    }
+    await updateOrder(orderId, patch);
+    return { ok: true, status: patch.status || cur };
+  } catch (e) {
+    console.warn("[orders-store] applyCourierStatus failed:", e?.message || e);
+    return { ok: false };
+  }
+}
+
 /**
  * List orders newest-first for the dashboard table.
  * @param {{limit?:number, offset?:number}} opts
@@ -225,4 +282,4 @@ async function listOrders({ limit = 200, offset = 0 } = {}) {
   }
 }
 
-export { recordOrder, updateOrder, getOrder, listOrders, isConfigured, blankRecord };
+export { recordOrder, updateOrder, applyCourierStatus, getOrder, listOrders, isConfigured, blankRecord };

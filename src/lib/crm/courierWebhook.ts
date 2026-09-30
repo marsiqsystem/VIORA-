@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as shiprocket from "@/lib/crm/shiprocket";
 import * as wix from "@/lib/crm/wix";
 import * as notify from "@/lib/crm/notify";
+import * as ordersStore from "@/lib/crm/orders-store";
 import * as idempotency from "@/lib/crm/idempotency";
 import * as reviewQueue from "@/lib/crm/reviewQueue";
 import { dispatchCancellationOnce } from "@/lib/crm/cancel";
@@ -97,6 +98,16 @@ export async function handleCourierWebhook(req: NextRequest) {
     // Velocity-branded host, which would produce a dead link for a Shiprocket AWB.
     if (trackingUrl && !order.trackingUrl) order.trackingUrl = trackingUrl;
     else if (!order.trackingUrl && awb) order.trackingUrl = `https://shiprocket.co/tracking/${awb}`;
+
+    // Persist courier truth to the dashboard store so the storefront order-tracking
+    // page (/orders/[id]) advances together with these WhatsApp updates instead of
+    // staying stuck at "Confirmed". Best-effort — never blocks the customer message.
+    // order.orderId is the human order number (the store key).
+    await ordersStore.applyCourierStatus(order.orderId, status, {
+      awb: order.awb,
+      trackingUrl: order.trackingUrl,
+      courier: "shiprocket",
+    });
 
     if (status === "DISPATCHED") {
       await dispatchOnce(order, "wa_dispatched_sent", notify.sendDispatched);

@@ -18,6 +18,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as velocity from "@/lib/crm/velocity";
 import * as wix from "@/lib/crm/wix";
 import * as notify from "@/lib/crm/notify";
+import * as ordersStore from "@/lib/crm/orders-store";
 import * as idempotency from "@/lib/crm/idempotency";
 import * as reviewQueue from "@/lib/crm/reviewQueue";
 import { dispatchCancellationOnce } from "@/lib/crm/cancel";
@@ -109,6 +110,16 @@ export async function POST(req: NextRequest) {
     // NOTE: the customer product override (colour/variant changed after ordering)
     // is applied centrally in notify.js — the single choke point every template
     // send passes through — so it covers every message without wiring it here.
+
+    // Persist courier truth to the dashboard store so the storefront order-tracking
+    // page (/orders/[id]) advances together with these WhatsApp updates instead of
+    // staying stuck at "Confirmed". Best-effort — a store hiccup must never block
+    // the customer message. order.orderId is the human order number (the store key).
+    await ordersStore.applyCourierStatus(order.orderId, status, {
+      awb: order.awb,
+      trackingUrl: order.trackingUrl,
+      courier: "velocity",
+    });
 
     if (status === "DISPATCHED") {
       // WhatsApp message #2: packed & on its way, with the tracking link.
