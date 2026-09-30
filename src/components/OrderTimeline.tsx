@@ -14,7 +14,7 @@ export type OrderStageKey =
   | "CANCELED";
 
 export const ORDER_STAGES: { key: OrderStageKey; label: string; desc: string }[] = [
-  { key: "CONFIRMED", label: "Order Confirmed", desc: "We've received your order and it's being packed." },
+  { key: "CONFIRMED", label: "Order Confirmed", desc: "We've received your order — our team will call to confirm it before dispatch." },
   { key: "SHIPPED", label: "Shipped", desc: "Your order has been handed to the courier." },
   { key: "OUT_FOR_DELIVERY", label: "Out for Delivery", desc: "Your order is arriving today." },
   { key: "DELIVERED", label: "Delivered", desc: "Your order has been delivered. Enjoy!" },

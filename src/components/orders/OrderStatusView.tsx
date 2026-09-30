@@ -57,6 +57,15 @@ const OrderStatusView = ({ status, showFullAddress, backHref, backLabel }: Props
               <OrderTimeline currentIndex={status.stageIndex} timestamps={{ CONFIRMED: status.placedAt }} canceled={status.canceled} />
             </div>
 
+            {!status.canceled && status.stageIndex === 0 && (
+              <p className="mt-4 flex items-start gap-2 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <span aria-hidden="true">📞</span>
+                <span>
+                  Our team will call you to confirm this order before dispatch — please keep your phone reachable so it ships without delay.
+                </span>
+              </p>
+            )}
+
             {status.edd && (
               <p className="mt-4 text-sm text-gray-700">
                 Expected delivery: <b className="text-primary">{status.edd}</b>
