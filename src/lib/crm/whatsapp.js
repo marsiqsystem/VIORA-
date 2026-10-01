@@ -275,6 +275,21 @@ function sendVideo({ to, mediaId, link, caption, replyTo }, opts) {
 }
 
 /**
+ * Send an audio message by Meta media id (uploaded via uploadMedia) or a public
+ * link. 24-hour-window only, like sendText/sendImage/sendVideo. WhatsApp accepts
+ * aac/mp4/mpeg/amr/ogg(OPUS); audio messages carry no caption.
+ *
+ * @param {{to:string, mediaId?:string, link?:string, replyTo?:string}} p
+ * @param {object} [opts]
+ */
+function sendAudio({ to, mediaId, link, replyTo }, opts) {
+  const audio = mediaId ? { id: mediaId } : { link };
+  const payload = { messaging_product: "whatsapp", recipient_type: "individual", to, type: "audio", audio };
+  if (replyTo) payload.context = { message_id: replyTo };
+  return sendRaw(payload, opts);
+}
+
+/**
  * Upload a media file to Meta and return its media id (reusable for ~30 days).
  * The inbox uploads the operator's attachment here, then sends it by id so no
  * public hosting is needed. Never throws.
@@ -380,6 +395,7 @@ export {
   sendTemplate,
   sendImage,
   sendVideo,
+  sendAudio,
   sendDocument,
   uploadMedia,
   fetchMediaBytes,

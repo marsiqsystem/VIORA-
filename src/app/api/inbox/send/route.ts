@@ -14,7 +14,7 @@
 // as "pending" and dryRun:true is returned. Protected by INBOX_SECRET.
 
 import { NextRequest, NextResponse } from "next/server";
-import { sendText, sendImage, sendVideo, sendDocument } from "@/lib/crm/whatsapp";
+import { sendText, sendImage, sendVideo, sendAudio, sendDocument } from "@/lib/crm/whatsapp";
 import {
   getMessages,
   recordOutbound,
@@ -54,6 +54,7 @@ export async function POST(req: NextRequest) {
   const replyTo = String(body?.replyTo ?? "").trim(); // wamid this reply quotes
   const isImage = !!mediaId && kind === "image";
   const isVideo = !!mediaId && kind === "video";
+  const isAudio = !!mediaId && kind === "audio";
   const isDoc = !!mediaId && kind === "document";
   if (!to || (!text && !mediaId)) {
     return NextResponse.json({ ok: false, error: "Missing `to` or message content." }, { status: 400 });
@@ -88,6 +89,8 @@ export async function POST(req: NextRequest) {
     ? await sendImage({ to, mediaId, caption: text || undefined, replyTo: quoteRemote })
     : isVideo
     ? await sendVideo({ to, mediaId, caption: text || undefined, replyTo: quoteRemote })
+    : isAudio
+    ? await sendAudio({ to, mediaId, replyTo: quoteRemote })
     : isDoc
     ? await sendDocument({ to, mediaId, filename: filename || undefined, caption: text || undefined, replyTo: quoteRemote })
     : await sendText({ to, body: text, replyTo: quoteRemote });
@@ -102,12 +105,14 @@ export async function POST(req: NextRequest) {
       ? text || "📷 Photo"
       : isVideo
       ? text || "🎥 Video"
+      : isAudio
+      ? "🎵 Audio"
       : isDoc
       ? text || `📄 ${filename || "Document"}`
       : text,
     wamid,
     status: sent?.dryRun ? "pending" : "sent",
-    type: isImage ? "image" : isVideo ? "video" : isDoc ? "document" : "text",
+    type: isImage ? "image" : isVideo ? "video" : isAudio ? "audio" : isDoc ? "document" : "text",
     mediaId: mediaId || undefined,
     filename: isDoc ? filename || undefined : undefined,
     quoted,

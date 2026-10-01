@@ -20,9 +20,12 @@ export const dynamic = "force-dynamic";
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 16 * 1024 * 1024;
 const MAX_DOC_BYTES = 16 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 16 * 1024 * 1024;
 const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
 // WhatsApp only accepts mp4 / 3gpp video (H.264 video + AAC audio).
 const VIDEO_MIMES = new Set(["video/mp4", "video/3gpp"]);
+// WhatsApp audio: aac / mp4 / mpeg(mp3) / amr / ogg(OPUS only).
+const AUDIO_MIMES = new Set(["audio/aac", "audio/mp4", "audio/mpeg", "audio/amr", "audio/ogg"]);
 const DOC_MIMES = new Set([
   "application/pdf",
   "application/msword",
@@ -56,14 +59,15 @@ export async function POST(req: NextRequest) {
   const mime = file.type || "application/octet-stream";
   const isImage = IMAGE_MIMES.has(mime);
   const isVideo = VIDEO_MIMES.has(mime);
+  const isAudio = AUDIO_MIMES.has(mime);
   const isDoc = DOC_MIMES.has(mime);
-  if (!isImage && !isVideo && !isDoc) {
+  if (!isImage && !isVideo && !isAudio && !isDoc) {
     return NextResponse.json(
-      { ok: false, error: "Unsupported file type (images: JPG/PNG/WebP; video: MP4/3GP; docs: PDF/Word/Excel/CSV/TXT)." },
+      { ok: false, error: "Unsupported file type (images: JPG/PNG/WebP; video: MP4/3GP; audio: MP3/AAC/M4A/OGG/AMR; docs: PDF/Word/Excel/CSV/TXT)." },
       { status: 415 }
     );
   }
-  const cap = isImage ? MAX_IMAGE_BYTES : isVideo ? MAX_VIDEO_BYTES : MAX_DOC_BYTES;
+  const cap = isImage ? MAX_IMAGE_BYTES : isVideo ? MAX_VIDEO_BYTES : isAudio ? MAX_AUDIO_BYTES : MAX_DOC_BYTES;
   if (file.size > cap) {
     return NextResponse.json(
       { ok: false, error: `File too large (max ${isImage ? "5MB" : "16MB"}).` },
@@ -75,7 +79,7 @@ export async function POST(req: NextRequest) {
   const up = await uploadMedia({
     buffer,
     mime,
-    filename: file.name || (isImage ? "photo" : isVideo ? "video" : "document"),
+    filename: file.name || (isImage ? "photo" : isVideo ? "video" : isAudio ? "audio" : "document"),
   });
   if (!up.ok || !up.id) {
     return NextResponse.json(
@@ -88,7 +92,7 @@ export async function POST(req: NextRequest) {
     ok: true,
     mediaId: up.id,
     mime,
-    kind: isImage ? "image" : isVideo ? "video" : "document",
+    kind: isImage ? "image" : isVideo ? "video" : isAudio ? "audio" : "document",
     filename: file.name || "",
     dryRun: !!up.dryRun,
   });
