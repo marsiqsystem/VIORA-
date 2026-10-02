@@ -34,9 +34,13 @@ export function useAutoLadderCoupon(enabled: boolean) {
     if (appliedCode && !COUPON_TIERS.some((t) => t.code === appliedCode)) return;
 
     const target = bestTierFor(subtotal)?.code || "";
-    if (target === appliedCode) return;
-
     const ui = useCommerceUi.getState();
+    // A ladder code we applied that the bag has since dropped below vanishes
+    // from appliedDiscounts but stays on the Wix cart, and createOrder then
+    // fails (INVALID_CART). So "nothing applied" isn't proof — remove it anyway.
+    const hiddenStaleCode = !target && !appliedCode && !!ui.autoAppliedCode;
+    if (target === appliedCode && !hiddenStaleCode) return;
+
     const attempt = `${target}@${Math.round(subtotal)}`;
     if (ui.autoCouponAttempt === attempt) return;
     ui.setAutoCouponAttempt(attempt);

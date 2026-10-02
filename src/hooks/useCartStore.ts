@@ -161,10 +161,19 @@ export const useCartStore = create<CartState>((set) => ({
         couponCode: code,
       } as any);
       // Re-fetch the full cart to get appliedDiscounts populated
-      const updatedCart = await wixClient.currentCart.getCurrentCart();
+      let updatedCart = await wixClient.currentCart.getCurrentCart();
       const hasAppliedCoupon = !!(updatedCart as any)?.appliedDiscounts?.some(
         (d: any) => d.coupon
       );
+      // Wix keeps a code that doesn't qualify (e.g. below its minimum) on the
+      // cart without listing it in appliedDiscounts — invisible here, but it
+      // makes createOrder fail with INVALID_CART at checkout. Take it off.
+      if (!hasAppliedCoupon) {
+        try {
+          const cleared = await wixClient.currentCart.removeCouponFromCurrentCart();
+          if (cleared.cart) updatedCart = cleared.cart;
+        } catch {}
+      }
       set({
         cart: updatedCart || EMPTY_CART,
         counter: updatedCart?.lineItems?.length || 0,

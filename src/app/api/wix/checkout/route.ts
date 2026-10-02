@@ -126,18 +126,37 @@ const flattenCalculationErrors = (value: unknown): string[] => {
   ];
 };
 
+// True when Wix refused the order only because of a coupon that no longer
+// qualifies. Wix reports this two ways: the older ERROR_INVALID_SUBTOTAL, and
+// (seen live from 29 Sep 2026) INVALID_CART with an INVALID_COUPON_STATUS
+// violation such as "Coupon CLUBVIORA has an invalid status: MIN_SUBTOTAL_NOT_REACHED".
+const isInvalidCouponError = (err: any) => {
+  const appErr = err?.details?.applicationError;
+  if (appErr?.code === "ERROR_INVALID_SUBTOTAL") return true;
+  if (appErr?.code !== "INVALID_CART") return false;
+  const violations: any[] = appErr?.data?.violations || [];
+  return (
+    violations.length > 0 &&
+    violations
+      .filter((v) => v?.severity === "ERROR")
+      .every((v) => v?.code === "INVALID_COUPON_STATUS" || v?.scope === "DISCOUNT")
+  );
+};
+
 // Create the order, but survive a coupon that no longer meets its minimum.
 // A shopper can apply CLUBVIORA (min ₹999), then remove an item so the subtotal
-// drops below ₹999 — the coupon stays attached to the Wix cart and createOrder
-// then fails with ERROR_INVALID_SUBTOTAL. Rather than losing the order, strip
-// the coupon and place it at the normal price.
+// drops below ₹999 — the coupon stays attached to the Wix cart (but is missing
+// from the cart's appliedDiscounts, so the bag can't see it to remove it) and
+// createOrder then fails. For a prepaid shopper that meant money taken and no
+// order. The coupon was giving no discount anyway, so strip it and place the
+// order at the price the shopper saw and paid.
 const createOrderWithCouponFallback = async (wixClient: any, checkoutId: string) => {
   try {
     return await wixClient.checkout.createOrder(checkoutId);
   } catch (err: any) {
-    if (err?.details?.applicationError?.code !== "ERROR_INVALID_SUBTOTAL") throw err;
+    if (!isInvalidCouponError(err)) throw err;
     console.warn(
-      "createOrder hit ERROR_INVALID_SUBTOTAL — removing the invalid coupon and retrying."
+      `createOrder refused an invalid coupon (${err?.details?.applicationError?.code}) — removing it and retrying.`
     );
     try {
       await wixClient.checkout.removeCoupon(checkoutId);
