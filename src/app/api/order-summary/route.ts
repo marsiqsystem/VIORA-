@@ -63,7 +63,8 @@ export async function GET(req: NextRequest) {
       postalCode: info.address?.postalCode || "",
       phoneLast4: info.phone ? String(info.phone).slice(-4) : "",
       hasEmail: !!(order.buyerInfo?.email || order.billingInfo?.contactDetails?.email),
-      codCollect: info.paymentMode === "COD" ? Number(String(customFieldValue(order, "cod amount to collect") || "").replace(/[^\d.]/g, "")) || total : 0,
+      // info.amount is the sealed/verified figure (see extractBillableAmount).
+      codCollect: info.paymentMode === "COD" ? total : 0,
     },
     { headers: noStore }
   );

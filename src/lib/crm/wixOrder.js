@@ -8,6 +8,7 @@
 // can be tested against sample payloads.
 
 import { COD_CHARGE, COD_SWITCH_DISCOUNT_LABEL } from "../checkoutPricing";
+import { verifyPaymentSeal } from "./paymentSeal";
 
 /**
  * Turn whatever Wix gives us into digits-only international format for WhatsApp.
@@ -120,47 +121,92 @@ const deepFindItems = (root) =>
     return undefined;
   });
 
-/**
- * Normalise Wix's many payment representations into our two-value enum.
- * Wix eCommerce exposes paymentStatus ("PAID" / "NOT_PAID" / "PARTIALLY_PAID")
- * and sometimes an explicit method. We treat a fully-paid order as PREPAID and
- * everything else as COD (cash collected on delivery).
- */
+// Orders created from this moment on carry a payment seal (see paymentSeal.js).
+// A newer order WITHOUT a valid seal was not made by our checkout server (or its
+// fields were edited), so its "paid online" / amount custom fields are ignored
+// and only what Wix itself records is believed. Older orders keep the old rules.
+const SEAL_REQUIRED_FROM = Date.parse("2026-10-02T11:06:00Z");
+
+const cfFrom = (order, body, title) => firstDefined(customFieldValue(order, title), customFieldValue(body, title));
+
+function paymentStatusOf(order = {}, body = {}) {
+  return String(
+    firstDefined(
+      order.paymentStatus,
+      order.billingInfo?.paymentStatus,
+      body.paymentStatus,
+      deepFind(body, (n) => (typeof n.paymentStatus === "string" ? n.paymentStatus : undefined))
+    ) || ""
+  ).toUpperCase();
+}
+
+/** Created before seals existed. Unknown creation date counts as new (strict). */
+function isLegacyOrder(order = {}, body = {}) {
+  const raw = firstDefined(order._createdDate, order.createdDate, order.dateCreated, body.createdDate, body.dateCreated);
+  if (raw == null) return false;
+  const t = new Date(raw).getTime();
+  return Number.isFinite(t) && t < SEAL_REQUIRED_FROM;
+}
+
+/** { mode, amount } stamped and sealed by our checkout server, or null. */
+function sealedPayment(order = {}, body = {}) {
+  const seal = cfFrom(order, body, "payment seal");
+  if (!seal) return null;
+  const checkoutId = firstDefined(order.checkoutId, body.checkoutId);
+  const method = String(cfFrom(order, body, "payment method") || "");
+  const mode = /prepaid|razorpay|online/i.test(method) ? "PREPAID" : "COD";
+  const amount = cfFrom(order, body, mode === "PREPAID" ? "amount paid" : "cod amount to collect");
+  const paymentId = mode === "PREPAID" ? String(cfFrom(order, body, "razorpay payment id") || "") : "";
+  if (!verifyPaymentSeal(String(seal), { checkoutId, mode, amount, paymentId })) return null;
+  return { mode, amount: String(amount).replace(/[^\d.]/g, "") };
+}
+
 /**
  * A COD order the customer later paid online from the success page (see
- * src/lib/codSwitch.ts). The switch waives the COD charge, so the order is fully
- * paid with a total exactly COD_CHARGE below the "COD Amount to Collect" stamped
- * at checkout. A COD order marked paid after cash collection keeps its full
- * total, so it is never mistaken for a switch.
+ * src/lib/codSwitch.ts). Only our server can add the switch's merchant discount,
+ * so look for its label THERE — never anywhere in the order, where a shopper
+ * could type it into an address field. Fallback: the order is fully paid with a
+ * total exactly COD_CHARGE below the "COD Amount to Collect" stamped at checkout
+ * (a COD order marked paid after cash collection keeps its full total).
  */
 function isSwitchedToOnline(order = {}, body = {}) {
-  try {
-    if (JSON.stringify(order).includes(COD_SWITCH_DISCOUNT_LABEL)) return true;
-  } catch {
-    /* non-serialisable payload — fall through to the totals check */
-  }
-  const status = String(firstDefined(order.paymentStatus, body.paymentStatus) || "").toUpperCase();
-  if (status !== "PAID") return false;
-  const collect = Number(
-    String(
-      firstDefined(customFieldValue(order, "cod amount to collect"), customFieldValue(body, "cod amount to collect")) ?? ""
-    ).replace(/[^\d.]/g, "")
-  );
+  const discounts = [order.appliedDiscounts, body.appliedDiscounts].flatMap((d) => (Array.isArray(d) ? d : []));
+  if (
+    discounts.some((d) =>
+      String(d?.merchantDiscount?.description || d?.discountName || "").includes(COD_SWITCH_DISCOUNT_LABEL)
+    )
+  )
+    return true;
+  if (paymentStatusOf(order, body) !== "PAID") return false;
+  const collect = Number(String(cfFrom(order, body, "cod amount to collect") ?? "").replace(/[^\d.]/g, ""));
   const total = Number(extractAmount(order, body));
   return collect > 0 && Number.isFinite(total) && total <= collect - COD_CHARGE + 0.5;
 }
 
+/**
+ * Normalise Wix's many payment representations into our two-value enum:
+ * PREPAID (collect nothing on delivery) or COD (collect cash).
+ */
 function normalizePaymentMode(order = {}, body = {}) {
-  // 1) DEFINITIVE — the "Payment Method" custom field + buyerNote our checkout
-  //    stamps at updateCheckout. These are on the order from the moment it's
-  //    created, so they are correct even when the order_placed webhook fires
-  //    BEFORE Razorpay settles and the prepaid discount commits. Without this a
-  //    prepaid order snapshots as NOT_PAID and gets mislabelled COD — which would
-  //    make Velocity try to COLLECT cash on an order the customer already paid.
-  const cf = firstDefined(
-    customFieldValue(order, "payment method"),
-    customFieldValue(body, "payment method")
-  );
+  const status = paymentStatusOf(order, body);
+
+  // 1) SEALED — the "Payment Method" our checkout server stamped before the order
+  //    existed. Correct even when the order_placed webhook fires BEFORE Razorpay
+  //    settles (a prepaid order would otherwise snapshot as NOT_PAID → COD, and
+  //    the courier would try to collect cash the customer already paid).
+  const sealed = sealedPayment(order, body);
+  if (sealed) {
+    if (sealed.mode === "PREPAID") return "PREPAID";
+    return isSwitchedToOnline(order, body) ? "PREPAID" : "COD";
+  }
+
+  // 2) New order, no valid seal: not from our checkout server, or an underpaid /
+  //    unverified prepaid order. Believe only a payment Wix itself recorded
+  //    (only the store's own server can record one); everything else is COD.
+  if (!isLegacyOrder(order, body)) return status === "PAID" || status === "FULLY_PAID" ? "PREPAID" : "COD";
+
+  // 3) LEGACY (before seals) — the unsealed custom field + buyerNote.
+  const cf = cfFrom(order, body, "payment method");
   const note = String(firstDefined(order.buyerNote, body.buyerNote, order.buyer_note, "") || "");
   const definitive = `${cf || ""} ${note}`.toUpperCase();
   if (definitive.includes("PREPAID") || definitive.includes("RAZORPAY") || definitive.includes("ONLINE"))
@@ -169,7 +215,7 @@ function normalizePaymentMode(order = {}, body = {}) {
     return isSwitchedToOnline(order, body) ? "PREPAID" : "COD";
   }
 
-  // 2) Explicit paymentMode/paymentMethod fields (other Wix shapes).
+  // Explicit paymentMode/paymentMethod fields (other Wix shapes).
   const explicit = firstDefined(
     body.paymentMode,
     order.paymentMode,
@@ -183,47 +229,27 @@ function normalizePaymentMode(order = {}, body = {}) {
     if (s.includes("COD") || s.includes("CASH")) return "COD";
   }
 
-  // 3) Last resort — a fully-paid order is prepaid, everything else COD.
-  const status = String(
-    firstDefined(
-      order.paymentStatus,
-      order.billingInfo?.paymentStatus,
-      body.paymentStatus,
-      deepFind(body, (n) => (typeof n.paymentStatus === "string" ? n.paymentStatus : undefined))
-    ) || ""
-  ).toUpperCase();
+  // Last resort — a fully-paid order is prepaid, everything else COD.
   return status === "PAID" || status === "FULLY_PAID" ? "PREPAID" : "COD";
 }
 
 /**
- * The real amount to bill/collect. For a PREPAID order this is what the customer
- * actually paid online (the "Amount Paid (Razorpay)" custom field, e.g. ₹549 —
- * the ₹599 subtotal minus the ₹50 online-payment discount), which is stamped at
- * checkout and therefore race-proof. Falls back to the order total. This is the
- * figure Velocity should show as sub_total, with nothing to collect on delivery.
+ * The real amount to bill/collect. For a sealed PREPAID order this is what the
+ * customer actually paid online ("Amount Paid (Razorpay)", e.g. ₹574 — ₹599 minus
+ * the pay-online discount); for a sealed COD order it is "COD Amount to Collect"
+ * (total + ₹49, stamped before the ₹49 fee edit commits). Both are race-proof.
+ * Anything unsealed falls back to the total Wix itself computed.
  */
 function extractBillableAmount(order = {}, body = {}, paymentMode) {
-  if (paymentMode === "PREPAID") {
-    const paid = firstDefined(
-      customFieldValue(order, "amount paid"),
-      customFieldValue(body, "amount paid")
-    );
-    if (paid != null) {
-      const cleaned = String(paid).replace(/[^\d.]/g, "");
-      if (cleaned) return cleaned;
-    }
-  }
-  // For COD, prefer the "COD Amount to Collect" custom field stamped at checkout
-  // (subtotal − coupon + ₹49 delivery/handling charge). It is present on the
-  // order from creation, so Velocity collects the right cash even if the
-  // order_placed webhook fires before the COD charge draft-edit commits.
-  if (paymentMode === "COD") {
-    const collect = firstDefined(
-      customFieldValue(order, "cod amount to collect"),
-      customFieldValue(body, "cod amount to collect")
-    );
-    if (collect != null) {
-      const cleaned = String(collect).replace(/[^\d.]/g, "");
+  const sealed = sealedPayment(order, body);
+  if (sealed) {
+    if (sealed.mode === paymentMode && sealed.amount) return sealed.amount;
+  } else if (isLegacyOrder(order, body)) {
+    const field =
+      paymentMode === "PREPAID" ? "amount paid" : paymentMode === "COD" ? "cod amount to collect" : "";
+    const value = field ? cfFrom(order, body, field) : undefined;
+    if (value != null) {
+      const cleaned = String(value).replace(/[^\d.]/g, "");
       if (cleaned) return cleaned;
     }
   }

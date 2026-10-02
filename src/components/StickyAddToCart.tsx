@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useCartStore } from "@/hooks/useCartStore";
 import { useWixClient } from "@/hooks/useWixClient";
 import { useCommerceUi } from "@/hooks/useCommerceUi";
@@ -56,6 +56,8 @@ const StickyAddToCart = ({
   const [isBuyingNow, setIsBuyingNow] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [abandonedItems, setAbandonedItems] = useState<AbandonedCartItem[]>([]);
+  // Guards Buy Now against a second tap landing before the button disables.
+  const buyNowBusy = useRef(false);
 
   useEffect(() => {
     const target = document.querySelector(triggerSelector);
@@ -114,10 +116,19 @@ const StickyAddToCart = ({
   const runBuyNow = async () => {
     trackMetaEvent("AddToCart", baseEvent);
 
-    await addItem(wixClient, productId, variantId, 1, selectedOptions);
+    // Already in the bag (e.g. a second Buy Now after closing checkout) —
+    // don't add another one.
+    const hasRealVariant = !!variantId && variantId !== "00000000-0000-0000-0000-000000000000";
+    const inBag = ((useCartStore.getState().cart as any)?.lineItems || []).some(
+      (li: any) =>
+        li?.catalogReference?.catalogItemId === productId &&
+        (!hasRealVariant || li?.catalogReference?.options?.variantId === variantId)
+    );
+    if (!inBag) {
+      await addItem(wixClient, productId, variantId, 1, selectedOptions);
+    }
 
-    const verifyCart = await wixClient.currentCart.getCurrentCart();
-    if (!verifyCart?.lineItems?.length) {
+    if (!useCartStore.getState().cart?.lineItems?.length) {
       throw new Error("Cart is still empty after adding item");
     }
 
@@ -126,7 +137,7 @@ const StickyAddToCart = ({
   };
 
   const handleBuyNow = async () => {
-    if (isOutOfStock || isBuyingNow) return;
+    if (isOutOfStock || isBuyingNow || buyNowBusy.current) return;
 
     if (hasUnselectedVariants) {
       document
@@ -142,6 +153,7 @@ const StickyAddToCart = ({
       return;
     }
 
+    buyNowBusy.current = true;
     setIsBuyingNow(true);
     try {
       await runBuyNow();
@@ -153,11 +165,14 @@ const StickyAddToCart = ({
         "Please try again.";
       showToast(err?.message === "SOLD_OUT" ? "Sorry, this piece just sold out." : `Buy Now failed: ${cause}`, "error");
     } finally {
+      buyNowBusy.current = false;
       setIsBuyingNow(false);
     }
   };
 
   const handleConfirmDecision = async (decision: "yes" | "no") => {
+    if (buyNowBusy.current) return;
+    buyNowBusy.current = true;
     setIsBuyingNow(true);
     try {
       if (decision === "no") {
@@ -177,6 +192,7 @@ const StickyAddToCart = ({
         "Please try again.";
       showToast(err?.message === "SOLD_OUT" ? "Sorry, this piece just sold out." : `Buy Now failed: ${cause}`, "error");
     } finally {
+      buyNowBusy.current = false;
       setIsBuyingNow(false);
     }
   };

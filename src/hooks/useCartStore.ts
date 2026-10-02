@@ -86,7 +86,7 @@ export const useCartStore = create<CartState>((set) => ({
   addItem: async (wixClient, productId, variantId, quantity, selectedOptions) => {
     set((state) => ({ ...state, isLoading: true }));
     try {
-      await wixClient.currentCart.addToCurrentCart({
+      const added = await wixClient.currentCart.addToCurrentCart({
         lineItems: [
           {
             catalogReference: {
@@ -104,10 +104,11 @@ export const useCartStore = create<CartState>((set) => ({
         ],
       });
 
-      // Fetch the updated cart state to ensure global UI sync
+      // The add response already carries the whole cart — reuse it instead of
+      // a second round trip (only re-fetch if Wix left it out).
       const { cart: updatedCart, removed, removedIds } = await dropUnavailable(
         wixClient,
-        await wixClient.currentCart.getCurrentCart()
+        added?.cart || (await wixClient.currentCart.getCurrentCart())
       );
 
       set({

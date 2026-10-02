@@ -4,7 +4,8 @@ import { sendOrderConfirmationEmail } from "@/lib/orderEmail";
 import { sendServerCapi } from "@/lib/metaCapiServer";
 import { readCookieRaw } from "@/lib/metaFbc";
 import { slugFromUrl } from "@/lib/metaCatalogId";
-import { PREPAID_DISCOUNT } from "@/lib/checkoutPricing";
+import { COD_CHARGE, PREPAID_DISCOUNT } from "@/lib/checkoutPricing";
+import { makePaymentSeal } from "@/lib/crm/paymentSeal";
 import { fetchRazorpayPayment } from "@/lib/razorpayVerify";
 import { claimOnce, release } from "@/lib/crm/idempotency";
 import * as checkoutLeads from "@/lib/crm/checkoutLeads";
@@ -23,11 +24,9 @@ type CheckoutAddressPayload = {
   // Sent by the browser for reference only. What was actually paid is always
   // read from Razorpay (see fetchRazorpayPayment below).
   razorpayAmount?: string;
-  // COD delivery + handling charge to add onto the order so the courier
-  // collects subtotal + this amount. Sent by the checkout for COD orders.
+  // Still sent by the checkout but IGNORED: the COD charge and the amount the
+  // courier collects are worked out here, never taken from the browser.
   codCharge?: string | number;
-  // Final COD amount to collect (subtotal − coupon + charge). Stamped on the
-  // order as a custom field so the CRM/Velocity read it race-proof.
   codAmount?: string;
 };
 
@@ -195,21 +194,10 @@ export async function POST(req: Request) {
     const postalCode = normalizeText(details?.postalCode);
     const paymentMethod = details?.paymentMethod === "PREPAID" ? "PREPAID" : "COD";
     const razorpayPaymentId = normalizeText(details?.razorpayPaymentId);
-    // COD delivery + handling charge. Clamp to a sane range so a bad client
-    // value can never inflate an order (0 disables the fee).
-    const codChargeRaw = Number(details?.codCharge);
-    const codCharge =
-      paymentMethod === "COD" && Number.isFinite(codChargeRaw)
-        ? Math.min(Math.max(codChargeRaw, 0), 200)
-        : 0;
-    // Final COD collection amount (subtotal − coupon + charge) the courier must
-    // collect. Stamped as a custom field below so the CRM/Velocity read it
-    // race-proof (independent of the COD draft-edit timing).
-    const codAmountRaw = Number(normalizeText(details?.codAmount).replace(/[^\d.]/g, ""));
-    const codAmount =
-      paymentMethod === "COD" && Number.isFinite(codAmountRaw) && codAmountRaw > 0
-        ? codAmountRaw.toFixed(2)
-        : "";
+    // COD delivery + handling charge — the server's own figure. (It used to come
+    // from the browser, as did the cash amount to collect, so a tampered request
+    // could set "collect ₹1" on a ₹599 order.)
+    const codCharge = paymentMethod === "COD" ? COD_CHARGE : 0;
 
     if (!email || !fullName || !phone || !addressLine1 || !city || !state || !postalCode) {
       return NextResponse.json(
@@ -222,6 +210,8 @@ export async function POST(req: Request) {
     // actually paid, and make sure one payment can't be replayed for a second order.
     let verifiedPaid: number | null = null;
     let paymentUnverified = false;
+    // KV was down, so this payment couldn't be locked to one order — don't seal it.
+    let paymentClaimDegraded = false;
     if (paymentMethod === "PREPAID") {
       if (!razorpayPaymentId) {
         return NextResponse.json({ error: "Missing payment reference." }, { status: 400 });
@@ -239,6 +229,7 @@ export async function POST(req: Request) {
           );
         }
         if (!claim.degraded) pendingPaymentClaim = paymentUsedKey(razorpayPaymentId);
+        else paymentClaimDegraded = true;
         verifiedPaid = payment.paid;
       } else if (payment.reason === "unreachable" || payment.reason === "not-configured") {
         // Razorpay couldn't be asked. Don't lose a real customer's order — place
@@ -279,11 +270,6 @@ export async function POST(req: Request) {
         : []),
       ...(paymentUnverified
         ? [{ title: "Payment Check", value: "UNVERIFIED — confirm this payment in Razorpay before shipping" }]
-        : []),
-      // COD collection amount, stamped at creation so the CRM/Velocity read
-      // the ₹49-inclusive figure race-proof (see extractBillableAmount).
-      ...(codAmount
-        ? [{ title: "COD Amount to Collect", value: `₹${codAmount}` }]
         : []),
     ];
 
@@ -353,19 +339,42 @@ export async function POST(req: Request) {
           checkoutTotal - PREPAID_DISCOUNT
         ).toFixed(2)} (payment ${razorpayPaymentId}).`
       );
-      try {
-        updatedCheckout = await wixClient.checkout.updateCheckout(checkoutId, {
-          customFields: [
-            ...customFields,
-            {
-              title: "Payment Check",
-              value: `SHORTFALL — paid ₹${verifiedPaid!.toFixed(2)}, expected ₹${(checkoutTotal - PREPAID_DISCOUNT).toFixed(2)}. Do not ship before checking.`,
-            },
-          ],
-        } as any);
-      } catch (flagErr) {
-        console.error("[checkout] could not flag the payment shortfall on the order:", flagErr);
-      }
+      customFields.push({
+        title: "Payment Check",
+        value: `SHORTFALL — paid ₹${verifiedPaid!.toFixed(2)}, expected ₹${(checkoutTotal - PREPAID_DISCOUNT).toFixed(2)}. Do not ship before checking.`,
+      });
+    }
+
+    // COD: the cash to collect (Wix total after coupons + the COD charge), stamped
+    // now so the CRM/courier read the ₹49-inclusive figure race-proof — before the
+    // fee's draft edit below commits.
+    const codAmount =
+      paymentMethod === "COD" && Number.isFinite(checkoutTotal) && checkoutTotal > 0
+        ? (checkoutTotal + codCharge).toFixed(2)
+        : "";
+    if (codAmount) customFields.push({ title: "COD Amount to Collect", value: `₹${codAmount}` });
+
+    // Seal the payment mode + amount to this checkout (see src/lib/crm/paymentSeal.js).
+    // The order pipeline only believes "paid online" / "collect ₹X" when the seal
+    // checks out, so fields a browser writes onto a Wix checkout count for nothing.
+    // Underpaid or unverified prepaid orders get no seal → treated as COD for the
+    // full Wix total until someone checks Razorpay.
+    const seal =
+      paymentMethod === "COD"
+        ? codAmount
+          ? makePaymentSeal({ checkoutId, mode: "COD", amount: codAmount })
+          : ""
+        : verifiedPaid != null && !paymentShortfall && !paymentClaimDegraded
+          ? makePaymentSeal({ checkoutId, mode: "PREPAID", amount: verifiedPaid, paymentId: razorpayPaymentId })
+          : "";
+    if (seal) customFields.push({ title: "Payment Seal", value: seal });
+    else console.warn(`[checkout] order from checkout ${checkoutId} goes UNSEALED (${paymentMethod}).`);
+
+    try {
+      updatedCheckout = await wixClient.checkout.updateCheckout(checkoutId, { customFields } as any);
+    } catch (fieldErr) {
+      // The order still goes through; unsealed it is treated as COD for the Wix total.
+      console.error("[checkout] could not stamp the payment fields/seal on the order:", fieldErr);
     }
 
     const orderResult = await createOrderWithCouponFallback(wixClient, checkoutId);

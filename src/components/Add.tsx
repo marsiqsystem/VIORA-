@@ -5,7 +5,7 @@ import { useWixClient } from "@/hooks/useWixClient";
 import { useCommerceUi } from "@/hooks/useCommerceUi";
 import { useToast } from "@/components/Toast";
 import { trackMetaEvent } from "@/lib/metaEvents";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import dynamic from "next/dynamic";
 import type { AbandonedCartItem } from "@/components/BuyNowConfirmModal";
@@ -59,6 +59,19 @@ const Add = ({
   const { openDrawer, openCheckout } = useCommerceUi();
   const { showToast } = useToast();
 
+  // Guards Buy Now against a second tap landing before React re-renders the
+  // disabled button.
+  const buyNowBusy = useRef(false);
+
+  // Fetch the checkout code while the shopper looks at the product, so Buy
+  // Now opens it at once instead of downloading it on the first tap.
+  useEffect(() => {
+    const preload = () => void import("@/components/CheckoutModal");
+    const w = window as any;
+    const id = w.requestIdleCallback ? w.requestIdleCallback(preload) : setTimeout(preload, 2000);
+    return () => (w.cancelIdleCallback ? w.cancelIdleCallback(id) : clearTimeout(id));
+  }, []);
+
   const hasRealVariant =
     !!variantId && variantId !== "00000000-0000-0000-0000-000000000000";
 
@@ -104,6 +117,13 @@ const Add = ({
   };
 
   const handleAddToCart = async () => {
+    if (isAdding) return;
+    // Already in the bag: the Qty control above edits that line directly, so
+    // adding `quantity` again would double it. Just show the bag.
+    if (matchingLineItem) {
+      openDrawer(productId);
+      return;
+    }
     setIsAdding(true);
     // Fire the Meta AddToCart signal synchronously on click — BEFORE awaiting
     // the Wix API. Waiting for the round-trip risks losing the event if the
@@ -177,10 +197,13 @@ const Add = ({
       num_items: quantity,
     });
 
-    await addItem(wixClient, productId, variantId, quantity, selectedOptions);
+    // Already in the bag (e.g. a second Buy Now after closing checkout) — the
+    // quantity shown IS the bag's quantity, so adding again would double it.
+    if (!matchingLineItem) {
+      await addItem(wixClient, productId, variantId, quantity, selectedOptions);
+    }
 
-    const verifyCart = await wixClient.currentCart.getCurrentCart();
-    if (!verifyCart?.lineItems?.length) {
+    if (!useCartStore.getState().cart?.lineItems?.length) {
       throw new Error("Cart is still empty after adding item");
     }
 
@@ -198,7 +221,7 @@ const Add = ({
   };
 
   const handleBuyNow = async () => {
-    if (isOutOfStock || isBuyingNow) return;
+    if (isOutOfStock || isBuyingNow || buyNowBusy.current) return;
 
     // If the cart already has products that aren't this one, stop and ask the
     // customer whether to keep them. Avoids the surprise of paying for an
@@ -210,6 +233,7 @@ const Add = ({
       return;
     }
 
+    buyNowBusy.current = true;
     setIsBuyingNow(true);
     try {
       await runBuyNow();
@@ -217,10 +241,13 @@ const Add = ({
       console.error("Detailed Wix Cart Error:", err);
       showToast((err as any)?.message === "SOLD_OUT" ? "Sorry, this piece just sold out." : "Buy Now failed. Please try again.", "error");
     }
+    buyNowBusy.current = false;
     setIsBuyingNow(false);
   };
 
   const handleConfirmDecision = async (decision: "yes" | "no") => {
+    if (buyNowBusy.current) return;
+    buyNowBusy.current = true;
     setIsBuyingNow(true);
     try {
       if (decision === "no") {
@@ -238,6 +265,7 @@ const Add = ({
       console.error("Buy Now confirmation failed:", err);
       showToast((err as any)?.message === "SOLD_OUT" ? "Sorry, this piece just sold out." : "Buy Now failed. Please try again.", "error");
     } finally {
+      buyNowBusy.current = false;
       setIsBuyingNow(false);
     }
   };
