@@ -12,7 +12,7 @@
 // MOCK mode: set NEXT_PUBLIC_INBOX_MOCK=1 to preview the UI with seed data
 // (no passcode, no API calls) before the webhook/KV are live.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const MOCK = process.env.NEXT_PUBLIC_INBOX_MOCK === "1";
 const POLL_MS = 4000;
@@ -274,6 +274,31 @@ function AdCard({ referral }: { referral?: Referral | null }) {
   );
 }
 
+// Starter quick-replies (operator can edit/add; stored in localStorage after that).
+const DEFAULT_QUICK_REPLIES = [
+  "Hello! Thank you for contacting Viora Jewels 💎 How can we help you?",
+  "Please share your full address with pincode so we can confirm your order. 🙏",
+  "Your order is confirmed ✅ — we will dispatch it shortly.",
+  "Your order has been shipped 🚚 You'll receive tracking details soon.",
+  "Could you please confirm your order by replying YES?",
+  "Thank you for shopping with Viora Jewels! ❤️",
+];
+
+// Render message text with clickable links (ops/customers paste product URLs a lot).
+const URL_RE = /(https?:\/\/[^\s]+)/g;
+function linkify(text: string): React.ReactNode {
+  if (!text) return text;
+  const parts = text.split(URL_RE);
+  return parts.map((part, i) =>
+    /^https?:\/\//.test(part) ? (
+      <a key={i} href={part} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+        style={{ color: "#1a6fd4", textDecoration: "underline", wordBreak: "break-all" }}>{part}</a>
+    ) : (
+      <span key={i}>{part}</span>
+    )
+  );
+}
+
 export default function InboxPage() {
   const [key, setKey] = useState("");
   const [authed, setAuthed] = useState(MOCK);
@@ -323,6 +348,42 @@ export default function InboxPage() {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLInputElement | null>(null);
   const docRef = useRef<HTMLInputElement | null>(null);
+  const audioRef = useRef<HTMLInputElement | null>(null);
+  const lastConvSig = useRef<string>("");   // skip re-render when a poll returns identical data
+  const lastThreadSig = useRef<string>("");
+  const [lightbox, setLightbox] = useState<string | null>(null);  // full-screen image viewer
+  const [dragOver, setDragOver] = useState(false);                // drag-and-drop file overlay
+  const [highlightId, setHighlightId] = useState<string | null>(null); // flash a jumped-to message
+  const [atBottom, setAtBottom] = useState(true);                 // show the scroll-to-latest button
+  const prevUnreadRef = useRef<number>(-1);                        // detect newly-arrived messages
+
+  // --- extra WhatsApp-style features ---
+  const [forwarding, setForwarding] = useState<Message | null>(null); // message being forwarded (opens picker)
+  const [quickOpen, setQuickOpen] = useState(false);              // quick-replies tray
+  const [quickEditing, setQuickEditing] = useState(false);        // quick-replies editor
+  const [quickReplies, setQuickReplies] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("viora_inbox_quickreplies") || "null") || DEFAULT_QUICK_REPLIES; }
+    catch { return DEFAULT_QUICK_REPLIES; }
+  });
+  const [chatSearchOpen, setChatSearchOpen] = useState(false);    // in-chat find bar
+  const [chatSearch, setChatSearch] = useState("");
+  const [chatSearchIdx, setChatSearchIdx] = useState(0);
+  const [pinned, setPinned] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("viora_inbox_pinned") || "[]") || []; } catch { return []; }
+  });
+  const [starred, setStarred] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("viora_inbox_starred") || "[]") || []; } catch { return []; }
+  });
+  const [infoOpen, setInfoOpen] = useState(false);                // contact info side panel
+  const [forwardSearch, setForwardSearch] = useState("");         // filter in the forward picker
+
+  // persist the localStorage-backed lists
+  useEffect(() => { try { localStorage.setItem("viora_inbox_quickreplies", JSON.stringify(quickReplies)); } catch { /* ignore */ } }, [quickReplies]);
+  useEffect(() => { try { localStorage.setItem("viora_inbox_pinned", JSON.stringify(pinned)); } catch { /* ignore */ } }, [pinned]);
+  useEffect(() => { try { localStorage.setItem("viora_inbox_starred", JSON.stringify(starred)); } catch { /* ignore */ } }, [starred]);
+
+  const togglePin = useCallback((phone: string) => setPinned((p) => (p.includes(phone) ? p.filter((x) => x !== phone) : [phone, ...p])), []);
+  const toggleStar = useCallback((id: string) => setStarred((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id])), []);
 
   // This inbox is a position:fixed full-screen overlay on top of the storefront
   // layout (Navbar/Footer + Lenis smooth-scroll on the window). Lock the page
@@ -348,6 +409,28 @@ export default function InboxPage() {
     return res;
   }, []);
 
+  // short WebAudio chime on a new message (no asset / CSP-safe)
+  const beep = useCallback(() => {
+    try {
+      const AC = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AC) return;
+      const ctx = new AC();
+      const o = ctx.createOscillator(); const g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.type = "sine"; o.frequency.value = 680; g.gain.value = 0.06;
+      o.start(); o.stop(ctx.currentTime + 0.16);
+      setTimeout(() => ctx.close().catch(() => {}), 350);
+    } catch { /* ignore */ }
+  }, []);
+  const notifyNewMessage = useCallback(() => {
+    beep();
+    try {
+      if (typeof Notification !== "undefined" && Notification.permission === "granted" && document.hidden) {
+        new Notification("Viora Inbox", { body: "New message received" });
+      }
+    } catch { /* ignore */ }
+  }, [beep]);
+
   // --- load conversation list ---
   const loadConvs = useCallback(async () => {
     if (MOCK) return;
@@ -356,9 +439,18 @@ export default function InboxPage() {
       if (res.status === 503) { setNeedsSetup(true); setAuthed(false); return; }
       if (res.status === 401) { setAuthed(false); setAuthError("Wrong passcode."); return; }
       const data = await res.json();
-      if (data.ok) { setConvs(data.conversations || []); setAuthed(true); setNeedsSetup(false); }
+      if (data.ok) {
+        const list = data.conversations || [];
+        const sig = JSON.stringify(list);
+        if (sig !== lastConvSig.current) { lastConvSig.current = sig; setConvs(list); }
+        // new-message alert: total unread went up since the last poll
+        const totalUnread = list.reduce((s: number, c: any) => s + (c.unread || 0), 0);
+        if (prevUnreadRef.current >= 0 && totalUnread > prevUnreadRef.current) notifyNewMessage();
+        prevUnreadRef.current = totalUnread;
+        setAuthed(true); setNeedsSetup(false);
+      }
     } catch { /* network blip — keep prior state */ }
-  }, [api]);
+  }, [api, notifyNewMessage]);
 
   // --- load one thread ---
   const loadThread = useCallback(async (phone: string) => {
@@ -371,7 +463,17 @@ export default function InboxPage() {
       const res = await api(`/api/inbox/conversations?phone=${encodeURIComponent(phone)}`);
       if (!res.ok) return;
       const data = await res.json();
-      if (data.ok) setThread({ phone: data.phone, name: data.name, withinWindow: data.withinWindow, lastInboundTs: data.lastInboundTs, referral: data.referral || null, messages: data.messages || [] });
+      if (data.ok) {
+        const msgs = data.messages || [];
+        const last = msgs[msgs.length - 1];
+        // Signature of the server state. If a poll returns the same thread, skip the
+        // setThread so we don't re-render / reload every image bubble every few seconds.
+        const sig = `${data.phone}|${msgs.length}|${last?.id || ""}|${last?.status || ""}|${data.withinWindow}`;
+        if (sig !== lastThreadSig.current) {
+          lastThreadSig.current = sig;
+          setThread({ phone: data.phone, name: data.name, withinWindow: data.withinWindow, lastInboundTs: data.lastInboundTs, referral: data.referral || null, messages: msgs });
+        }
+      }
     } catch { /* ignore */ }
   }, [api]);
 
@@ -405,9 +507,14 @@ export default function InboxPage() {
     try {
       const res = await api("/api/inbox/send", { method: "POST", body: JSON.stringify({ to: phone, text, replyTo: rt?.id }) });
       const data = await res.json();
-      if (!data.ok) setSendError(typeof data.error === "string" ? data.error : "Send failed.");
-      await loadThread(phone);
-      loadConvs();
+      if (!data.ok) {
+        setSendError(typeof data.error === "string" ? data.error : "Send failed.");
+        lastThreadSig.current = "";   // force the reconcile below to clear the ghost bubble
+      } else {
+        // mark the optimistic bubble as sent; the background poll reconciles the real id
+        setThread((t) => (t ? { ...t, messages: t.messages.map((x) => (x.id === optimistic.id ? { ...x, status: "sent" } : x)) } : t));
+      }
+      loadThread(phone); loadConvs();   // reconcile in the background — don't block the composer
     } catch {
       setSendError("Network error while sending.");
     } finally {
@@ -415,55 +522,98 @@ export default function InboxPage() {
     }
   }, [draft, sending, replyTo, api, loadThread, loadConvs]);
 
-  // --- send a photo OR document: upload to Meta, then send by media id ---
-  const sendAttachment = useCallback(async (file: File) => {
+  // --- send one or many photos / a video / a document ---
+  // Each file is uploaded to Meta then sent by media id. Several images can be
+  // picked and sent in one go; the typed caption and any reply quote attach to
+  // the first item only (WhatsApp-style). Reconciles once at the end.
+  const sendAttachments = useCallback(async (files: File[]) => {
     const phone = activeRef.current;
-    if (!file || !phone || uploading) return;
+    if (!files.length || !phone || uploading) return;
     setUploading(true);
     setSendError("");
     setAttachOpen(false);
-    const caption = draft.trim();
+    const caption0 = draft.trim();
     const rt = replyTo;
+    setDraft("");
+    setReplyTo(null);
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const up = await fetch("/api/inbox/upload", {
-        method: "POST",
-        headers: { "x-inbox-key": keyRef.current },
-        body: form,
-      });
-      const upData = await up.json();
-      if (!upData.ok || !upData.mediaId) {
-        setSendError(typeof upData.error === "string" ? upData.error : "Upload failed.");
-        return;
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const caption = i === 0 ? caption0 : "";
+        const quoted = i === 0 && rt ? { id: rt.id, text: String(rt.text || "").slice(0, 140), dir: rt.dir } : undefined;
+        const form = new FormData();
+        form.append("file", file);
+        const up = await fetch("/api/inbox/upload", { method: "POST", headers: { "x-inbox-key": keyRef.current }, body: form });
+        const upData = await up.json();
+        if (!upData.ok || !upData.mediaId) {
+          setSendError(typeof upData.error === "string" ? upData.error : `Upload failed for ${file.name || "a file"}.`);
+          continue;
+        }
+        const kind: string = upData.kind || "image";   // image | video | audio | document
+        const fname = upData.filename || file.name || "";
+        const placeholder = kind === "document" ? `📄 ${fname || "Document"}` : kind === "video" ? "🎥 Video" : kind === "audio" ? "🎵 Audio" : "📷 Photo";
+        const optimistic: Message = {
+          id: `tmp_${Date.now()}_${i}`, dir: "out",
+          text: kind === "audio" ? "🎵 Audio" : (caption || placeholder),
+          ts: Date.now(), status: "pending", type: kind, mediaId: upData.mediaId,
+          filename: kind === "document" ? fname : undefined,
+          ...(quoted ? { quoted } : {}),
+        };
+        setThread((t) => (t ? { ...t, messages: [...t.messages, optimistic] } : t));
+        const res = await api("/api/inbox/send", {
+          method: "POST",
+          body: JSON.stringify({ to: phone, mediaId: upData.mediaId, kind, filename: fname, text: caption, replyTo: quoted ? rt?.id : undefined }),
+        });
+        const data = await res.json();
+        if (!data.ok) { setSendError(typeof data.error === "string" ? data.error : "Send failed."); lastThreadSig.current = ""; }
       }
-      const kind = upData.kind === "document" ? "document" : upData.kind === "video" ? "video" : "image";
-      const fname = upData.filename || file.name || "";
-      // optimistic bubble
-      const optimistic: Message = {
-        id: `tmp_${Date.now()}`, dir: "out",
-        text: caption || (kind === "document" ? `📄 ${fname || "Document"}` : kind === "video" ? "🎥 Video" : "📷 Photo"),
-        ts: Date.now(), status: "pending", type: kind, mediaId: upData.mediaId,
-        filename: kind === "document" ? fname : undefined,
-        ...(rt ? { quoted: { id: rt.id, text: String(rt.text || "").slice(0, 140), dir: rt.dir } } : {}),
-      };
-      setThread((t) => (t ? { ...t, messages: [...t.messages, optimistic] } : t));
-      setDraft("");
-      setReplyTo(null);
-      const res = await api("/api/inbox/send", {
-        method: "POST",
-        body: JSON.stringify({ to: phone, mediaId: upData.mediaId, kind, filename: fname, text: caption, replyTo: rt?.id }),
-      });
-      const data = await res.json();
-      if (!data.ok) setSendError(typeof data.error === "string" ? data.error : "Send failed.");
-      await loadThread(phone);
-      loadConvs();
+      loadThread(phone); loadConvs();   // reconcile once, in the background
     } catch {
-      setSendError("Network error while sending the file.");
+      setSendError("Network error while sending the file(s).");
     } finally {
       setUploading(false);
     }
   }, [draft, uploading, replyTo, api, loadThread, loadConvs]);
+
+  const sendAttachment = useCallback((file: File) => sendAttachments([file]), [sendAttachments]);
+
+  // Route dropped / pasted files straight into the attachment sender.
+  const handleFiles = useCallback((files: FileList | File[]) => {
+    const arr = Array.from(files);
+    if (arr.length) sendAttachments(arr);
+  }, [sendAttachments]);
+
+  // Scroll to, and briefly flash, a quoted message when its preview is tapped.
+  const jumpToMessage = useCallback((id?: string) => {
+    if (!id) return;
+    const el = document.getElementById(`msg-${id}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlightId(id);
+    setTimeout(() => setHighlightId((cur) => (cur === id ? null : cur)), 1600);
+  }, []);
+
+  // Forward the picked message to another conversation, then open that chat.
+  const forwardTo = useCallback(async (toPhone: string) => {
+    const m = forwarding;
+    setForwarding(null);
+    if (!m || !toPhone) return;
+    try {
+      const body = m.mediaId
+        ? { to: toPhone, mediaId: m.mediaId, kind: m.type, filename: m.filename }
+        : { to: toPhone, text: m.text };
+      const res = await api("/api/inbox/send", { method: "POST", body: JSON.stringify(body) });
+      const data = await res.json();
+      if (!data.ok) { setSendError(typeof data.error === "string" ? data.error : "Forward failed (target's 24h window may be closed)."); return; }
+      openConv(toPhone);
+    } catch { setSendError("Network error while forwarding."); }
+  }, [forwarding, api, openConv]);
+
+  // Insert a saved quick-reply into the composer (operator can tweak, then send).
+  const insertQuickReply = useCallback((txt: string) => {
+    setDraft((d) => (d.trim() ? d + " " + txt : txt));
+    setQuickOpen(false);
+  }, []);
 
   // --- approved templates: load list + send one to this chat ---
   const openTemplates = useCallback(async () => {
@@ -643,7 +793,41 @@ export default function InboxPage() {
   // --- autoscroll to newest ---
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+    setAtBottom(true);
   }, [thread?.messages.length, active]);
+
+  // ask for desktop-notification permission once the operator is in
+  useEffect(() => {
+    if (authed && typeof Notification !== "undefined" && Notification.permission === "default") {
+      Notification.requestPermission().catch(() => {});
+    }
+  }, [authed]);
+
+  // Esc closes the lightbox / cancels a reply / shuts open menus
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (lightbox) { setLightbox(null); return; }
+      if (replyTo) { setReplyTo(null); return; }
+      if (attachOpen || emojiOpen) { setAttachOpen(false); setEmojiOpen(false); return; }
+      if (msgMenuId || headerMenu) { setMsgMenuId(null); setHeaderMenu(false); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightbox, replyTo, attachOpen, emojiOpen, msgMenuId, headerMenu]);
+
+  // in-chat search: ids of messages whose text matches the find bar
+  const searchMatches = useMemo(() => {
+    const q = chatSearch.trim().toLowerCase();
+    if (!q || !thread) return [] as string[];
+    return thread.messages.filter((m) => (m.text || "").toLowerCase().includes(q)).map((m) => m.id);
+  }, [chatSearch, thread]);
+  useEffect(() => {
+    if (!chatSearchOpen || searchMatches.length === 0) return;
+    const idx = Math.min(chatSearchIdx, searchMatches.length - 1);
+    jumpToMessage(searchMatches[idx]);
+  }, [chatSearchIdx, searchMatches, chatSearchOpen, jumpToMessage]);
+  const searchMatchSet = useMemo(() => new Set(searchMatches), [searchMatches]);
 
   const unlock = () => {
     const k = keyInput.trim();
@@ -790,6 +974,7 @@ export default function InboxPage() {
               </button>
             );
           })}
+          <span style={{ marginLeft: "auto", alignSelf: "center", fontSize: 11, color: C.sub }}>{convs.length} chats</span>
         </div>
 
         {composing && (
@@ -827,7 +1012,8 @@ export default function InboxPage() {
               ? base.filter(
                   (c) =>
                     (c.name || "").toLowerCase().includes(q) ||
-                    (digits && c.phone.includes(digits))
+                    (c.lastText || "").toLowerCase().includes(q) ||
+                    !!(digits && c.phone.includes(digits))
                 )
               : base;
             if (convs.length > 0 && shown.length === 0) {
@@ -837,8 +1023,11 @@ export default function InboxPage() {
                 </div>
               );
             }
-            return shown.map((c) => {
+            const pinnedSet = new Set(pinned);
+            const ordered = [...shown].sort((a, b) => (pinnedSet.has(b.phone) ? 1 : 0) - (pinnedSet.has(a.phone) ? 1 : 0));
+            return ordered.map((c) => {
             const isActive = c.phone === active;
+            const isPinned = pinnedSet.has(c.phone);
             return (
               <button
                 key={c.phone}
@@ -855,7 +1044,7 @@ export default function InboxPage() {
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                    <span style={{ fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name || `+${c.phone}`}</span>
+                    <span style={{ fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{isPinned ? "📌 " : ""}{c.name || `+${c.phone}`}</span>
                     <span style={{ fontSize: 11, color: C.sub, flexShrink: 0 }}>{listTime(c.lastTs)}</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 2 }}>
@@ -880,7 +1069,7 @@ export default function InboxPage() {
 
       {/* RIGHT: thread */}
       {showThread && (
-      <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+      <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, position: "relative" }}>
         {!thread ? (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: C.sub, flexDirection: "column", gap: 8 }}>
             <div style={{ fontSize: 40 }}>💬</div>
@@ -913,19 +1102,44 @@ export default function InboxPage() {
                   </span>
                 );
               })()}
+              <button onClick={() => { setChatSearchOpen((v) => !v); setChatSearch(""); setChatSearchIdx(0); }} title="Search in chat" style={{ background: "transparent", border: "none", color: "#fff", fontSize: 18, cursor: "pointer", lineHeight: 1, padding: "2px 6px" }}>🔍</button>
+              <button onClick={() => setInfoOpen((v) => !v)} title="Contact info" style={{ background: "transparent", border: "none", color: "#fff", fontSize: 18, cursor: "pointer", lineHeight: 1, padding: "2px 6px" }}>ℹ️</button>
               <div style={{ position: "relative" }}>
                 <button onClick={() => setHeaderMenu((v) => !v)} title="Chat options" style={{ background: "transparent", border: "none", color: "#fff", fontSize: 22, cursor: "pointer", lineHeight: 1, padding: "2px 6px" }}>⋮</button>
                 {headerMenu && (
                   <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 6, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 10, boxShadow: "0 6px 20px rgba(0,0,0,.16)", overflow: "hidden", zIndex: 8, minWidth: 160 }}>
+                    <button onClick={() => { togglePin(thread.phone); setHeaderMenu(false); }} style={{ ...menuItem, whiteSpace: "nowrap", color: C.plum }}>{pinned.includes(thread.phone) ? "📌 Unpin chat" : "📌 Pin chat"}</button>
+                    <button onClick={() => { setInfoOpen(true); setHeaderMenu(false); }} style={{ ...menuItem, whiteSpace: "nowrap", color: C.plum }}>ℹ️ Contact info</button>
                     <button onClick={deleteChat} style={{ ...menuItem, color: "#c0392b", whiteSpace: "nowrap" }}>🗑 Delete chat</button>
                   </div>
                 )}
               </div>
             </header>
 
+            {chatSearchOpen && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", background: C.cream2, borderBottom: `1px solid ${C.border}` }}>
+                <input autoFocus value={chatSearch} onChange={(e) => { setChatSearch(e.target.value); setChatSearchIdx(0); }}
+                  placeholder="Search in this chat…" style={{ flex: 1, padding: "7px 10px", borderRadius: 8, border: `1px solid ${C.border}`, fontSize: 13, fontFamily: "inherit" }} />
+                <span style={{ fontSize: 12, color: C.sub, minWidth: 42, textAlign: "center" }}>{searchMatches.length ? `${Math.min(chatSearchIdx + 1, searchMatches.length)}/${searchMatches.length}` : (chatSearch ? "0/0" : "")}</span>
+                <button onClick={() => setChatSearchIdx((i) => (searchMatches.length ? (i - 1 + searchMatches.length) % searchMatches.length : 0))} disabled={!searchMatches.length} title="Previous" style={{ ...iconBtn, opacity: searchMatches.length ? 1 : 0.4 }}>↑</button>
+                <button onClick={() => setChatSearchIdx((i) => (searchMatches.length ? (i + 1) % searchMatches.length : 0))} disabled={!searchMatches.length} title="Next" style={{ ...iconBtn, opacity: searchMatches.length ? 1 : 0.4 }}>↓</button>
+                <button onClick={() => { setChatSearchOpen(false); setChatSearch(""); }} title="Close search" style={iconBtn}>×</button>
+              </div>
+            )}
+
             {thread.referral && <AdCard referral={thread.referral} />}
 
-            <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <div ref={scrollRef}
+              onDragOver={(e) => { e.preventDefault(); if (!dragOver) setDragOver(true); }}
+              onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false); }}
+              onDrop={(e) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files); }}
+              onScroll={(e) => { const el = e.currentTarget; setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80); }}
+              style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 8, position: "relative" }}>
+              {dragOver && (
+                <div style={{ position: "absolute", inset: 0, zIndex: 9, background: "rgba(201,166,107,.14)", border: `2px dashed ${C.gold}`, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", color: C.plum, fontWeight: 700, fontSize: 16 }}>
+                  ⬇ Drop files to send
+                </div>
+              )}
               {thread.messages.map((m, i) => {
                 const out = m.dir === "out";
                 const prev = thread.messages[i - 1];
@@ -962,6 +1176,15 @@ export default function InboxPage() {
                         return q ? { id: q.id, text: q.text, dir: q.dir } : null;
                       })()
                     : null);
+                // Resolve the full quoted message (by id) so a reply to a photo shows
+                // a thumbnail — otherwise every photo reply just reads "📷 Photo".
+                const qFull = quotedPreview
+                  ? thread.messages.find((x) => x.id === (m.quoted?.id || m.quotedId))
+                  : null;
+                const qThumb =
+                  qFull && qFull.type === "image" && (qFull.mediaId || qFull.imageUrl)
+                    ? qFull.imageUrl || `/api/inbox/media?id=${encodeURIComponent(qFull.mediaId!)}&key=${encodeURIComponent(key)}`
+                    : "";
                 return (
                   <div key={m.id} style={{ display: "contents" }}>
                     {showDay && (
@@ -969,10 +1192,20 @@ export default function InboxPage() {
                         {dayLabel(m.ts)}
                       </div>
                     )}
-                    <div style={{ alignSelf: out ? "flex-end" : "flex-start", maxWidth: "72%", position: "relative" }}>
+                    <div id={`msg-${m.id}`} style={{ alignSelf: out ? "flex-end" : "flex-start", maxWidth: "72%", position: "relative", borderRadius: 13, transition: "box-shadow .3s", boxShadow: highlightId === m.id ? `0 0 0 3px ${C.gold}` : "none", background: chatSearchOpen && searchMatchSet.has(m.id) ? "rgba(201,166,107,.16)" : undefined }}>
                       {msgMenuId === m.id && (
                         <div style={{ position: "absolute", top: 0, [out ? "right" : "left"]: 0, transform: "translateY(-108%)", zIndex: 7, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 10, boxShadow: "0 6px 20px rgba(0,0,0,.16)", overflow: "hidden" }}>
                           <button onClick={() => { setReplyTo(m); setMsgMenuId(null); }} style={{ ...menuItem, whiteSpace: "nowrap", fontSize: 13, color: C.plum }}>↩ Reply</button>
+                          <button onClick={() => { setForwarding(m); setMsgMenuId(null); }} style={{ ...menuItem, whiteSpace: "nowrap", fontSize: 13, color: C.plum }}>↪ Forward</button>
+                          <button onClick={() => { toggleStar(m.id); setMsgMenuId(null); }} style={{ ...menuItem, whiteSpace: "nowrap", fontSize: 13, color: C.plum }}>{starred.includes(m.id) ? "⭐ Unstar" : "☆ Star"}</button>
+                          {caption && (
+                            <button onClick={() => { navigator.clipboard?.writeText(caption).catch(() => {}); setMsgMenuId(null); }} style={{ ...menuItem, whiteSpace: "nowrap", fontSize: 13, color: C.plum }}>📋 Copy</button>
+                          )}
+                          {(m.mediaId || m.imageUrl) && (
+                            <a href={isImage ? imgSrc : proxy} download={m.filename || ""} target="_blank" rel="noreferrer"
+                              onClick={() => setMsgMenuId(null)}
+                              style={{ ...menuItem, display: "block", whiteSpace: "nowrap", fontSize: 13, color: C.plum, textDecoration: "none" }}>⬇ Download</a>
+                          )}
                           <button onClick={() => deleteMsg(m.id)} style={{ ...menuItem, color: "#c0392b", whiteSpace: "nowrap", fontSize: 13 }}>🗑 Delete for me</button>
                         </div>
                       )}
@@ -983,13 +1216,20 @@ export default function InboxPage() {
                           </div>
                         )}
                         {quotedPreview && (
-                          <div style={{ borderLeft: `3px solid ${C.gold}`, background: "rgba(0,0,0,.045)", borderRadius: 6, padding: "3px 8px", marginBottom: 5, maxWidth: "100%", overflow: "hidden" }}>
-                            <div style={{ fontSize: 10.5, fontWeight: 700, color: C.plum }}>
-                              {quotedPreview.dir === "out" ? "You" : (thread.name || "Customer")}
+                          <div onClick={() => jumpToMessage(m.quoted?.id || m.quotedId)} title="Go to message"
+                            style={{ display: "flex", gap: 6, alignItems: "stretch", borderLeft: `3px solid ${C.gold}`, background: "rgba(0,0,0,.045)", borderRadius: 6, padding: "3px 8px", marginBottom: 5, maxWidth: "100%", overflow: "hidden", cursor: "pointer" }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 10.5, fontWeight: 700, color: C.plum }}>
+                                {quotedPreview.dir === "out" ? "You" : (thread.name || "Customer")}
+                              </div>
+                              <div style={{ fontSize: 12, color: C.sub, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                {qThumb ? "📷 Photo" : (quotedPreview.text || "Media")}
+                              </div>
                             </div>
-                            <div style={{ fontSize: 12, color: C.sub, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                              {quotedPreview.text || "Media"}
-                            </div>
+                            {qThumb && (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={qThumb} alt="Photo" style={{ width: 34, height: 34, objectFit: "cover", borderRadius: 4, flexShrink: 0 }} />
+                            )}
                           </div>
                         )}
                         {isLocation && m.location && (
@@ -1006,10 +1246,9 @@ export default function InboxPage() {
                           </a>
                         )}
                         {isImage && imgSrc && (
-                          <a href={imgSrc} target="_blank" rel="noreferrer" style={{ display: "block" }}>
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={imgSrc} alt={caption || "Photo"} style={{ maxWidth: "100%", width: 240, maxHeight: 280, objectFit: "cover", borderRadius: 9, display: "block" }} />
-                          </a>
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={imgSrc} alt={caption || "Photo"} onClick={() => setLightbox(imgSrc)}
+                            style={{ maxWidth: "100%", width: 240, maxHeight: 280, objectFit: "cover", borderRadius: 9, display: "block", cursor: "zoom-in" }} />
                         )}
                         {isVideo && proxy && (
                           // eslint-disable-next-line jsx-a11y/media-has-caption
@@ -1030,8 +1269,9 @@ export default function InboxPage() {
                           </a>
                         )}
                         <div style={{ padding: isTile ? "4px 7px 2px" : 0 }}>
-                          {caption || (isTile || isAudio || isDoc || isLocation ? "" : m.text)}
+                          {linkify(caption || (isTile || isAudio || isDoc || isLocation ? "" : m.text))}
                           <span style={{ float: "right", marginLeft: 10, marginTop: 6, fontSize: 10, color: C.sub, display: "inline-flex", gap: 4, alignItems: "center" }}>
+                            {starred.includes(m.id) && <span title="Starred" style={{ fontSize: 11 }}>⭐</span>}
                             <button onClick={(e) => { e.stopPropagation(); setMsgMenuId((cur) => (cur === m.id ? null : m.id)); }} title="Message options" style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 13, color: C.sub, padding: 0, lineHeight: 1 }}>⋮</button>
                             {clock(m.ts)} {out && <Ticks status={m.status} error={m.error} />}
                           </span>
@@ -1043,15 +1283,23 @@ export default function InboxPage() {
               })}
             </div>
 
+            {!atBottom && (
+              <button onClick={() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); setAtBottom(true); }}
+                title="Jump to latest" aria-label="Jump to latest"
+                style={{ position: "absolute", right: 24, bottom: 86, zIndex: 8, width: 40, height: 40, borderRadius: "50%", border: `1px solid ${C.border}`, background: "#fff", boxShadow: "0 4px 14px rgba(0,0,0,.18)", cursor: "pointer", fontSize: 18, color: C.plum }}>↓</button>
+            )}
+
             {/* composer */}
             <div style={{ borderTop: `1px solid ${C.border}`, background: "#fff", padding: 12 }}>
               {sendError && <div style={{ color: "#c0392b", fontSize: 12, marginBottom: 8 }}>{sendError}</div>}
               {/* hidden pickers — available whether or not the window is open */}
-              <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" style={{ display: "none" }}
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) sendAttachment(f); e.target.value = ""; }} />
+              <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" multiple style={{ display: "none" }}
+                onChange={(e) => { const fs = Array.from(e.target.files || []); if (fs.length) sendAttachments(fs); e.target.value = ""; }} />
               <input ref={videoRef} type="file" accept="video/mp4,video/3gpp" style={{ display: "none" }}
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) sendAttachment(f); e.target.value = ""; }} />
               <input ref={docRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,application/pdf" style={{ display: "none" }}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) sendAttachment(f); e.target.value = ""; }} />
+              <input ref={audioRef} type="file" accept="audio/mpeg,audio/aac,audio/mp4,audio/ogg,audio/amr,.mp3,.m4a,.aac,.ogg" style={{ display: "none" }}
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) sendAttachment(f); e.target.value = ""; }} />
 
               {replyTo && (
@@ -1080,7 +1328,7 @@ export default function InboxPage() {
                   {emojiOpen && (
                     <div style={{ position: "absolute", bottom: "100%", left: 0, marginBottom: 8, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 12, boxShadow: "0 6px 24px rgba(0,0,0,.12)", padding: 8, display: "flex", flexWrap: "wrap", gap: 4, width: 268, maxHeight: 160, overflowY: "auto", zIndex: 5 }}>
                       {EMOJIS.map((e) => (
-                        <button key={e} onClick={() => { setDraft((d) => d + e); setEmojiOpen(false); }} style={{ border: "none", background: "transparent", fontSize: 20, cursor: "pointer", width: 34, height: 34, borderRadius: 8 }}>
+                        <button key={e} onClick={() => setDraft((d) => d + e)} style={{ border: "none", background: "transparent", fontSize: 20, cursor: "pointer", width: 34, height: 34, borderRadius: 8 }}>
                           {e}
                         </button>
                       ))}
@@ -1088,21 +1336,48 @@ export default function InboxPage() {
                   )}
                   {attachOpen && (
                     <div style={{ position: "absolute", bottom: "100%", left: 74, marginBottom: 8, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 12, boxShadow: "0 6px 24px rgba(0,0,0,.12)", padding: 6, zIndex: 5, minWidth: 150 }}>
-                      <button onClick={() => { setAttachOpen(false); fileRef.current?.click(); }} style={menuItem}>🖼️ Photo</button>
+                      <button onClick={() => { setAttachOpen(false); fileRef.current?.click(); }} style={menuItem}>🖼️ Photos</button>
                       <button onClick={() => { setAttachOpen(false); videoRef.current?.click(); }} style={menuItem}>🎥 Video</button>
+                      <button onClick={() => { setAttachOpen(false); audioRef.current?.click(); }} style={menuItem}>🎵 Audio</button>
                       <button onClick={() => { setAttachOpen(false); docRef.current?.click(); }} style={menuItem}>📄 Document</button>
+                    </div>
+                  )}
+                  {quickOpen && (
+                    <div style={{ position: "absolute", bottom: "100%", left: 0, marginBottom: 8, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 12, boxShadow: "0 6px 24px rgba(0,0,0,.12)", padding: 10, zIndex: 5, width: 330, maxHeight: 300, overflowY: "auto" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                        <span style={{ fontWeight: 700, fontSize: 12.5, color: C.plum }}>💬 Quick replies</span>
+                        <button onClick={() => setQuickEditing((v) => !v)} style={{ border: "none", background: "transparent", color: C.plum, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{quickEditing ? "✓ Done" : "✏️ Edit"}</button>
+                      </div>
+                      {quickReplies.length === 0 && <div style={{ color: C.sub, fontSize: 12, padding: "4px 2px" }}>No quick replies yet — tap Edit to add.</div>}
+                      {quickReplies.map((qr, i) => (
+                        <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 5 }}>
+                          {quickEditing ? (
+                            <>
+                              <textarea value={qr} onChange={(e) => setQuickReplies((list) => list.map((x, j) => (j === i ? e.target.value : x)))} rows={2} style={{ flex: 1, fontSize: 12.5, padding: "6px 8px", borderRadius: 6, border: `1px solid ${C.border}`, resize: "vertical", fontFamily: "inherit" }} />
+                              <button onClick={() => setQuickReplies((list) => list.filter((_, j) => j !== i))} title="Delete" style={{ border: "none", background: "transparent", color: "#c0392b", fontSize: 15, cursor: "pointer" }}>🗑</button>
+                            </>
+                          ) : (
+                            <button onClick={() => insertQuickReply(qr)} style={{ textAlign: "left", width: "100%", border: `1px solid ${C.border}`, background: C.cream2, borderRadius: 8, padding: "7px 10px", fontSize: 12.5, cursor: "pointer", color: C.text, whiteSpace: "normal", lineHeight: 1.35 }}>{qr}</button>
+                          )}
+                        </div>
+                      ))}
+                      {quickEditing && (
+                        <button onClick={() => setQuickReplies((list) => [...list, "New quick reply"])} style={{ marginTop: 4, border: `1px dashed ${C.gold}`, background: "transparent", color: C.plum, borderRadius: 8, padding: "6px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", width: "100%" }}>＋ Add quick reply</button>
+                      )}
                     </div>
                   )}
                   <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
                     <button onClick={openTemplates} title="Send approved template" style={iconBtn}>🗒️</button>
+                    <button onClick={() => setQuickOpen((v) => !v)} title="Quick replies" style={iconBtn}>💬</button>
                     <button onClick={() => setEmojiOpen((v) => !v)} title="Emoji" style={iconBtn}>😊</button>
-                    <button onClick={() => setAttachOpen((v) => !v)} disabled={uploading} title="Attach photo or document" style={{ ...iconBtn, opacity: uploading ? 0.5 : 1 }}>
+                    <button onClick={() => setAttachOpen((v) => !v)} disabled={uploading} title="Attach photos, video, audio or document" style={{ ...iconBtn, opacity: uploading ? 0.5 : 1 }}>
                       {uploading ? "…" : "📎"}
                     </button>
                     <textarea
                       value={draft}
                       onChange={(e) => setDraft(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+                      onPaste={(e) => { const fs = Array.from(e.clipboardData?.files || []); if (fs.length) { e.preventDefault(); handleFiles(fs); } }}
                       placeholder="Type a reply…  (Enter to send, Shift+Enter for newline)"
                       rows={1}
                       style={{ flex: 1, resize: "none", maxHeight: 120, padding: "10px 12px", borderRadius: 20, border: `1px solid ${C.border}`, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }}
@@ -1122,6 +1397,83 @@ export default function InboxPage() {
       {/* click-away layer to dismiss the header / message option menus */}
       {(headerMenu || msgMenuId) && (
         <div onClick={() => { setHeaderMenu(false); setMsgMenuId(null); }} style={{ position: "fixed", inset: 0, zIndex: 6 }} />
+      )}
+
+      {/* contact info drawer */}
+      {infoOpen && thread && (
+        <div style={{ position: "absolute", top: 0, right: 0, bottom: 0, width: 300, maxWidth: "88%", background: "#fff", borderLeft: `1px solid ${C.border}`, boxShadow: "-6px 0 24px rgba(0,0,0,.12)", zIndex: 9, display: "flex", flexDirection: "column" }}>
+          <div style={{ background: HEADER_BG, color: "#fff", padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontWeight: 600, fontFamily: SERIF, fontSize: 16 }}>Contact info</span>
+            <button onClick={() => setInfoOpen(false)} style={{ background: "transparent", border: "none", color: "#fff", fontSize: 22, cursor: "pointer", lineHeight: 1 }}>×</button>
+          </div>
+          <div style={{ padding: 18, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+              <div style={{ width: 72, height: 72, borderRadius: "50%", background: GOLD_BG, color: C.plumDark, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontFamily: SERIF, fontSize: 30 }}>{(thread.name || thread.phone).slice(0, 1).toUpperCase()}</div>
+              <div style={{ fontWeight: 700, fontSize: 16, color: C.text, textAlign: "center" }}>{thread.name || "Unnamed contact"}</div>
+              <div style={{ fontSize: 13, color: C.sub }}>+{thread.phone}</div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => { navigator.clipboard?.writeText("+" + thread.phone).catch(() => {}); }} style={{ ...btn(C.plum), flex: 1, padding: "9px 0", fontSize: 13 }}>📋 Copy number</button>
+              <a href={`https://wa.me/${thread.phone}`} target="_blank" rel="noreferrer" style={{ ...btn(C.gold), flex: 1, padding: "9px 0", fontSize: 13, textAlign: "center", textDecoration: "none", display: "block" }}>Open ↗</a>
+            </div>
+            <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 12, fontSize: 13, color: C.sub, display: "flex", flexDirection: "column", gap: 8 }}>
+              <div><b style={{ color: C.text }}>24-hour window:</b> {windowRemaining(thread.lastInboundTs, nowTick).label}</div>
+              <div><b style={{ color: C.text }}>Pinned:</b> {pinned.includes(thread.phone) ? "Yes" : "No"} <button onClick={() => togglePin(thread.phone)} style={{ marginLeft: 6, border: "none", background: "transparent", color: C.plum, cursor: "pointer", fontWeight: 600, fontSize: 12 }}>{pinned.includes(thread.phone) ? "Unpin" : "Pin"}</button></div>
+              <div><b style={{ color: C.text }}>Starred messages:</b> {thread.messages.filter((m) => starred.includes(m.id)).length}</div>
+            </div>
+            {thread.referral && (
+              <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.plum, marginBottom: 4 }}>📣 Came from an ad</div>
+                <div style={{ fontSize: 12.5, color: C.text, fontWeight: 600 }}>{thread.referral.headline || thread.referral.body || "Click-to-WhatsApp ad"}</div>
+                {thread.referral.sourceUrl && <a href={thread.referral.sourceUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: C.goldDark }}>View ad ↗</a>}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* forward picker */}
+      {forwarding && (
+        <div onClick={() => { setForwarding(null); setForwardSearch(""); }} style={{ position: "fixed", inset: 0, zIndex: 11000, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 420, maxHeight: "80vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            <div style={{ padding: "14px 18px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h3 style={{ margin: 0, color: C.plum, fontSize: 18, fontFamily: SERIF, fontWeight: 600 }}>Forward to…</h3>
+              <button onClick={() => { setForwarding(null); setForwardSearch(""); }} style={{ background: "transparent", border: "none", fontSize: 22, cursor: "pointer", color: C.sub }}>×</button>
+            </div>
+            <div style={{ padding: "8px 14px 6px", fontSize: 12, color: C.sub, borderBottom: `1px solid ${C.border}` }}>
+              Forwarding: {forwarding.mediaId ? `🗂 ${forwarding.type || "media"}` : `“${(forwarding.text || "").slice(0, 60)}”`}
+            </div>
+            <div style={{ padding: 10 }}>
+              <input autoFocus value={forwardSearch} onChange={(e) => setForwardSearch(e.target.value)} placeholder="Search name or number" style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: `1px solid ${C.border}`, fontSize: 13, boxSizing: "border-box" }} />
+            </div>
+            <div style={{ overflowY: "auto", flex: 1 }}>
+              {convs
+                .filter((c) => {
+                  const q = forwardSearch.trim().toLowerCase();
+                  if (!q) return true;
+                  const digits = q.replace(/[^\d]/g, "");
+                  return (c.name || "").toLowerCase().includes(q) || !!(digits && c.phone.includes(digits));
+                })
+                .map((c) => (
+                  <button key={c.phone} onClick={() => forwardTo(c.phone)} style={{ width: "100%", textAlign: "left", border: "none", borderBottom: `1px solid ${C.border}`, background: "transparent", padding: "10px 16px", cursor: "pointer", display: "flex", gap: 10, alignItems: "center" }}>
+                    <div style={{ width: 34, height: 34, borderRadius: "50%", background: GOLD_BG, color: C.plumDark, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 15, flexShrink: 0 }}>{(c.name || c.phone).slice(0, 1).toUpperCase()}</div>
+                    <span style={{ fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name || `+${c.phone}`}</span>
+                  </button>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* image lightbox — full-screen viewer with a download button */}
+      {lightbox && (
+        <div onClick={() => setLightbox(null)} style={{ position: "fixed", inset: 0, zIndex: 11000, background: "rgba(0,0,0,.85)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={lightbox} alt="Photo" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "94vw", maxHeight: "86vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 10px 40px rgba(0,0,0,.5)" }} />
+          <a href={lightbox} download target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title="Download"
+            style={{ position: "fixed", top: 18, right: 64, background: "rgba(255,255,255,.14)", color: "#fff", borderRadius: 10, padding: "8px 14px", fontSize: 14, fontWeight: 600, textDecoration: "none" }}>⬇ Download</a>
+          <button onClick={() => setLightbox(null)} title="Close" style={{ position: "fixed", top: 18, right: 18, background: "rgba(255,255,255,.14)", color: "#fff", border: "none", borderRadius: 10, width: 38, height: 38, fontSize: 22, cursor: "pointer", lineHeight: 1 }}>×</button>
+        </div>
       )}
 
       {/* Send-approved-template modal */}

@@ -48,7 +48,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, live: isConfigured(), ...thread });
   }
 
-  const conversations = await getConversations(100);
+  // Return the full list (newest-first) so the dashboard can show every stored
+  // chat and search across all of them — not just the most recent 100.
+  const limitParam = Number(req.nextUrl.searchParams.get("limit"));
+  const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 5000) : 1000;
+  const conversations = await getConversations(limit);
   return NextResponse.json({ ok: true, live: isConfigured(), conversations });
 }
 
