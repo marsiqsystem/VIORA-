@@ -62,9 +62,28 @@ async function command(args) {
 
 // --- helpers -----------------------------------------------------------------
 
-/** Digits-only international phone (Meta gives no "+"). Empty string if none. */
+/**
+ * Canonical conversation key for a phone number. Meta gives no "+", and
+ * different code paths hand us the SAME human number in different shapes:
+ *   - inbound webhooks & the order pipeline give the full wa_id "91XXXXXXXXXX"
+ *   - a broadcast/admin send often gets a bare 10-digit "XXXXXXXXXX" pasted in
+ *   - some sources carry a trunk "0" or a "00" international prefix
+ * Keying by raw digits made each shape its OWN chat, so one customer showed up
+ * as 2–3 separate conversations (one per shape, each with a different name).
+ * Canonicalising to a single international-digits form (India default, override
+ * via DEFAULT_COUNTRY_CODE) means every shape of the same number maps to ONE
+ * key — so one person is always one chat. Mirrors wixOrder.normalizePhone.
+ * Empty string when there are no digits.
+ */
 function normPhone(p) {
-  return String(p || "").replace(/[^\d]/g, "");
+  let d = String(p || "").replace(/[^\d]/g, "");
+  if (!d) return "";
+  const cc = String(process.env.DEFAULT_COUNTRY_CODE || "91").replace(/\D/g, "") || "91";
+  if (d.startsWith("00")) d = d.slice(2); // 0091… -> 91…
+  if (d.length === 10) return cc + d; // bare national mobile -> add country code
+  if (d.length === 11 && d.startsWith("0")) return cc + d.slice(1); // 0XXXXXXXXXX -> ccXXXXXXXXXX
+  if (d.length > 11 && d.startsWith("0")) d = d.replace(/^0+/, ""); // 091… -> 91…
+  return d;
 }
 
 function convKey(phone) {
@@ -623,6 +642,159 @@ async function markRead(phone) {
   }
 }
 
+// --- MERGE DUPLICATE CONVERSATIONS (one-time repair) -------------------------
+//
+// Before normPhone canonicalised numbers, the same customer could end up under
+// several keys (e.g. "919876543210" from inbound + "9876543210" from a broadcast
+// send). This consolidates every group of index members that now canonicalise to
+// the SAME key into one conversation: messages concatenated (deduped by id,
+// re-sorted oldest→newest, capped), delivery ticks + error reasons merged, the
+// best name kept, counters combined. Stale keys are removed and the index is left
+// with one member per real number.
+//
+// `apply=false` (default) is a DRY RUN: it reports what WOULD merge and writes
+// nothing. Never throws; returns a summary for the admin route to show.
+
+/** Prefer a human name (has a letter) over a numeric/blank one; longer wins ties. */
+function pickBestName(names) {
+  const clean = names.map((n) => String(n || "").trim()).filter(Boolean);
+  if (!clean.length) return "";
+  const alpha = clean.filter((n) => /[a-z]/i.test(n));
+  const pool = alpha.length ? alpha : clean;
+  return pool.sort((a, b) => b.length - a.length)[0];
+}
+
+async function mergeDuplicates({ apply = false } = {}) {
+  if (!isConfigured()) return { ok: false, error: "KV not configured" };
+  try {
+    const members = (await command(["ZRANGE", INDEX_KEY, 0, -1])) || [];
+    // Group current index members by their canonical key.
+    const groups = new Map(); // canonical -> [rawMember, ...]
+    for (const m of members) {
+      const canon = normPhone(m);
+      if (!canon) continue;
+      if (!groups.has(canon)) groups.set(canon, []);
+      groups.get(canon).push(m);
+    }
+
+    const plan = [];
+    for (const [canon, raws] of groups.entries()) {
+      // A merge is needed when >1 member collapses here, OR the single member is
+      // not already stored under its canonical key.
+      const needs = raws.length > 1 || raws[0] !== canon;
+      if (needs) plan.push({ canon, sources: raws });
+    }
+
+    const summary = {
+      ok: true,
+      apply,
+      indexMembers: members.length,
+      groupsToMerge: plan.length,
+      conversationsRemoved: 0,
+      details: [],
+    };
+
+    for (const { canon, sources } of plan) {
+      // Gather every source conversation's data.
+      const convs = [];
+      const allMsgs = [];
+      const statusMerged = {};
+      const errMerged = {};
+      for (const src of sources) {
+        const conv = await readConv(src);
+        convs.push(conv);
+        const rawList = (await command(["LRANGE", msgsKey(src), 0, -1]).catch(() => [])) || [];
+        for (const r of rawList) {
+          const mm = safeParse(r, null);
+          if (mm) allMsgs.push(mm);
+        }
+        const st = hashToObj(await command(["HGETALL", statusKey(src)]).catch(() => ({})));
+        for (const [wamid, s] of Object.entries(st)) {
+          const cur = statusMerged[wamid];
+          if (cur === "failed") continue;
+          if (s === "failed" && (STATUS_RANK[cur] ?? -1) >= STATUS_RANK.delivered) continue;
+          if (s === "failed" || cur == null || (STATUS_RANK[s] ?? -1) > (STATUS_RANK[cur] ?? -1)) {
+            statusMerged[wamid] = s;
+          }
+        }
+        const er = hashToObj(await command(["HGETALL", errKey(src)]).catch(() => ({})));
+        Object.assign(errMerged, er);
+      }
+
+      // Dedupe messages by id, re-sort oldest→newest, cap.
+      const seen = new Set();
+      const msgs = allMsgs
+        .filter((m) => {
+          const id = m.id || `${m.dir}_${m.ts}`;
+          if (seen.has(id)) return false;
+          seen.add(id);
+          return true;
+        })
+        .sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0))
+        .slice(-MSG_CAP);
+
+      const last = msgs[msgs.length - 1] || null;
+      const mergedConv = {
+        phone: canon,
+        name: pickBestName(convs.map((c) => c.name)),
+        lastText: last ? String(last.text || "") : pickBestName(convs.map((c) => c.lastText)) || "",
+        lastTs: Math.max(0, ...convs.map((c) => Number(c.lastTs) || 0)),
+        unread: convs.reduce((s, c) => s + (Number(c.unread) || 0), 0),
+        lastInboundTs: Math.max(0, ...convs.map((c) => Number(c.lastInboundTs) || 0)),
+        lastOutboundTs: Math.max(0, ...convs.map((c) => Number(c.lastOutboundTs) || 0)),
+      };
+      const referral = convs.map((c) => c.referral).find(Boolean);
+      if (referral) mergedConv.referral = referral;
+
+      const staleSources = sources.filter((s) => s !== canon);
+      summary.details.push({
+        target: canon,
+        mergedFrom: sources,
+        messages: msgs.length,
+        name: mergedConv.name,
+        removed: staleSources,
+      });
+
+      if (!apply) continue;
+
+      // Write the consolidated conversation under the canonical key.
+      await command(["SET", convKey(canon), JSON.stringify(mergedConv)]);
+      await command(["DEL", msgsKey(canon)]);
+      if (msgs.length) {
+        await command(["RPUSH", msgsKey(canon), ...msgs.map((m) => JSON.stringify(m))]);
+      }
+      if (Object.keys(statusMerged).length) {
+        const flat = [];
+        for (const [k, v] of Object.entries(statusMerged)) flat.push(k, v);
+        await command(["DEL", statusKey(canon)]);
+        await command(["HSET", statusKey(canon), ...flat]);
+      }
+      if (Object.keys(errMerged).length) {
+        const flat = [];
+        for (const [k, v] of Object.entries(errMerged)) flat.push(k, typeof v === "string" ? v : JSON.stringify(v));
+        await command(["DEL", errKey(canon)]);
+        await command(["HSET", errKey(canon), ...flat]);
+        await command(["EXPIRE", errKey(canon), String(ERR_TTL_S)]);
+      }
+      await command(["ZADD", INDEX_KEY, mergedConv.lastTs || Date.now(), canon]);
+
+      // Remove the stale (non-canonical) duplicate keys.
+      for (const src of staleSources) {
+        await command(["DEL", convKey(src)]);
+        await command(["DEL", msgsKey(src)]);
+        await command(["DEL", statusKey(src)]);
+        await command(["DEL", errKey(src)]);
+        await command(["ZREM", INDEX_KEY, src]);
+        summary.conversationsRemoved++;
+      }
+    }
+
+    return summary;
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
 // --- AUTH (protect the inbox: it reads customer PII + sends as the brand) -----
 
 /**
@@ -662,6 +834,7 @@ export {
   markRead,
   deleteMessage,
   deleteConversation,
+  mergeDuplicates,
   authOk,
   authConfigured,
   keyFromRequest,
