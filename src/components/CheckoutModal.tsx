@@ -157,6 +157,8 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
     cart,
     getCart,
     clearCart,
+    removeItem,
+    updateQuantity,
     couponApplied,
     couponError,
     applyCoupon,
@@ -196,6 +198,8 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   const [couponCode, setCouponCode] = useState("");
   const [applyingCoupon, setApplyingCoupon] = useState(false);
   const [removingCoupon, setRemovingCoupon] = useState(false);
+  // Line being removed / re-quantified from the order summary.
+  const [busyLine, setBusyLine] = useState<string | null>(null);
   // "Don't miss out" prompt, shown once per visit when someone tries to leave.
   const [showExitPrompt, setShowExitPrompt] = useState(false);
   const exitPromptShown = useRef(false);
@@ -447,6 +451,30 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
     onClose();
   };
   requestCloseRef.current = requestClose;
+
+  // Let shoppers fix their order without leaving checkout. Removing the last
+  // piece closes checkout (nothing left to pay for).
+  const changeLineQuantity = async (li: any, quantity: number) => {
+    if (processing || busyLine) return;
+    setBusyLine(li._id);
+    try {
+      if (quantity < 1) {
+        await removeItem(wixClient, li._id);
+        const remaining = (useCartStore.getState().cart.lineItems || []).filter((l) => !isServiceLine(l));
+        if (!remaining.length) {
+          showToast("Your bag is now empty.", "info");
+          onClose();
+        }
+      } else {
+        await updateQuantity(wixClient, li._id, quantity);
+      }
+    } catch (err) {
+      console.error("[checkout] line update failed:", err);
+      showToast("Couldn't update your order. Please try again.", "error");
+    } finally {
+      setBusyLine(null);
+    }
+  };
 
   if (!mounted || !open) return null;
 
@@ -903,6 +931,8 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
               const src = thumbnail(li.image, 48);
               const qty = li.quantity || 1;
               const left = lowStockLeft(li);
+              const stockCap = li.availability?.quantityAvailable;
+              const busy = busyLine === li._id;
               return (
                 <li key={li._id} className="flex items-center gap-3">
                   <span className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden bg-gray-100 text-lg">
@@ -910,9 +940,43 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="line-clamp-1 block text-sm text-primary">{li.productName?.original}</span>
-                    <span className="text-xs text-gray-500">Qty {qty}</span>
                     {left !== null && (
-                      <span className="ml-2 text-xs font-semibold text-orange-600">Only {left} left</span>
+                      <span className="block text-xs font-semibold text-orange-600">Only {left} left</span>
+                    )}
+                    {isServiceLine(li) ? (
+                      <span className="text-xs text-gray-500">Qty {qty}</span>
+                    ) : (
+                      <span className={`mt-1 flex items-center gap-3 ${busy ? "opacity-50" : ""}`}>
+                        <span className="flex h-7 items-center border border-gray-300">
+                          <button
+                            type="button"
+                            onClick={() => changeLineQuantity(li, qty - 1)}
+                            disabled={busy || processing}
+                            aria-label={qty === 1 ? `Remove ${li.productName?.original}` : "Decrease quantity"}
+                            className="h-full w-7 text-primary disabled:opacity-40"
+                          >
+                            −
+                          </button>
+                          <span className="w-6 text-center text-xs font-semibold tabular-nums text-primary">{qty}</span>
+                          <button
+                            type="button"
+                            onClick={() => changeLineQuantity(li, qty + 1)}
+                            disabled={busy || processing || (typeof stockCap === "number" && qty >= stockCap)}
+                            aria-label="Increase quantity"
+                            className="h-full w-7 text-primary disabled:opacity-40"
+                          >
+                            +
+                          </button>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => changeLineQuantity(li, 0)}
+                          disabled={busy || processing}
+                          className="text-xs font-medium text-gray-500 underline underline-offset-2 hover:text-red-600 disabled:opacity-50"
+                        >
+                          Remove
+                        </button>
+                      </span>
                     )}
                   </span>
                   <span className="text-sm font-medium tabular-nums">
