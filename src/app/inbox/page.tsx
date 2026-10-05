@@ -274,6 +274,14 @@ function AdCard({ referral }: { referral?: Referral | null }) {
   );
 }
 
+// Frequently-pasted long replies (order confirmation + ad product-link). Kept as a
+// separate list so they can also be back-filled into an operator's saved quick-replies
+// via a one-time seed migration (see SEEDED_QR_VERSION below).
+const SEEDED_QUICK_REPLIES = [
+  "Your order #_____ is Confirmed ✅ You will receive the tracking link as soon as your order is picked up by the courier.\nNote - Do not share any type of OTP with any delivery executive as we don't take any kind of OTPs for COD orders.\nExchange policy is available for damaged products if you inform us within 48 hours of delivery.\nThank You,\nViora Jewels",
+  "Hello, Welcome to Viora Jewels 💎\nHere is the direct link of the product:\nhttps://www.viorajewel.in/rosa-blush-set\nIt's ₹519 only and if you do prepaid payment you will get another ₹25 discount!",
+];
+
 // Starter quick-replies (operator can edit/add; stored in localStorage after that).
 const DEFAULT_QUICK_REPLIES = [
   "Hello! Thank you for contacting Viora Jewels 💎 How can we help you?",
@@ -282,7 +290,12 @@ const DEFAULT_QUICK_REPLIES = [
   "Your order has been shipped 🚚 You'll receive tracking details soon.",
   "Could you please confirm your order by replying YES?",
   "Thank you for shopping with Viora Jewels! ❤️",
+  ...SEEDED_QUICK_REPLIES,
 ];
+
+// Bump this when SEEDED_QUICK_REPLIES changes; new entries are appended once to an
+// operator's already-saved quick-replies (deletions they made are preserved).
+const SEEDED_QR_VERSION = 1;
 
 // Render message text with clickable links (ops/customers paste product URLs a lot).
 const URL_RE = /(https?:\/\/[^\s]+)/g;
@@ -362,8 +375,18 @@ export default function InboxPage() {
   const [quickOpen, setQuickOpen] = useState(false);              // quick-replies tray
   const [quickEditing, setQuickEditing] = useState(false);        // quick-replies editor
   const [quickReplies, setQuickReplies] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem("viora_inbox_quickreplies") || "null") || DEFAULT_QUICK_REPLIES; }
-    catch { return DEFAULT_QUICK_REPLIES; }
+    try {
+      const saved: string[] | null = JSON.parse(localStorage.getItem("viora_inbox_quickreplies") || "null");
+      if (!saved) return DEFAULT_QUICK_REPLIES; // fresh operator — full defaults (incl. seeded)
+      // One-time back-fill: append any new SEEDED_QUICK_REPLIES this operator hasn't seen yet.
+      const seenVer = Number(localStorage.getItem("viora_inbox_quickreplies_seedver") || "0");
+      if (seenVer < SEEDED_QR_VERSION) {
+        const missing = SEEDED_QUICK_REPLIES.filter((s) => !saved.includes(s));
+        localStorage.setItem("viora_inbox_quickreplies_seedver", String(SEEDED_QR_VERSION));
+        if (missing.length) return [...saved, ...missing];
+      }
+      return saved;
+    } catch { return DEFAULT_QUICK_REPLIES; }
   });
   const [chatSearchOpen, setChatSearchOpen] = useState(false);    // in-chat find bar
   const [chatSearch, setChatSearch] = useState("");
