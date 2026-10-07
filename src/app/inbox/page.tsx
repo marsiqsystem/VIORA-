@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const MOCK = process.env.NEXT_PUBLIC_INBOX_MOCK === "1";
-const POLL_MS = 4000;
+const POLL_MS = 6000;
 const KEY_STORE = "viora_inbox_key";
 // Every approved Viora template has an IMAGE header; when sending one manually
 // from a chat we attach this default header image (the brand logo) so the send
@@ -798,14 +798,20 @@ export default function InboxPage() {
   }, [key]);
 
   // --- polling ---
+  // Keep the poll light so it doesn't saturate a slow mobile connection (which
+  // was making an open chat take ages to load): skip entirely while the tab is
+  // hidden, and on a phone don't re-fetch the whole conversation list while a
+  // thread is open (the list is off-screen then) — just refresh the open thread.
   useEffect(() => {
     if (MOCK || !authed) return;
     const id = setInterval(() => {
-      loadConvs();
-      if (activeRef.current) loadThread(activeRef.current);
+      if (typeof document !== "undefined" && document.hidden) return;
+      const inThread = !!activeRef.current;
+      if (!(isMobile && inThread)) loadConvs();
+      if (inThread) loadThread(activeRef.current!);
     }, POLL_MS);
     return () => clearInterval(id);
-  }, [authed, loadConvs, loadThread]);
+  }, [authed, loadConvs, loadThread, isMobile]);
 
   // --- keep the 24h countdown fresh (1-min tick; poll already refreshes data) ---
   useEffect(() => {
@@ -898,6 +904,10 @@ export default function InboxPage() {
   }
 
   // --- passcode gate ---
+  // While a key is set but we haven't confirmed it yet, the conversation fetch
+  // is in flight — show the operator we're working (on slow data this can take a
+  // few seconds) instead of a dead "Unlock" button that looks like nothing fired.
+  const checking = !!key && !authError;
   if (!authed && !MOCK) {
     return (
       <Centered>
@@ -914,7 +924,7 @@ export default function InboxPage() {
             style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 15, marginBottom: 12, boxSizing: "border-box" }}
           />
           {authError && <div style={{ color: "#c0392b", fontSize: 13, marginBottom: 10 }}>{authError}</div>}
-          <button onClick={unlock} style={btn(C.plum)}>Unlock</button>
+          <button onClick={unlock} disabled={checking} style={{ ...btn(C.plum), opacity: checking ? 0.65 : 1, cursor: checking ? "default" : "pointer" }}>{checking ? "Unlocking…" : "Unlock"}</button>
         </div>
       </Centered>
     );
@@ -930,9 +940,9 @@ export default function InboxPage() {
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", height: "100dvh", background: C.bgChat, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif", color: C.text }}>
-      {/* LEFT: conversation list */}
-      {showList && (
-      <aside style={{ width: isMobile ? "100%" : 340, minWidth: isMobile ? 0 : 300, borderRight: isMobile ? "none" : `1px solid ${C.border}`, background: C.bgList, display: "flex", flexDirection: "column", }}>
+      {/* LEFT: conversation list — stays MOUNTED (display toggled) so its scroll
+          position is kept when you open a chat and come back on mobile. */}
+      <aside style={{ width: isMobile ? "100%" : 340, minWidth: isMobile ? 0 : 300, borderRight: isMobile ? "none" : `1px solid ${C.border}`, background: C.bgList, display: showList ? "flex" : "none", flexDirection: "column", }}>
         <header style={{ background: HEADER_BG, color: "#fff", padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `2px solid ${C.gold}` }}>
           <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.1 }}>
             <span style={{ fontFamily: SERIF, fontSize: 25, fontWeight: 600, letterSpacing: 0.3 }}>Viora</span>
@@ -1088,11 +1098,9 @@ export default function InboxPage() {
           })()}
         </div>
       </aside>
-      )}
 
       {/* RIGHT: thread */}
-      {showThread && (
-      <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, position: "relative" }}>
+      <main style={{ flex: 1, display: showThread ? "flex" : "none", flexDirection: "column", minWidth: 0, position: "relative" }}>
         {!thread ? (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: C.sub, flexDirection: "column", gap: 8 }}>
             <div style={{ fontSize: 40 }}>💬</div>
@@ -1415,7 +1423,6 @@ export default function InboxPage() {
           </>
         )}
       </main>
-      )}
 
       {/* click-away layer to dismiss the header / message option menus */}
       {(headerMenu || msgMenuId) && (
