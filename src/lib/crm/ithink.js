@@ -128,6 +128,19 @@ function buildOrderPayload(o) {
         },
       ];
 
+  // iThink validates `total_amount` against the SUM of the product lines it was
+  // sent ("Invalid order total Amount (Calculated by System: X, Entered by
+  // User: Y)"). Our COD orders carry a "Delivery + COD Charges" fee line in the
+  // Wix total (o.amount) that we deliberately DROP from `products` above (so it
+  // isn't counted as a unit) — which made o.amount exceed the product sum by the
+  // COD fee and got every COD booking rejected. So compute total_amount from the
+  // exact products we send (always matches iThink's figure); the full COD fee is
+  // still collected via `cod_amount` below, not here.
+  const productsTotal = products.reduce(
+    (sum, p) => sum + (Number(p.product_price) || 0) * (Number(p.product_quantity) || 1),
+    0
+  );
+
   // order = "VJ-#<Wix number>" (same convention as Velocity/Shiprocket) so the
   // courier dashboard id matches the Wix/site/email order and the status webhook
   // correlates via wix.findOrderByNumber (which strips the "VJ-#" prefix). Falls
@@ -143,7 +156,7 @@ function buildOrderPayload(o) {
     order: orderRef,
     sub_order: "",
     order_date: formatOrderDate(new Date()),
-    total_amount: String(amount),
+    total_amount: String(productsTotal),
     name: (o.name || "Customer").trim(),
     company_name: "",
     add: address.line1 || "",
