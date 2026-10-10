@@ -130,16 +130,27 @@ function buildOrderPayload(o) {
 
   // iThink validates `total_amount` against the SUM of the product lines it was
   // sent ("Invalid order total Amount (Calculated by System: X, Entered by
-  // User: Y)"). Our COD orders carry a "Delivery + COD Charges" fee line in the
-  // Wix total (o.amount) that we deliberately DROP from `products` above (so it
-  // isn't counted as a unit) — which made o.amount exceed the product sum by the
-  // COD fee and got every COD booking rejected. So compute total_amount from the
-  // exact products we send (always matches iThink's figure); the full COD fee is
-  // still collected via `cod_amount` below, not here.
+  // User: Y)"). Our COD orders carry a "Delivery + COD Charges" fee (e.g. ₹49) in
+  // the Wix total (o.amount) that we DROP from `products` above (so it isn't a
+  // shippable unit) — so the product sum is short by that fee.
   const productsTotal = products.reduce(
     (sum, p) => sum + (Number(p.product_price) || 0) * (Number(p.product_quantity) || 1),
     0
   );
+
+  // For COD, the amount the courier COLLECTS (cod_amount) is the full o.amount
+  // incl. that fee. If total_amount stayed at the product sum it would be LESS
+  // than cod_amount, and iThink's panel/invoice then showed the lower figure
+  // (e.g. ₹479 instead of ₹528), making it look like the ₹49 wasn't collected.
+  // Fold the fee into the first product's price so the product sum == o.amount:
+  // total_amount, cod_amount and the panel all read the full amount, AND iThink's
+  // "sum of products" validation still passes (we add no line/unit, so the parcel
+  // weight & volumetric size computed above are unchanged). Prepaid has no fee.
+  const codFee = isCOD ? Math.max(0, Math.round(amount - productsTotal)) : 0;
+  if (codFee > 0 && products.length) {
+    products[0].product_price = String((Number(products[0].product_price) || 0) + codFee);
+  }
+  const declaredTotal = productsTotal + codFee;
 
   // order = "VJ-#<Wix number>" (same convention as Velocity/Shiprocket) so the
   // courier dashboard id matches the Wix/site/email order and the status webhook
@@ -156,7 +167,7 @@ function buildOrderPayload(o) {
     order: orderRef,
     sub_order: "",
     order_date: formatOrderDate(new Date()),
-    total_amount: String(productsTotal),
+    total_amount: String(declaredTotal),
     name: (o.name || "Customer").trim(),
     company_name: "",
     add: address.line1 || "",
