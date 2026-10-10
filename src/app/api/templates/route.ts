@@ -43,6 +43,36 @@ type ParsedTemplate = {
 // create-* route), because it drives how the composer builds each send.
 const FALLBACK_TEMPLATES: ParsedTemplate[] = [
   {
+    // UNIVERSAL order-delay notice (UTILITY). APPROVED by Meta, but the Graph
+    // /message_templates list omits it even post-approval, so it never shows in
+    // the inbox/broadcast composer without this fallback. Metadata mirrors the
+    // approved template: IMAGE header (per-order product photo), 5 body vars used
+    // once each. The bodyText below drives only the composer PREVIEW — the copy
+    // actually delivered is Meta's approved template. Var mapping is authoritative:
+    // {{1}}=name, {{2}}=order id, {{3}}=product, {{4}}=dispatch, {{5}}=delivery.
+    name: "order_delay_notice_v1",
+    language: "en",
+    category: "UTILITY",
+    bodyText:
+      "Hi {{1}}, thank you for shopping with Viora Jewels! 💛\n\n" +
+      "Due to an unusually heavy order rush, your order is taking a little longer " +
+      "than usual to dispatch. We're sorry for the wait and are handling it on priority.\n\n" +
+      "🛍️ Order ID: {{2}}\n" +
+      "💎 Product: {{3}}\n" +
+      "🚚 Dispatch: {{4}}\n" +
+      "📦 Expected delivery: {{5}}\n\n" +
+      "You'll receive your tracking ID the moment it's dispatched.\n" +
+      "─────────\n" +
+      "Namaste {{1}}! Bahut zyada orders ki wajah se aapka order thoda late ho raha " +
+      "hai. Iske liye maafi chahte hain — aapka parcel priority par bheja ja raha hai " +
+      "aur dispatch hote hi tracking ID mil jayegi. Dhanyavaad! 🙏",
+    bodyVars: 5, // {{1}}=name {{2}}=order id {{3}}=product {{4}}=dispatch {{5}}=delivery
+    headerFormat: "IMAGE", // operator supplies the product photo at send time
+    headerVars: 0,
+    hasUrlButton: false,
+    urlButtonIndex: null,
+  },
+  {
     name: "rakhi_luxe_gift_v1",
     language: "en_US",
     category: "MARKETING",
