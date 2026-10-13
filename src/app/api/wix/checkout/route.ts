@@ -8,6 +8,7 @@ import { COD_CHARGE, PREPAID_DISCOUNT } from "@/lib/checkoutPricing";
 import { makePaymentSeal } from "@/lib/crm/paymentSeal";
 import { fetchRazorpayPayment } from "@/lib/razorpayVerify";
 import { claimOnce, release } from "@/lib/crm/idempotency";
+import { markHandled as clearPendingSnapshot } from "@/lib/crm/rzpPending";
 import * as checkoutLeads from "@/lib/crm/checkoutLeads";
 
 type CheckoutAddressPayload = {
@@ -24,6 +25,10 @@ type CheckoutAddressPayload = {
   // Sent by the browser for reference only. What was actually paid is always
   // read from Razorpay (see fetchRazorpayPayment below).
   razorpayAmount?: string;
+  // The Razorpay ORDER id (not the payment id). Used only to clear the
+  // pending-order snapshot once this order is created, so the payment.captured
+  // webhook fallback knows the browser already succeeded.
+  razorpayOrderId?: string;
   // Still sent by the checkout but IGNORED: the COD charge and the amount the
   // courier collects are worked out here, never taken from the browser.
   codCharge?: string | number;
@@ -194,6 +199,7 @@ export async function POST(req: Request) {
     const postalCode = normalizeText(details?.postalCode);
     const paymentMethod = details?.paymentMethod === "PREPAID" ? "PREPAID" : "COD";
     const razorpayPaymentId = normalizeText(details?.razorpayPaymentId);
+    const razorpayOrderId = normalizeText(details?.razorpayOrderId);
     // COD delivery + handling charge — the server's own figure. (It used to come
     // from the browser, as did the cash amount to collect, so a tampered request
     // could set "collect ₹1" on a ₹599 order.)
@@ -771,6 +777,12 @@ export async function POST(req: Request) {
       });
     } catch (capiErr) {
       console.error("Server-side Purchase CAPI prep failed:", capiErr);
+    }
+
+    // Order created — clear the pending-order snapshot so the payment.captured
+    // webhook fallback sees the browser already succeeded and does nothing.
+    if (razorpayOrderId) {
+      await clearPendingSnapshot(razorpayOrderId);
     }
 
     return NextResponse.json({

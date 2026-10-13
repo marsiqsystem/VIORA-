@@ -529,7 +529,8 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   // For COD, `codCharge` is applied server-side so the order total = subtotal + ₹49.
   const finalizeWixOrder = async (
     method: PaymentMethod,
-    razorpayPaymentId?: string
+    razorpayPaymentId?: string,
+    razorpayOrderId?: string
   ): Promise<string> => {
     const checkoutResult = await wixClient.currentCart.createCheckoutFromCurrentCart({
       channelType: currentCart.ChannelType.WEB,
@@ -556,6 +557,10 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
           postalCode: pincode,
           paymentMethod: method,
           razorpayPaymentId,
+          // The Razorpay order id — lets the server clear the pending-order
+          // snapshot so the payment.captured webhook fallback knows this order
+          // was created by the browser.
+          razorpayOrderId,
           // For reference only — the server records what Razorpay says was paid.
           razorpayAmount: method === "PREPAID" ? total.toFixed(2) : undefined,
           // COD delivery + handling charge to add onto the Wix order so the
@@ -637,6 +642,19 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   // become orders. Note: rzp.open() returns immediately — completion happens in
   // the handler/dismiss/failure callbacks, which own setProcessing(false).
   const runPrepaidOrder = async (contentIds: string[]) => {
+    // Snapshot the cart's catalog references so the server can rebuild this order
+    // from a payment.captured webhook if the browser never finishes it (the
+    // orphan-payment safety net). Read-only + best-effort — never blocks payment.
+    let pendingItems: { catalogReference: any; quantity: number }[] = [];
+    try {
+      const cart: any = await wixClient.currentCart.getCurrentCart();
+      pendingItems = (cart?.lineItems || [])
+        .map((li: any) => ({ catalogReference: li?.catalogReference, quantity: li?.quantity || 1 }))
+        .filter((x: any) => x.catalogReference);
+    } catch (e) {
+      console.warn("Could not snapshot cart for webhook fallback:", e);
+    }
+
     // 1. Create the Razorpay order on the server (KEY_SECRET stays server-side).
     const orderResponse = await fetch("/api/razorpay", {
       method: "POST",
@@ -646,6 +664,21 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
         currency: "INR",
         receipt: `viora_${Date.now()}`,
         notes: { email: email.trim(), phone },
+        // Fallback snapshot (see above). The webhook uses this only if the
+        // browser fails to create the order after payment.
+        pending: {
+          items: pendingItems,
+          details: {
+            email: email.trim(),
+            fullName: fullName.trim(),
+            phone,
+            addressLine1: address.trim(),
+            addressLine2: landmark.trim(),
+            city: city.trim(),
+            state,
+            postalCode: pincode,
+          },
+        },
       }),
     });
     const orderData = await orderResponse.json();
@@ -705,7 +738,11 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
           }
 
           // 5. Payment confirmed — finalize the Wix order and finish up.
-          const wixOrderId = await finalizeWixOrder("PREPAID", response.razorpay_payment_id);
+          const wixOrderId = await finalizeWixOrder(
+            "PREPAID",
+            response.razorpay_payment_id,
+            response.razorpay_order_id
+          );
           completeOrder(wixOrderId, contentIds);
         } catch (err: any) {
           console.error("Prepaid order finalization failed:", err);
