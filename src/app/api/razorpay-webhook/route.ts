@@ -12,29 +12,36 @@
 //      first; when it does it DELETES the snapshot, so this webhook then finds
 //      nothing to do.
 //   2. Even in a race, /api/wix/checkout claims the Razorpay payment id
-//      (`paymentUsedKey`) atomically and returns 409 if that payment already
-//      made an order — so a given payment can only ever create ONE order.
+//      (`paymentUsedKey`) atomically — so a given payment can only ever create
+//      ONE order. The loser gets that order back (alreadyCreated), so a browser
+//      that arrives after the webhook still lands on the success page.
 //
 // Configure in Razorpay Dashboard → Settings → Webhooks:
 //   URL:    https://www.viorajewel.in/api/razorpay-webhook
 //   Secret: must equal env RAZORPAY_WEBHOOK_SECRET
 //   Event:  payment.captured
 //
-// Always returns 200 (except a bad signature → 401) so Razorpay doesn't hammer
-// retries; real failures are logged and the snapshot is kept for the next retry.
+// Replies 200 at once (except a bad signature → 401) and recovers the order in
+// the background (waitUntil); real failures are logged and the snapshot is kept
+// so Razorpay's next delivery of the event can try again.
 
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { wixAdminClientServer } from "@/lib/wixAdminClientServer";
+import { waitUntil } from "@vercel/functions";
 import { getPending, markHandled } from "@/lib/crm/rzpPending";
+import { claimOnce, release } from "@/lib/crm/idempotency";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 // Give the browser a head start to finish the normal flow (and delete the
-// snapshot) before we step in. The webhook is only a fallback.
-const GRACE_MS = 12_000;
+// snapshot) before we step in. The webhook is only a fallback. Shoppers in
+// Instagram/Facebook's in-app browser can take ~30 s to come back from the UPI
+// app, so 12 s made the webhook beat a browser that was about to succeed.
+// (Runs after the reply to Razorpay; must stay well under maxDuration.)
+const GRACE_MS = 30_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function verifySignature(rawBody: string, signature: string, secret: string): boolean {
@@ -89,77 +96,114 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, handledBy: "client-or-missing" }, { status: 200 });
   }
 
-  // 2) Let the browser finish first, then re-check.
+  // 2) Answer Razorpay NOW and do the rest in the background. Razorpay waits only
+  //    ~5 s for a reply; sleeping through the grace window inside the request
+  //    made every slow-browser delivery count as a failed webhook (Razorpay
+  //    retries those and disables a webhook that keeps failing).
+  //    Razorpay often delivers the same event more than once — only one
+  //    background recovery runs per Razorpay order.
+  const lock = await claimOnce(`rzp_webhook_inflight:${orderId}`, 120);
+  if (!lock.claimed) {
+    return NextResponse.json({ ok: true, handledBy: "already-running" }, { status: 200 });
+  }
+  const origin =
+    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
+    req.nextUrl.origin ||
+    "https://www.viorajewel.in";
+  waitUntil(
+    recoverOrphan({ orderId, paymentId, amount, contact, emailFromPay, origin }).finally(() =>
+      lock.degraded ? undefined : release(`rzp_webhook_inflight:${orderId}`)
+    )
+  );
+  return NextResponse.json({ ok: true, queued: true }, { status: 200 });
+}
+
+async function recoverOrphan({
+  orderId,
+  paymentId,
+  amount,
+  contact,
+  emailFromPay,
+  origin,
+}: {
+  orderId: string;
+  paymentId: string;
+  amount: number;
+  contact: string;
+  emailFromPay: string;
+  origin: string;
+}) {
+  // Let the browser finish first, then re-check.
   await sleep(GRACE_MS);
   const pending = await getPending(orderId);
-  if (!pending) {
-    return NextResponse.json({ ok: true, handledBy: "client" }, { status: 200 });
-  }
+  if (!pending) return;
 
-  // 3) The browser did NOT complete the order — build it now from the snapshot.
+  // The browser did NOT complete the order — build it now from the snapshot.
   const items = Array.isArray(pending.items) ? pending.items : [];
   if (!items.length) {
     console.error(
       `[rzp-webhook] ORPHAN but no cart snapshot — manual recovery needed. ` +
         `payment=${paymentId} order=${orderId} amount=₹${amount} contact=${contact} email=${emailFromPay}`
     );
-    return NextResponse.json({ ok: true, orphan: true, reason: "no items" }, { status: 200 });
+    return;
   }
 
-  try {
-    const wixClient = wixAdminClientServer();
-    const created: any = await wixClient.checkout.createCheckout({
-      lineItems: items,
-      channelType: "WEB",
-    } as any);
-    const checkoutId = created?._id;
-    if (!checkoutId) throw new Error("Wix returned an empty checkoutId.");
+  // Razorpay won't redeliver an event we already answered 200, so retry once
+  // here. If both attempts fail the snapshot stays and the error log above is
+  // the alert — recover that payment by hand.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    if (attempt > 1) await sleep(4_000);
+    try {
+      const wixClient = wixAdminClientServer();
+      const created: any = await wixClient.checkout.createCheckout({
+        lineItems: items,
+        channelType: "WEB",
+      } as any);
+      const checkoutId = created?._id;
+      if (!checkoutId) throw new Error("Wix returned an empty checkoutId.");
 
-    const origin =
-      process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
-      req.nextUrl.origin ||
-      "https://www.viorajewel.in";
+      const resp = await fetch(`${origin}/api/wix/checkout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          checkoutId,
+          marketingConsent: false,
+          details: {
+            ...(pending.details || {}),
+            paymentMethod: "PREPAID",
+            razorpayPaymentId: paymentId,
+            razorpayAmount: String(amount.toFixed(2)),
+            razorpayOrderId: orderId,
+          },
+        }),
+      });
 
-    const resp = await fetch(`${origin}/api/wix/checkout`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        checkoutId,
-        marketingConsent: false,
-        details: {
-          ...(pending.details || {}),
-          paymentMethod: "PREPAID",
-          razorpayPaymentId: paymentId,
-          razorpayAmount: String(amount.toFixed(2)),
-          razorpayOrderId: orderId,
-        },
-      }),
-    });
+      const result = await resp.json().catch(() => ({}));
+      if (resp.ok && result?.alreadyCreated) {
+        // The browser won the race and already made this order.
+        await markHandled(orderId);
+        return;
+      }
+      if (resp.status === 409) {
+        await markHandled(orderId);
+        return;
+      }
+      if (!resp.ok || !result?.orderId) {
+        console.error(
+          `[rzp-webhook] order create FAILED (attempt ${attempt}): payment=${paymentId} order=${orderId} ` +
+            `status=${resp.status} err=${result?.error || "?"}`
+        );
+        continue;
+      }
 
-    if (resp.status === 409) {
-      // The browser already used this payment for an order (it won the race).
       await markHandled(orderId);
-      return NextResponse.json({ ok: true, handledBy: "client-race" }, { status: 200 });
-    }
-
-    const result = await resp.json().catch(() => ({}));
-    if (!resp.ok || !result?.orderId) {
-      // Keep the snapshot so Razorpay's next retry can try again.
-      console.error(
-        `[rzp-webhook] order create FAILED (will retry): payment=${paymentId} order=${orderId} ` +
-          `status=${resp.status} err=${result?.error || "?"}`
+      console.log(
+        `[rzp-webhook] RECOVERED orphan → created Wix order #${result.order?.number || result.orderId} ` +
+          `from payment ${paymentId} (₹${amount}).`
       );
-      return NextResponse.json({ ok: false, error: result?.error || "create failed" }, { status: 200 });
+      return;
+    } catch (e: any) {
+      console.error(`[rzp-webhook] recovery error (attempt ${attempt}) for payment ${paymentId}:`, e?.message || e);
     }
-
-    await markHandled(orderId);
-    console.log(
-      `[rzp-webhook] RECOVERED orphan → created Wix order #${result.order?.number || result.orderId} ` +
-        `from payment ${paymentId} (₹${amount}).`
-    );
-    return NextResponse.json({ ok: true, created: result.orderId }, { status: 200 });
-  } catch (e: any) {
-    console.error(`[rzp-webhook] recovery error for payment ${paymentId}:`, e?.message || e);
-    return NextResponse.json({ ok: false, error: e?.message || "error" }, { status: 200 });
   }
 }

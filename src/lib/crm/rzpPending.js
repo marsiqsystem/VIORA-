@@ -87,4 +87,39 @@ async function markHandled(orderId) {
   }
 }
 
-export { savePending, getPending, markHandled, isConfigured };
+// Which Wix order a captured payment became. Lets /api/wix/checkout answer a
+// late browser with the order the webhook already created (instead of a
+// "payment already used" error after the shopper has paid).
+const ORDER_KEY = (paymentId) => `rzp_payment_order:${String(paymentId || "").trim()}`;
+const ORDER_TTL = 60 * 60 * 24 * 180; // same as the payment-used claim
+
+/** Record the Wix order created from a payment. Best-effort; never throws. */
+async function rememberPaymentOrder(paymentId, orderId) {
+  if (!paymentId || !orderId || !isConfigured()) return;
+  try {
+    await command(["SET", ORDER_KEY(paymentId), String(orderId), "EX", String(ORDER_TTL)]);
+  } catch (e) {
+    console.warn("[rzpPending] rememberPaymentOrder failed:", e?.message || e);
+  }
+}
+
+/** The Wix order id created from a payment, or null. Never throws. */
+async function findPaymentOrder(paymentId) {
+  if (!paymentId || !isConfigured()) return null;
+  try {
+    const v = await command(["GET", ORDER_KEY(paymentId)]);
+    return v ? String(v) : null;
+  } catch (e) {
+    console.warn("[rzpPending] findPaymentOrder failed:", e?.message || e);
+    return null;
+  }
+}
+
+export {
+  savePending,
+  getPending,
+  markHandled,
+  isConfigured,
+  rememberPaymentOrder,
+  findPaymentOrder,
+};

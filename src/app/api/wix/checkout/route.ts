@@ -8,7 +8,11 @@ import { COD_CHARGE, PREPAID_DISCOUNT } from "@/lib/checkoutPricing";
 import { makePaymentSeal } from "@/lib/crm/paymentSeal";
 import { fetchRazorpayPayment } from "@/lib/razorpayVerify";
 import { claimOnce, release } from "@/lib/crm/idempotency";
-import { markHandled as clearPendingSnapshot } from "@/lib/crm/rzpPending";
+import {
+  markHandled as clearPendingSnapshot,
+  rememberPaymentOrder,
+  findPaymentOrder,
+} from "@/lib/crm/rzpPending";
 import * as checkoutLeads from "@/lib/crm/checkoutLeads";
 
 type CheckoutAddressPayload = {
@@ -34,6 +38,9 @@ type CheckoutAddressPayload = {
   codCharge?: string | number;
   codAmount?: string;
 };
+
+// Room for the "payment already became an order" wait below (up to ~20 s).
+export const maxDuration = 60;
 
 // A payment id may pay for exactly one order.
 const PAYMENT_USED_TTL_S = 60 * 60 * 24 * 180;
@@ -229,6 +236,24 @@ export async function POST(req: Request) {
         }
         const claim = await claimOnce(paymentUsedKey(razorpayPaymentId), PAYMENT_USED_TTL_S);
         if (!claim.claimed) {
+          // Usually the payment.captured webhook got there first (the shopper's
+          // UPI app took a while to hand back to the browser). That order IS
+          // this shopper's — hand it back so they land on the success page
+          // instead of "order could not be completed" after paying. The other
+          // request may still be creating it, so wait a little.
+          const sameOrder =
+            !razorpayOrderId || !payment.razorpayOrderId || payment.razorpayOrderId === razorpayOrderId;
+          if (sameOrder && payment.notes?.purpose !== "cod-switch") {
+            for (let i = 0; i < 10; i++) {
+              const existing = await findPaymentOrder(razorpayPaymentId);
+              if (existing) {
+                console.log(`[checkout] payment ${razorpayPaymentId} already became order ${existing} — returning it.`);
+                if (razorpayOrderId) await clearPendingSnapshot(razorpayOrderId);
+                return NextResponse.json({ checkoutId, orderId: existing, alreadyCreated: true });
+              }
+              await new Promise((r) => setTimeout(r, 2000));
+            }
+          }
           return NextResponse.json(
             { error: "This payment has already been used for an order." },
             { status: 409 }
@@ -397,6 +422,9 @@ export async function POST(req: Request) {
     }
     // The payment now belongs to this order for good.
     pendingPaymentClaim = "";
+    if (paymentMethod === "PREPAID" && razorpayPaymentId) {
+      await rememberPaymentOrder(razorpayPaymentId, orderId);
+    }
 
     // No reminder for a shopper who just ordered.
     await checkoutLeads.removeByPhone(phone);
