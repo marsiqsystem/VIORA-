@@ -787,8 +787,8 @@ function ShipQueueTab({ orders, loading, apiKey, onChanged }: { orders: Order[];
 
   const rows = useMemo(() => {
     const list = orders.filter(isPendingShip).map((o) => ({ o, r: recoFor(o) as Reco }));
-    const order = { CALL: 0, MESSAGE: 1, SHIP: 2 } as Record<string, number>;
-    return list.sort((a, b) => (order[a.r.bucket] - order[b.r.bucket]) || ((b.r.rtoPct ?? -1) - (a.r.rtoPct ?? -1)));
+    // Sorted by order number (ascending) so the queue reads in order.
+    return list.sort((a, b) => (parseInt(a.o.orderId, 10) || 0) - (parseInt(b.o.orderId, 10) || 0));
   }, [orders]);
   const counts = useMemo(() => {
     const c = { SHIP: 0, MESSAGE: 0, CALL: 0 };
