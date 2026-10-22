@@ -748,7 +748,7 @@ const BUCKET_STYLE: Record<string, { bg: string; fg: string }> = {
 };
 const isPendingShip = (o: Order) =>
   !(o.awb && !/^MOCK/i.test(o.awb)) &&
-  !["cancelled", "delivered", "rto", "dispatched", "out_for_delivery", "created"].includes(o.status);
+  !["cancelled", "on_hold", "delivered", "rto", "dispatched", "out_for_delivery", "created"].includes(o.status);
 const rtoColor = (p: number | null) =>
   p == null ? C.sub : p > 70 ? C.bad : p >= 50 ? C.warn : C.ok;
 const sqBtn = (bg: string): React.CSSProperties => ({
@@ -899,10 +899,10 @@ function ShipQueueTab({ orders, loading, apiKey, onChanged }: { orders: Order[];
     <div>
       {/* engine summary */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-        {(["CALL", "MESSAGE", "SHIP"] as const).map((b) => (
+        {(["CALL", "SHIP"] as const).map((b) => (
           <button key={b} onClick={() => setFilter(filter === b ? "ALL" : b)}
             style={{ cursor: "pointer", border: `1px solid ${filter === b ? BUCKET_STYLE[b].fg : C.border}`, background: C.card, borderRadius: 12, padding: "10px 16px", textAlign: "left", minWidth: 120 }}>
-            <div style={{ fontSize: 12, color: C.sub, fontWeight: 600 }}>{b === "CALL" ? "📞 Call (RTO>70%)" : b === "MESSAGE" ? "📩 Message-confirm" : "🟢 Ship-ready"}</div>
+            <div style={{ fontSize: 12, color: C.sub, fontWeight: 600 }}>{b === "CALL" ? "📞 Call first (RTO ≥ 80%)" : "🟢 Ship-ready (< 80%)"}</div>
             <div style={{ fontSize: 24, fontWeight: 700, color: BUCKET_STYLE[b].fg }}>{counts[b]}</div>
           </button>
         ))}

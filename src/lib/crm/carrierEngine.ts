@@ -94,12 +94,12 @@ export function recommend(o: { paymentMode?: string; address?: Addr }): Reco {
   const r = engine.stateRTO[st] || null;
   const payment: "COD" | "PREPAID" = /prepaid/i.test(String(o.paymentMode || "")) ? "PREPAID" : "COD";
   const flags = addrFlags(o.address || null);
+  // Operating rule (2026-10-22): ship everything under 80% RTO; only call the
+  // >=80% ones first. Prepaid always ships. (Chasing confirmation on mid-RTO
+  // orders was losing more sales to cancellation than it saved.)
   let bucket: Bucket;
   if (payment === "PREPAID") bucket = "SHIP";
-  else if (r == null) bucket = "MESSAGE";
-  else if (r.rtoPct > 70) bucket = "CALL";
-  else if (r.rtoPct >= 50) bucket = "MESSAGE";
+  else if (r != null && r.rtoPct >= 80) bucket = "CALL";
   else bucket = "SHIP";
-  if (bucket === "SHIP" && flags.length) bucket = "MESSAGE"; // thin/no-pin COD → verify first
   return { state: st, rtoPct: r?.rtoPct ?? null, sample: r?.res ?? 0, best: engine.bestByState[st] || [], payment, bucket, flags, cleanAddr: cleanAddress(o.address || null) };
 }
