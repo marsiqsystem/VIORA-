@@ -63,11 +63,15 @@ export function cleanAddress(a: Addr): string {
     if (t && !segs.some((s) => s.toLowerCase() === t.toLowerCase())) segs.push(t);
   };
   [a.line1, a.line2, a.line3].forEach(push);
-  push(a.city);
+  // Append city / state / pin only when the lines don't already contain them,
+  // so a line1 that already spells out "…, Bikaner, Rajasthan – 334001" isn't
+  // repeated as "…, Bikaner, 334001" on the end.
+  const city = title(String(a.city || ""));
+  if (city && !segs.join(", ").toLowerCase().includes(city.toLowerCase())) segs.push(city);
   const st = fullState(a.state);
   if (st && !segs.join(" ").toUpperCase().includes(st)) segs.push(st.replace(/\b\w/g, (c) => c.toUpperCase()));
   const pin = String(a.postalCode || "").match(/\d{6}/)?.[0];
-  if (pin) segs.push(pin);
+  if (pin && !segs.join(" ").includes(pin)) segs.push(pin);
   return segs.join(", ");
 }
 

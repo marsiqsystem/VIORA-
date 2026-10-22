@@ -748,7 +748,12 @@ const BUCKET_STYLE: Record<string, { bg: string; fg: string }> = {
 };
 const isPendingShip = (o: Order) =>
   !(o.awb && !/^MOCK/i.test(o.awb)) &&
-  !["cancelled", "on_hold", "delivered", "rto", "dispatched", "out_for_delivery", "created"].includes(o.status);
+  !["cancelled", "on_hold", "delivered", "rto", "dispatched", "out_for_delivery", "created"].includes(o.status) &&
+  // A real, shippable order has a customer and a delivery address — this drops
+  // ancient empty/orphan rows (old test/failed orders stuck as "new") that have
+  // neither and were cluttering the queue.
+  !!String(o.name || "").trim() &&
+  !!(o.address && (o.address.line1 || o.address.city || o.address.postalCode));
 const rtoColor = (p: number | null) =>
   p == null ? C.sub : p > 70 ? C.bad : p >= 50 ? C.warn : C.ok;
 const sqBtn = (bg: string): React.CSSProperties => ({
