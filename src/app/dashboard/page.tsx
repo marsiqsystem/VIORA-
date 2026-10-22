@@ -8,6 +8,7 @@
 // remittance + Inventory tabs, which need courier/stock data, come next.)
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { recommend as recoFor, national as engineNational, fakeNonServiceable as engineFake, generatedAt as engineGeneratedAt, type Reco } from "@/lib/crm/carrierEngine";
 
 const KEY_STORE = "viora_inbox_key";
 
@@ -83,7 +84,7 @@ function StatusBadge({ status }: { status: string }) {
 
 const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
 
-type Tab = "summary" | "orders" | "rto" | "products" | "inventory" | "cod";
+type Tab = "summary" | "shipqueue" | "orders" | "rto" | "products" | "inventory" | "cod";
 type Meta = {
   inventory: { code: string; colour: string; qty: number }[];
   cod: Record<string, { label: string; value: string }[]>;
@@ -230,7 +231,7 @@ export default function DashboardPage() {
     );
   }
 
-  const TABS: [Tab, string][] = [["summary", "Summary"], ["orders", "Orders"], ["rto", "RTO Report"], ["products", "Products"], ["inventory", "Inventory"], ["cod", "COD & Freight"]];
+  const TABS: [Tab, string][] = [["summary", "Summary"], ["shipqueue", "Ship Queue"], ["orders", "Orders"], ["rto", "RTO Report"], ["products", "Products"], ["inventory", "Inventory"], ["cod", "COD & Freight"]];
 
   return (
     <div style={{ minHeight: "100vh", background: C.bg, color: C.text }}>
@@ -255,6 +256,7 @@ export default function DashboardPage() {
         {error && <div style={{ background: "#FBE3E1", color: C.bad, padding: "10px 14px", borderRadius: 10, marginBottom: 12, fontSize: 14 }}>{error}</div>}
 
         {tab === "summary" && <SummaryTab kpi={kpi} monthly={monthly} byProduct={byProduct} statusBreakdown={statusBreakdown} />}
+        {tab === "shipqueue" && <ShipQueueTab orders={orders} loading={loading} apiKey={key} onChanged={() => load(key)} />}
         {tab === "orders" && <OrdersTab orders={orders} loading={loading} apiKey={key} onChanged={() => load(key)} />}
         {tab === "rto" && <RtoTab kpi={kpi} byProduct={byProduct} rtoByCourier={rtoByCourier} rtoByPayment={rtoByPayment} />}
         {tab === "products" && <ProductsTab byProduct={byProduct} />}
@@ -732,6 +734,124 @@ function RateCompare({ rate, busy, onBookIthink }: { rate: any; busy?: string; o
 }
 function assignBtn(bg: string): React.CSSProperties {
   return { padding: "5px 9px", borderRadius: 7, border: "none", background: bg, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" };
+}
+
+// ===========================================================================
+// SHIP QUEUE — pending orders since the backlog, each scored by the carrier
+// engine (our-data RTO% + best-3 carriers) and bucketed SHIP / MESSAGE / CALL.
+// Stage 1: triage view + one-tap confirm message. Ship/create actions next.
+// ===========================================================================
+const BUCKET_STYLE: Record<string, { bg: string; fg: string }> = {
+  SHIP: { bg: "#DCF3E5", fg: "#1E874B" },
+  MESSAGE: { bg: "#FFF3D6", fg: "#B8860B" },
+  CALL: { bg: "#FBE3E1", fg: "#C0392B" },
+};
+const isPendingShip = (o: Order) =>
+  !(o.awb && !/^MOCK/i.test(o.awb)) &&
+  !["cancelled", "delivered", "rto", "dispatched", "out_for_delivery", "created"].includes(o.status);
+const rtoColor = (p: number | null) =>
+  p == null ? C.sub : p > 70 ? C.bad : p >= 50 ? C.warn : C.ok;
+
+function ShipQueueTab({ orders, loading, apiKey, onChanged }: { orders: Order[]; loading: boolean; apiKey: string; onChanged: () => void }) {
+  const [filter, setFilter] = useState<"ALL" | "SHIP" | "MESSAGE" | "CALL">("ALL");
+  const [busy, setBusy] = useState<Record<string, string>>({});
+
+  const rows = useMemo(() => {
+    const list = orders.filter(isPendingShip).map((o) => ({ o, r: recoFor(o) as Reco }));
+    const order = { CALL: 0, MESSAGE: 1, SHIP: 2 } as Record<string, number>;
+    return list.sort((a, b) => (order[a.r.bucket] - order[b.r.bucket]) || ((b.r.rtoPct ?? -1) - (a.r.rtoPct ?? -1)));
+  }, [orders]);
+  const counts = useMemo(() => {
+    const c = { SHIP: 0, MESSAGE: 0, CALL: 0 };
+    rows.forEach(({ r }) => { c[r.bucket]++; });
+    return c;
+  }, [rows]);
+  const shown = filter === "ALL" ? rows : rows.filter(({ r }) => r.bucket === filter);
+
+  const sendConfirm = async (orderId: string) => {
+    if (!window.confirm(`Send the order-confirmation (YES reply) WhatsApp to #${orderId}?`)) return;
+    setBusy((b) => ({ ...b, [orderId]: "sending" }));
+    try {
+      const res = await fetch("/api/admin/send-confirm-reply", {
+        method: "POST", headers: { "Content-Type": "application/json", "x-inbox-key": apiKey },
+        body: JSON.stringify({ numbers: [orderId], send: true }),
+      });
+      const j = await res.json();
+      const ok = j?.results?.[0]?.ok;
+      setBusy((b) => ({ ...b, [orderId]: ok ? "sent ✓" : `failed: ${j?.results?.[0]?.error || j.error || "err"}` }));
+    } catch (e: any) {
+      setBusy((b) => ({ ...b, [orderId]: "failed: " + (e?.message || "err") }));
+    }
+  };
+
+  const topCarriers = Object.entries(engineNational).sort((a, b) => b[1].delPct - a[1].delPct);
+
+  return (
+    <div>
+      {/* engine summary */}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+        {(["CALL", "MESSAGE", "SHIP"] as const).map((b) => (
+          <button key={b} onClick={() => setFilter(filter === b ? "ALL" : b)}
+            style={{ cursor: "pointer", border: `1px solid ${filter === b ? BUCKET_STYLE[b].fg : C.border}`, background: C.card, borderRadius: 12, padding: "10px 16px", textAlign: "left", minWidth: 120 }}>
+            <div style={{ fontSize: 12, color: C.sub, fontWeight: 600 }}>{b === "CALL" ? "📞 Call (RTO>70%)" : b === "MESSAGE" ? "📩 Message-confirm" : "🟢 Ship-ready"}</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: BUCKET_STYLE[b].fg }}>{counts[b]}</div>
+          </button>
+        ))}
+        <div style={{ border: `1px solid ${C.border}`, background: C.card, borderRadius: 12, padding: "10px 16px", flex: "1 1 320px" }}>
+          <div style={{ fontSize: 12, color: C.sub, fontWeight: 600, marginBottom: 4 }}>Our carrier delivery% (national) · {topCarriers.length} carriers</div>
+          <div style={{ fontSize: 12.5, display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {topCarriers.map(([c, v]) => (
+              <span key={c} title={`${v.del}/${v.res} resolved · carrier-fault ${v.carrierFaultPct}%`}>
+                <b>{c}</b> {v.delPct}%{engineFake[c] ? <span style={{ color: C.bad }} title={`${engineFake[c]} orders bounced as non-serviceable at serviceable pincodes`}> ⚠{engineFake[c]}</span> : null}
+              </span>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: C.sub, marginTop: 4 }}>⚠ = suspected fake non-serviceable (carrier badmashi). Engine built {engineGeneratedAt ? new Date(engineGeneratedAt).toLocaleDateString("en-IN") : "—"}.</div>
+        </div>
+      </div>
+
+      <TableWrap>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead>
+            <tr style={{ textAlign: "left", color: C.sub, borderBottom: `2px solid ${C.border}` }}>
+              {["Order", "Customer", "Destination", "RTO%", "Action", "Best 3 carriers", "Flags", "Pay", "Address (cleaned)", ""].map((h) => (
+                <th key={h} style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <tr><td colSpan={10} style={{ padding: 16, color: C.sub }}>Loading…</td></tr>}
+            {!loading && shown.length === 0 && <tr><td colSpan={10} style={{ padding: 16, color: C.sub }}>No pending orders in this bucket. 🎉</td></tr>}
+            {shown.map(({ o, r }) => (
+              <tr key={o.orderId} style={{ borderBottom: `1px solid ${C.border}` }}>
+                <td style={{ padding: "8px 10px", fontWeight: 600, whiteSpace: "nowrap" }}>#{o.orderId}</td>
+                <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{o.name}<div style={{ color: C.sub, fontSize: 11 }}>{o.phone}</div></td>
+                <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{(o.address?.city || "") + ""}<div style={{ color: C.sub, fontSize: 11 }}>{r.state}</div></td>
+                <td style={{ padding: "8px 10px", fontWeight: 700, color: rtoColor(r.rtoPct) }}>{r.rtoPct == null ? "?" : r.rtoPct + "%"}<div style={{ color: C.sub, fontSize: 10, fontWeight: 400 }}>n={r.sample}</div></td>
+                <td style={{ padding: "8px 10px" }}>
+                  <span style={{ background: BUCKET_STYLE[r.bucket].bg, color: BUCKET_STYLE[r.bucket].fg, padding: "2px 10px", borderRadius: 999, fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>{r.bucket}</span>
+                </td>
+                <td style={{ padding: "8px 10px" }}>{r.best.length ? r.best.map((b) => `${b.carrier} ${b.adj}%`).join(" · ") : <span style={{ color: C.sub }}>no data</span>}</td>
+                <td style={{ padding: "8px 10px" }}>{r.flags.map((f) => <span key={f} style={{ background: "#FBE3E1", color: C.bad, padding: "1px 7px", borderRadius: 6, fontSize: 11, marginRight: 4 }}>{f}</span>)}</td>
+                <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{r.payment}</td>
+                <td style={{ padding: "8px 10px", maxWidth: 260, fontSize: 12, color: C.sub }} title={r.cleanAddr}>{r.cleanAddr.length > 70 ? r.cleanAddr.slice(0, 70) + "…" : r.cleanAddr}</td>
+                <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                  {r.payment === "COD" && (
+                    <button onClick={() => sendConfirm(o.orderId)} disabled={busy[o.orderId] === "sending"}
+                      style={{ cursor: "pointer", border: `1px solid ${C.gold}`, background: busy[o.orderId]?.startsWith("sent") ? "#DCF3E5" : C.card, color: C.text, borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 600 }}>
+                      {busy[o.orderId] === "sending" ? "…" : busy[o.orderId]?.startsWith("sent") ? "Sent ✓" : "📩 Confirm"}
+                    </button>
+                  )}
+                  {busy[o.orderId]?.startsWith("failed") && <div style={{ color: C.bad, fontSize: 10 }}>{busy[o.orderId]}</div>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableWrap>
+      <p style={{ color: C.sub, fontSize: 12, marginTop: 10 }}>Ship / Create-on-Velocity buttons (with delivery cost + 18% GST, saved for the sales report) land next. For now this triages the backlog and sends confirmations.</p>
+    </div>
+  );
 }
 
 function OrdersTab({ orders, loading, apiKey, onChanged }: { orders: Order[]; loading: boolean; apiKey: string; onChanged: () => void }) {
