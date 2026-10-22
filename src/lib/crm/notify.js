@@ -12,6 +12,7 @@ import { recordOutbound } from "./inbox-store";
 import { renderTemplateBody } from "./templateText";
 import { applyOverride } from "./orderOverride";
 import T from "./templates";
+import { lookupPincode } from "./pincode";
 
 /** Normalize a SQLite order row (snake_case) into the shape used below. */
 function fromRow(row) {
@@ -140,9 +141,62 @@ const slugify = (s) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 
+// 2-letter / IN-XX state code -> full name, to compare the customer's state with
+// what their pincode actually maps to (India Post). Loose — only to spot a clear mismatch.
+const ST2 = { CT:"CHHATTISGARH",HR:"HARYANA",JK:"JAMMU AND KASHMIR",MP:"MADHYA PRADESH",KA:"KARNATAKA",MH:"MAHARASHTRA",UP:"UTTAR PRADESH",RJ:"RAJASTHAN",AP:"ANDHRA PRADESH",AS:"ASSAM",PB:"PUNJAB",TN:"TAMIL NADU",TG:"TELANGANA",TS:"TELANGANA",WB:"WEST BENGAL",GJ:"GUJARAT",BR:"BIHAR",JH:"JHARKHAND",KL:"KERALA",OD:"ODISHA",OR:"ODISHA",UK:"UTTARAKHAND",UT:"UTTARAKHAND",HP:"HIMACHAL PRADESH",DL:"DELHI",GA:"GOA",ML:"MEGHALAYA",NL:"NAGALAND",AR:"ARUNACHAL PRADESH",MN:"MANIPUR",MZ:"MIZORAM",TR:"TRIPURA",SK:"SIKKIM",CH:"CHANDIGARH",AN:"ANDAMAN AND NICOBAR ISLANDS",PY:"PUDUCHERRY" };
+const normStateName = (s) => {
+  const x = String(s || "").trim().toUpperCase().replace(/^IN-/, "");
+  return ST2[x] || x.replace(/\s+/g, " ");
+};
+
+// Build the 8 body params for order_confirmation_v2. {{8}} is the per-order
+// "smart check": it asks the customer to fix the one thing wrong with their
+// address (bad/mismatched pincode, or a thin / landmark-less address), and
+// otherwise reassures them it looks fine. Never empty (Meta rejects empty
+// variables) and never throws (a pincode-lookup blip just skips that check).
+async function buildConfirmV2Params(o) {
+  const a = o.address || {};
+  const qty = Number(o.qty) || 1;
+  const item = [o.product, o.colour].filter(Boolean).join(" - ") || o.product || "your order";
+  const qtyText = qty >= 2 ? `${qty} — please confirm you want ${qty} pieces` : String(qty);
+  const amt = Number(String(o.amount).replace(/[^\d.]/g, "")) || 0;
+  const amtText = amt ? amt.toLocaleString("en-IN") : String(o.amount || "");
+  const pin = String(a.postalCode || "").replace(/\D/g, "");
+  const addrText =
+    [a.line1, a.line2, a.city, normStateName(a.state), pin].filter(Boolean).join(", ") || "your saved address";
+
+  const issues = [];
+  if (pin.length !== 6) {
+    issues.push("reply with your correct 6-digit pincode");
+  } else {
+    let resolved = { city: "", state: "" };
+    try { resolved = await lookupPincode(pin); } catch { /* lookup blip — skip */ }
+    if (resolved && resolved.state) {
+      const want = normStateName(a.state), got = normStateName(resolved.state);
+      if (want && got && want !== got && !want.includes(got) && !got.includes(want)) {
+        issues.push(`confirm your pincode ${pin} — we have it in ${resolved.city}, ${resolved.state}; reply with the right one if this is wrong`);
+      }
+    } else {
+      issues.push(`confirm your pincode ${pin} is correct`);
+    }
+  }
+  const line = [a.line1, a.line2, a.line3].filter(Boolean).join(" ").trim();
+  if (line.length < 12 || /^(near|bus stand|market|chowk|main road)\b/i.test(line)) {
+    issues.push("share a nearby landmark along with your address for a smooth delivery");
+  }
+  const smart = issues.length
+    ? "🔎 Quick check before we ship — please " + issues.join(", and ") + "."
+    : "✅ Your address looks complete — just tap Confirm to proceed.";
+
+  return [o.name, o.orderId, item, qtyText, amtText, prettyPayment(o.paymentMode), addrText, smart];
+}
+
 // --- Workflow 1: order placed -------------------------------------------------
-// {{1}} name, {{2}} order id, {{3}} amount, {{4}} payment mode.
-// Confirm/Cancel are static quick replies — no params on send.
+// v1: {{1}} name, {{2}} order id, {{3}} amount, {{4}} payment mode.
+// v2 (order_confirmation_v2): {{1}} name, {{2}} order id, {{3}} item, {{4}} qty,
+//   {{5}} amount, {{6}} payment, {{7}} address, {{8}} smart-check — with
+//   Confirm / Cancel / Change-address quick replies. Switch by setting
+//   TPL_ORDER_CONFIRMATION=order_confirmation_v2 (no code change needed to flip).
 async function sendOrderConfirmation(o) {
   // Apply any operator product override (customer changed colour/variant after
   // ordering — item edited in Velocity but Wix still holds the old product). This
@@ -150,7 +204,10 @@ async function sendOrderConfirmation(o) {
   // message for that order — now and in future — shows the corrected name+photo.
   // No-op when no override is stored. See src/lib/crm/orderOverride.js.
   await applyOverride(o);
-  const bodyParams = [o.name, o.orderId, o.amount, o.paymentMode];
+  const isV2 = /v2$/i.test(T.orderConfirmation.name || "");
+  const bodyParams = isV2
+    ? await buildConfirmV2Params(o)
+    : [o.name, o.orderId, o.amount, o.paymentMode];
   const headerImageUrl = o.productImage || T.orderConfirmation.headerImageUrl;
   const res = await sendTemplate({
     to: o.phone,
