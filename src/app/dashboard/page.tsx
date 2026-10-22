@@ -751,10 +751,39 @@ const isPendingShip = (o: Order) =>
   !["cancelled", "delivered", "rto", "dispatched", "out_for_delivery", "created"].includes(o.status);
 const rtoColor = (p: number | null) =>
   p == null ? C.sub : p > 70 ? C.bad : p >= 50 ? C.warn : C.ok;
+const sqBtn = (bg: string): React.CSSProperties => ({
+  cursor: "pointer", border: `1px solid ${C.border}`, background: bg, color: C.text,
+  borderRadius: 8, padding: "4px 9px", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap",
+});
+const field: React.CSSProperties = { width: "100%", padding: "8px 10px", borderRadius: 8, border: `1px solid ${C.border}`, fontSize: 13, boxSizing: "border-box", background: "#fff" };
+const lbl: React.CSSProperties = { fontSize: 11, color: C.sub, fontWeight: 600, marginBottom: 3, display: "block" };
+
+// Pick the recommended carrier's Velocity rate from a rate-compare response:
+// the first best-for-state carrier that Velocity actually quoted, else cheapest.
+function pickCarrierRate(velRates: any[], best: { carrier: string }[]): { carrier: string; rate: number } | null {
+  if (!Array.isArray(velRates) || !velRates.length) return null;
+  const brandOf = (name: string) => {
+    const n = String(name || "").toLowerCase();
+    for (const b of ["dtdc", "delhivery", "ekart", "xpressbees", "shadowfax", "bluedart", "amazon"]) if (n.includes(b)) return b;
+    return n;
+  };
+  for (const b of best) {
+    const want = b.carrier.toLowerCase();
+    const hit = velRates.find((r) => brandOf(r.courier) === want);
+    if (hit) return { carrier: hit.courier, rate: Number(hit.rate) || 0 };
+  }
+  const cheapest = velRates.reduce((a, b) => (b.rate < a.rate ? b : a));
+  return { carrier: cheapest.courier, rate: Number(cheapest.rate) || 0 };
+}
+
+type ShipModal = { o: Order; r: Reco; loading: boolean; carrier?: string; cost?: number; gst?: number; total?: number; err?: string } | null;
+type EditModal = { o: Order; sellingPrice: string; qty: string; colour: string; dCode: string; line1: string; line2: string; city: string; state: string; postalCode: string } | null;
 
 function ShipQueueTab({ orders, loading, apiKey, onChanged }: { orders: Order[]; loading: boolean; apiKey: string; onChanged: () => void }) {
   const [filter, setFilter] = useState<"ALL" | "SHIP" | "MESSAGE" | "CALL">("ALL");
   const [busy, setBusy] = useState<Record<string, string>>({});
+  const [shipM, setShipM] = useState<ShipModal>(null);
+  const [editM, setEditM] = useState<EditModal>(null);
 
   const rows = useMemo(() => {
     const list = orders.filter(isPendingShip).map((o) => ({ o, r: recoFor(o) as Reco }));
@@ -782,6 +811,86 @@ function ShipQueueTab({ orders, loading, apiKey, onChanged }: { orders: Order[];
     } catch (e: any) {
       setBusy((b) => ({ ...b, [orderId]: "failed: " + (e?.message || "err") }));
     }
+  };
+
+  // CREATE-ONLY on Velocity — no charge, lands in Velocity "New Orders" to ship there.
+  const createOnVelocity = async (o: Order) => {
+    if (!window.confirm(`Create #${o.orderId} on Velocity (no charge)?\n\nLands in Velocity "New Orders" — nothing is booked or debited; you pick the courier + ship it there.`)) return;
+    setBusy((b) => ({ ...b, [o.orderId]: "creating" }));
+    try {
+      const res = await fetch(`/api/dashboard/assign-courier?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-inbox-key": apiKey },
+        body: JSON.stringify({ orderId: o.orderId, courier: "velocity", ship: false }),
+      });
+      const j = await res.json();
+      setBusy((b) => ({ ...b, [o.orderId]: j.ok ? "created ✓" : `failed: ${j.error || "err"}` }));
+      if (j.ok) onChanged();
+    } catch (e: any) { setBusy((b) => ({ ...b, [o.orderId]: "failed: " + (e?.message || "err") })); }
+  };
+
+  // Open the ship confirm modal and fetch the recommended carrier's live cost + 18% GST.
+  const openShip = async (o: Order, r: Reco) => {
+    setShipM({ o, r, loading: true });
+    try {
+      const res = await fetch(`/api/dashboard/rate-compare?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-inbox-key": apiKey },
+        body: JSON.stringify({ orderId: o.orderId }),
+      });
+      const j = await res.json();
+      const vel = j?.couriers?.velocity;
+      if (!j.ok || !vel?.ok) { setShipM({ o, r, loading: false, err: vel?.error || j.error || "no Velocity rate" }); return; }
+      const pick = pickCarrierRate(vel.rates, r.best);
+      if (!pick) { setShipM({ o, r, loading: false, err: "no serviceable carrier" }); return; }
+      const cost = Math.round(pick.rate);
+      const gst = Math.round(cost * 0.18);
+      setShipM({ o, r, loading: false, carrier: pick.carrier, cost, gst, total: cost + gst });
+    } catch (e: any) { setShipM({ o, r, loading: false, err: e?.message || "failed" }); }
+  };
+
+  // Confirm the ship: book on Velocity (charges wallet + AWB) then persist the
+  // quoted delivery cost (incl. 18% GST) on the order for the sales report.
+  const confirmShip = async () => {
+    if (!shipM || shipM.total == null) return;
+    const { o, total } = shipM;
+    setBusy((b) => ({ ...b, [o.orderId]: "booking" }));
+    setShipM((m) => (m ? { ...m, loading: true } : m));
+    try {
+      const res = await fetch(`/api/dashboard/assign-courier?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-inbox-key": apiKey },
+        body: JSON.stringify({ orderId: o.orderId, courier: "velocity", ship: true }),
+      });
+      const j = await res.json();
+      if (!j.ok) { setShipM((m) => (m ? { ...m, loading: false, err: j.error || "ship failed" } : m)); setBusy((b) => ({ ...b, [o.orderId]: "failed" })); return; }
+      // persist the delivery cost (cost + 18% GST) for the sales report
+      await fetch(`/api/dashboard/update-order?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-inbox-key": apiKey },
+        body: JSON.stringify({ orderId: o.orderId, patch: { freight: total } }),
+      }).catch(() => {});
+      setBusy((b) => ({ ...b, [o.orderId]: "shipped ✓" }));
+      setShipM(null); onChanged();
+    } catch (e: any) { setShipM((m) => (m ? { ...m, loading: false, err: e?.message || "failed" } : m)); setBusy((b) => ({ ...b, [o.orderId]: "failed" })); }
+  };
+
+  const openEdit = (o: Order) => setEditM({
+    o, sellingPrice: String(o.sellingPrice ?? ""), qty: String(o.qty ?? 1), colour: o.colour || "", dCode: o.dCode || "",
+    line1: o.address?.line1 || "", line2: o.address?.line2 || "", city: o.address?.city || "", state: o.address?.state || "", postalCode: o.address?.postalCode || "",
+  });
+  const saveEdit = async () => {
+    if (!editM) return;
+    const { o } = editM;
+    setBusy((b) => ({ ...b, [o.orderId]: "saving" }));
+    try {
+      await fetch(`/api/dashboard/update-order?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-inbox-key": apiKey },
+        body: JSON.stringify({ orderId: o.orderId, patch: { sellingPrice: editM.sellingPrice, qty: editM.qty, colour: editM.colour, dCode: editM.dCode } }),
+      });
+      await fetch(`/api/dashboard/update-address?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-inbox-key": apiKey },
+        body: JSON.stringify({ orderId: o.orderId, address: { line1: editM.line1, line2: editM.line2, city: editM.city, state: editM.state, postalCode: editM.postalCode } }),
+      }).catch(() => {});
+      setBusy((b) => ({ ...b, [o.orderId]: "saved ✓" }));
+      setEditM(null); onChanged();
+    } catch (e: any) { setBusy((b) => ({ ...b, [o.orderId]: "failed: " + (e?.message || "err") })); }
   };
 
   const topCarriers = Object.entries(engineNational).sort((a, b) => b[1].delPct - a[1].delPct);
@@ -836,20 +945,97 @@ function ShipQueueTab({ orders, loading, apiKey, onChanged }: { orders: Order[];
                 <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{r.payment}</td>
                 <td style={{ padding: "8px 10px", maxWidth: 260, fontSize: 12, color: C.sub }} title={r.cleanAddr}>{r.cleanAddr.length > 70 ? r.cleanAddr.slice(0, 70) + "…" : r.cleanAddr}</td>
                 <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
-                  {r.payment === "COD" && (
-                    <button onClick={() => sendConfirm(o.orderId)} disabled={busy[o.orderId] === "sending"}
-                      style={{ cursor: "pointer", border: `1px solid ${C.gold}`, background: busy[o.orderId]?.startsWith("sent") ? "#DCF3E5" : C.card, color: C.text, borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 600 }}>
-                      {busy[o.orderId] === "sending" ? "…" : busy[o.orderId]?.startsWith("sent") ? "Sent ✓" : "📩 Confirm"}
-                    </button>
-                  )}
-                  {busy[o.orderId]?.startsWith("failed") && <div style={{ color: C.bad, fontSize: 10 }}>{busy[o.orderId]}</div>}
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap", maxWidth: 230 }}>
+                    {r.payment === "COD" && (
+                      <button onClick={() => sendConfirm(o.orderId)} disabled={busy[o.orderId] === "sending"} title="Send YES-reply confirmation WhatsApp"
+                        style={sqBtn(busy[o.orderId]?.startsWith("sent") ? "#DCF3E5" : C.card)}>
+                        {busy[o.orderId] === "sending" ? "…" : busy[o.orderId]?.startsWith("sent") ? "Sent ✓" : "📩 Confirm"}
+                      </button>
+                    )}
+                    <button onClick={() => openShip(o, r)} disabled={busy[o.orderId] === "booking"} title="Book + generate AWB on Velocity (charges wallet)"
+                      style={sqBtn(busy[o.orderId]?.startsWith("shipped") ? "#DCF3E5" : "#FFF3D6")}>🚀 Ship</button>
+                    <button onClick={() => createOnVelocity(o)} disabled={busy[o.orderId] === "creating"} title="Create on Velocity (no charge) — ship from its New Orders"
+                      style={sqBtn(busy[o.orderId]?.startsWith("created") ? "#DCF3E5" : C.card)}>📦 Create</button>
+                    <button onClick={() => openEdit(o)} title="Edit address / product / amount / qty" style={sqBtn(C.card)}>✏️ Edit</button>
+                  </div>
+                  {busy[o.orderId] && !/sent|shipped|created|saved/.test(busy[o.orderId]) && <div style={{ color: busy[o.orderId].startsWith("failed") ? C.bad : C.sub, fontSize: 10, marginTop: 2 }}>{busy[o.orderId]}</div>}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </TableWrap>
-      <p style={{ color: C.sub, fontSize: 12, marginTop: 10 }}>Ship / Create-on-Velocity buttons (with delivery cost + 18% GST, saved for the sales report) land next. For now this triages the backlog and sends confirmations.</p>
+      <p style={{ color: C.sub, fontSize: 12, marginTop: 10 }}>📩 Confirm sends the YES-reply WhatsApp · 🚀 Ship books + AWB on Velocity (shows cost + 18% GST, charges wallet) · 📦 Create lands in Velocity New Orders (no charge) · ✏️ Edit updates address / product / amount.</p>
+
+      {/* SHIP CONFIRM MODAL — delivery cost + 18% GST, charges wallet on confirm */}
+      {shipM && (
+        <ModalShell onClose={() => setShipM(null)} title={`🚀 Ship #${shipM.o.orderId} on Velocity`}>
+          <div style={{ fontSize: 13.5, lineHeight: 1.7 }}>
+            <div><b>{shipM.o.name}</b> · {shipM.r.state} · {shipM.r.payment}</div>
+            <div style={{ color: C.sub, fontSize: 12 }}>{shipM.r.cleanAddr}</div>
+            <hr style={{ border: "none", borderTop: `1px solid ${C.border}`, margin: "10px 0" }} />
+            {shipM.loading && <div style={{ color: C.sub }}>Fetching live delivery cost…</div>}
+            {shipM.err && <div style={{ color: C.bad }}>⚠ {shipM.err}</div>}
+            {!shipM.loading && shipM.total != null && (
+              <>
+                <div>Recommended carrier: <b>{shipM.carrier}</b></div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 2, margin: "8px 0", maxWidth: 280 }}>
+                  <span>Delivery cost</span><b style={{ textAlign: "right" }}>{rupee(shipM.cost)}</b>
+                  <span>GST (18%)</span><b style={{ textAlign: "right" }}>{rupee(shipM.gst)}</b>
+                  <span style={{ borderTop: `1px solid ${C.border}`, paddingTop: 3 }}>Total delivery (saved)</span>
+                  <b style={{ textAlign: "right", borderTop: `1px solid ${C.border}`, paddingTop: 3, color: C.plum }}>{rupee(shipM.total)}</b>
+                  {shipM.r.payment === "COD" && <><span>COD to collect</span><b style={{ textAlign: "right" }}>{rupee(shipM.o.sellingPrice)}</b></>}
+                </div>
+                <div style={{ background: "#FBE3E1", color: C.bad, padding: "8px 10px", borderRadius: 8, fontSize: 12.5, margin: "8px 0" }}>
+                  ⚠ Booking generates the AWB and <b>debits your Velocity wallet immediately</b> — no undo (cancel in the Velocity panel to refund). Velocity assigns the actual carrier at booking.
+                </div>
+              </>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
+            <button onClick={() => setShipM(null)} style={sqBtn(C.card)}>Cancel</button>
+            <button onClick={confirmShip} disabled={shipM.loading || shipM.total == null}
+              style={{ ...sqBtn("#C0392B"), color: "#fff", border: "none", padding: "7px 16px", opacity: shipM.loading || shipM.total == null ? 0.5 : 1 }}>
+              {shipM.loading ? "…" : `Confirm & book (${rupee(shipM.total)})`}
+            </button>
+          </div>
+        </ModalShell>
+      )}
+
+      {/* EDIT MODAL — address / product / amount / qty */}
+      {editM && (
+        <ModalShell onClose={() => setEditM(null)} title={`✏️ Edit #${editM.o.orderId}`}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div><label style={lbl}>Amount (₹)</label><input style={field} value={editM.sellingPrice} onChange={(e) => setEditM({ ...editM, sellingPrice: e.target.value })} /></div>
+            <div><label style={lbl}>Qty</label><input style={field} value={editM.qty} onChange={(e) => setEditM({ ...editM, qty: e.target.value })} /></div>
+            <div><label style={lbl}>Colour</label><input style={field} value={editM.colour} onChange={(e) => setEditM({ ...editM, colour: e.target.value })} /></div>
+            <div><label style={lbl}>Product (D-code)</label><input style={field} value={editM.dCode} onChange={(e) => setEditM({ ...editM, dCode: e.target.value })} /></div>
+            <div style={{ gridColumn: "1 / 3" }}><label style={lbl}>Address line 1</label><input style={field} value={editM.line1} onChange={(e) => setEditM({ ...editM, line1: e.target.value })} /></div>
+            <div style={{ gridColumn: "1 / 3" }}><label style={lbl}>Address line 2 / landmark</label><input style={field} value={editM.line2} onChange={(e) => setEditM({ ...editM, line2: e.target.value })} /></div>
+            <div><label style={lbl}>City</label><input style={field} value={editM.city} onChange={(e) => setEditM({ ...editM, city: e.target.value })} /></div>
+            <div><label style={lbl}>State</label><input style={field} value={editM.state} onChange={(e) => setEditM({ ...editM, state: e.target.value })} /></div>
+            <div><label style={lbl}>Pincode</label><input style={field} value={editM.postalCode} onChange={(e) => setEditM({ ...editM, postalCode: e.target.value })} /></div>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "flex-end" }}>
+            <button onClick={() => setEditM(null)} style={sqBtn(C.card)}>Cancel</button>
+            <button onClick={saveEdit} style={{ ...sqBtn(C.plum), color: "#fff", border: "none", padding: "7px 16px" }}>Save</button>
+          </div>
+        </ModalShell>
+      )}
+    </div>
+  );
+}
+
+function ModalShell({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(26,20,16,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 50 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 20, width: "100%", maxWidth: 460, boxShadow: "0 12px 40px rgba(90,10,24,0.18)", maxHeight: "90vh", overflow: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <h3 style={{ fontFamily: SERIF, fontSize: 19, color: C.plumDark, margin: 0 }}>{title}</h3>
+          <button onClick={onClose} style={{ ...sqBtn(C.card), border: "none", fontSize: 16 }}>✕</button>
+        </div>
+        {children}
+      </div>
     </div>
   );
 }
