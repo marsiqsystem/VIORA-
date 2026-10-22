@@ -336,8 +336,8 @@ const SuccessContent = () => {
               )}
             </ol>
             <p className="mt-4 bg-platinum px-3 py-2.5 text-[13px] leading-snug text-gray-700">
-              📞 <b className="text-primary">Expect a quick call from us today or tomorrow.</b> Our team personally confirms
-              every order. Please pick up; it takes a minute and gets your order to you safely and on time.
+              💬 <b className="text-primary">Please check your address, quantity and details, then confirm your order on WhatsApp.</b> Just
+              tap <b>Confirm</b> on the message we&apos;ve sent — it takes a few seconds and gets your order shipped to you safely and on time.
             </p>
             {summary?.hasEmail !== false && (
               <p className="mt-4 border-t border-silver-light pt-3 text-xs text-gray-500">
