@@ -825,12 +825,61 @@ function keyFromRequest(req) {
   }
 }
 
+/**
+ * Phone reachability summary for the Call Queue — did our WhatsApp actually reach
+ * this number, and has the customer ever replied? A number whose template sends
+ * were DELIVERED/READ (or who has messaged us) is a live mobile that receives
+ * messages — strong evidence a call will connect too. A number whose sends FAILED
+ * (e.g. "not a WhatsApp user" / invalid) is a red flag worth verifying before you
+ * waste a call. Best-effort; never throws. (This is a WhatsApp-reachability proxy,
+ * not a live telecom/HLR check — true call-connectivity needs a paid lookup.)
+ *
+ * @returns {Promise<{hasInbound:boolean,hasOutbound:boolean,lastInboundTs:number,
+ *   bestStatus:string,delivered:boolean,failed:boolean,lastError:object|null}>}
+ */
+async function getReachability(phone) {
+  const empty = { hasInbound: false, hasOutbound: false, lastInboundTs: 0, bestStatus: "", delivered: false, failed: false, lastError: null };
+  const p = normPhone(phone);
+  if (!p || !isConfigured()) return empty;
+  try {
+    const [convRaw, stArr, erArr] = await Promise.all([
+      command(["GET", convKey(p)]),
+      command(["HGETALL", statusKey(p)]),
+      command(["HGETALL", errKey(p)]),
+    ]);
+    const conv = safeParse(convRaw, null) || {};
+    // HGETALL comes back as a flat [field, value, field, value, …] array.
+    const statuses = [];
+    for (let i = 1; i < (stArr?.length || 0); i += 2) statuses.push(String(stArr[i] || ""));
+    const rank = { read: 4, delivered: 3, sent: 2, failed: 1 };
+    let bestStatus = "";
+    for (const s of statuses) if ((rank[s] || 0) > (rank[bestStatus] || 0)) bestStatus = s;
+    // Latest recorded send error, if any.
+    let lastError = null;
+    if (erArr && erArr.length >= 2) {
+      lastError = safeParse(erArr[erArr.length - 1], null);
+    }
+    return {
+      hasInbound: Number(conv.lastInboundTs) > 0,
+      hasOutbound: Number(conv.lastOutboundTs) > 0 || statuses.length > 0,
+      lastInboundTs: Number(conv.lastInboundTs) || 0,
+      bestStatus,
+      delivered: bestStatus === "delivered" || bestStatus === "read",
+      failed: !!lastError || bestStatus === "failed",
+      lastError,
+    };
+  } catch {
+    return empty;
+  }
+}
+
 export {
   isConfigured,
   ingestWebhook,
   recordOutbound,
   getConversations,
   getMessages,
+  getReachability,
   markRead,
   deleteMessage,
   deleteConversation,

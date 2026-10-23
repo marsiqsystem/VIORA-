@@ -48,6 +48,7 @@ type Order = {
   address: { line1?: string; line2?: string; line3?: string; city?: string; state?: string; postalCode?: string; country?: string } | null;
   addressText?: string; addressEdited?: boolean;
   courierService?: string; // actual iThink carrier booked (e.g. "shadowfax")
+  callOutcome?: string; // "confirmed" | "cancelled" — set from the Call Queue
 };
 
 const rupee = (v: number | null | undefined) =>
@@ -84,7 +85,7 @@ function StatusBadge({ status }: { status: string }) {
 
 const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
 
-type Tab = "summary" | "shipqueue" | "orders" | "rto" | "products" | "inventory" | "cod";
+type Tab = "summary" | "shipqueue" | "callqueue" | "orders" | "rto" | "products" | "inventory" | "cod";
 type Meta = {
   inventory: { code: string; colour: string; qty: number }[];
   cod: Record<string, { label: string; value: string }[]>;
@@ -231,7 +232,7 @@ export default function DashboardPage() {
     );
   }
 
-  const TABS: [Tab, string][] = [["summary", "Summary"], ["shipqueue", "Ship Queue"], ["orders", "Orders"], ["rto", "RTO Report"], ["products", "Products"], ["inventory", "Inventory"], ["cod", "COD & Freight"]];
+  const TABS: [Tab, string][] = [["summary", "Summary"], ["shipqueue", "Ship Queue"], ["callqueue", "Call Queue"], ["orders", "Orders"], ["rto", "RTO Report"], ["products", "Products"], ["inventory", "Inventory"], ["cod", "COD & Freight"]];
 
   return (
     <div style={{ minHeight: "100vh", background: C.bg, color: C.text }}>
@@ -257,6 +258,7 @@ export default function DashboardPage() {
 
         {tab === "summary" && <SummaryTab kpi={kpi} monthly={monthly} byProduct={byProduct} statusBreakdown={statusBreakdown} />}
         {tab === "shipqueue" && <ShipQueueTab orders={orders} loading={loading} apiKey={key} onChanged={() => load(key)} />}
+        {tab === "callqueue" && <CallQueueTab apiKey={key} onChanged={() => load(key)} />}
         {tab === "orders" && <OrdersTab orders={orders} loading={loading} apiKey={key} onChanged={() => load(key)} />}
         {tab === "rto" && <RtoTab kpi={kpi} byProduct={byProduct} rtoByCourier={rtoByCourier} rtoByPayment={rtoByPayment} />}
         {tab === "products" && <ProductsTab byProduct={byProduct} />}
@@ -791,7 +793,12 @@ function ShipQueueTab({ orders, loading, apiKey, onChanged }: { orders: Order[];
   const [editM, setEditM] = useState<EditModal>(null);
 
   const rows = useMemo(() => {
-    const list = orders.filter(isPendingShip).map((o) => ({ o, r: recoFor(o) as Reco }));
+    const list = orders.filter(isPendingShip).map((o) => {
+      const r = recoFor(o) as Reco;
+      // A confirmed call overrides a high-RTO CALL bucket -> it's ship-ready now.
+      if (o.callOutcome === "confirmed" && r.bucket === "CALL") r.bucket = "SHIP";
+      return { o, r };
+    });
     // Sorted by order number (ascending) so the queue reads in order.
     return list.sort((a, b) => (parseInt(a.o.orderId, 10) || 0) - (parseInt(b.o.orderId, 10) || 0));
   }, [orders]);
@@ -1040,6 +1047,217 @@ function ModalShell({ title, children, onClose }: { title: string; children: Rea
           <button onClick={onClose} style={{ ...sqBtn(C.card), border: "none", fontSize: 16 }}>✕</button>
         </div>
         {children}
+      </div>
+    </div>
+  );
+}
+
+// ===========================================================================
+// CALL QUEUE — orders to phone the customer about before shipping. Each card
+// says WHY (bad phone / broken address / high return area) and WHAT TO ASK, plus
+// a phone-reachability check, and an answer form: Confirmed/Cancelled, the correct
+// pincode (live-validated to city+state), and a landmark — which, on save, is
+// auto-arranged into the order's address so it flows straight to shipping.
+// ===========================================================================
+type CallReason = { type: string; text: string; pin?: string; pinState?: string; pinCity?: string; claimedState?: string; rtoPct?: number; sample?: number };
+type PhoneCheck = { raw: string; national: string; valid: boolean; status: "good" | "weak" | "bad"; text: string; wa: string };
+type CallRow = {
+  orderId: string; name: string; phone: string; phoneCheck: PhoneCheck;
+  product: string; colour: string; qty: number; sellingPrice: number | null; paymentMode: string;
+  state: string; city: string; pin: string; pinPlace: { city: string; state: string } | null;
+  address: any; line: string; rtoPct: number | null; sample: number;
+  best: { carrier: string; adj: number }[]; reasons: CallReason[]; whatToAsk: string[]; priority: number;
+};
+type CallForm = { outcome: "" | "confirmed" | "cancelled"; pincode: string; landmark: string; addressLine: string; note: string; pinInfo?: { valid: boolean; city: string; state: string } };
+
+const PHONE_STYLE: Record<string, { bg: string; fg: string; icon: string }> = {
+  good: { bg: "#DCF3E5", fg: "#1E874B", icon: "✓" },
+  weak: { bg: "#FFF3D6", fg: "#B8860B", icon: "?" },
+  bad: { bg: "#FBE3E1", fg: "#C0392B", icon: "✕" },
+};
+const REASON_LABEL: Record<string, string> = {
+  "bad-phone": "📵 Phone problem", "pin-mismatch": "📍 Pincode ≠ state", "invalid-pin": "📍 Invalid pincode",
+  "no-pin": "📍 No pincode", "thin-address": "🏠 Thin address", "high-rto": "↩️ High return area",
+};
+
+function CallQueueTab({ apiKey, onChanged }: { apiKey: string; onChanged: () => void }) {
+  const [rows, setRows] = useState<CallRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState<Record<string, string>>({});
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [form, setForm] = useState<Record<string, CallForm>>({});
+
+  const loadQueue = useCallback(async () => {
+    setLoading(true); setErr("");
+    try {
+      const res = await fetch(`/api/dashboard/call-queue?key=${encodeURIComponent(apiKey)}`, { headers: { "x-inbox-key": apiKey } });
+      const j = await res.json();
+      if (!j.ok) { setErr(typeof j.error === "string" ? j.error : "Could not load the call queue."); setRows([]); }
+      else setRows(j.rows || []);
+    } catch (e: any) { setErr(e?.message || "failed"); }
+    setLoading(false);
+  }, [apiKey]);
+  useEffect(() => { loadQueue(); }, [loadQueue]);
+
+  const f = (id: string): CallForm => form[id] || { outcome: "", pincode: "", landmark: "", addressLine: "", note: "" };
+  const setF = (id: string, patch: Partial<CallForm>) => setForm((m) => ({ ...m, [id]: { ...f(id), ...patch } }));
+
+  // Live-validate a pincode as the operator types the one the customer gave.
+  const checkPin = async (id: string, pin: string) => {
+    const p = pin.replace(/\D/g, "");
+    setF(id, { pincode: p, pinInfo: undefined });
+    if (p.length !== 6) return;
+    try {
+      const res = await fetch(`/api/dashboard/pin-lookup?pin=${p}&key=${encodeURIComponent(apiKey)}`, { headers: { "x-inbox-key": apiKey } });
+      const j = await res.json();
+      setF(id, { pinInfo: { valid: !!j.valid, city: j.city || "", state: j.state || "" } });
+    } catch { /* ignore */ }
+  };
+
+  const resolve = async (row: CallRow, outcome: "confirmed" | "cancelled") => {
+    const st = f(row.orderId);
+    if (outcome === "cancelled" && !window.confirm(`Mark #${row.orderId} as CANCELLED? (No WhatsApp is sent.)`)) return;
+    setBusy((b) => ({ ...b, [row.orderId]: "saving" }));
+    try {
+      const res = await fetch(`/api/dashboard/call-resolve?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-inbox-key": apiKey },
+        body: JSON.stringify({ orderId: row.orderId, outcome, pincode: st.pincode, landmark: st.landmark, addressLine: st.addressLine, note: st.note }),
+      });
+      const j = await res.json();
+      if (!j.ok) { setBusy((b) => ({ ...b, [row.orderId]: `failed: ${j.error || "err"}` })); return; }
+      setBusy((b) => ({ ...b, [row.orderId]: outcome === "confirmed" ? "confirmed ✓ → Ship Queue" : "cancelled ✓" }));
+      setRows((rs) => rs.filter((x) => x.orderId !== row.orderId)); // leaves the queue
+      onChanged(); // refresh orders so the Ship Queue reflects it
+    } catch (e: any) { setBusy((b) => ({ ...b, [row.orderId]: "failed: " + (e?.message || "err") })); }
+  };
+
+  const counts = useMemo(() => {
+    const c = { phone: 0, address: 0, rto: 0 };
+    rows.forEach((r) => {
+      if (r.reasons.some((x) => x.type === "bad-phone")) c.phone++;
+      if (r.reasons.some((x) => ["pin-mismatch", "invalid-pin", "no-pin", "thin-address"].includes(x.type))) c.address++;
+      if (r.reasons.some((x) => x.type === "high-rto")) c.rto++;
+    });
+    return c;
+  }, [rows]);
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14, alignItems: "center" }}>
+        {[["📵 Bad phone", counts.phone, C.bad], ["📍 Address to fix", counts.address, C.warn], ["↩️ High-return confirm", counts.rto, C.plum]].map(([label, n, col]) => (
+          <div key={label as string} style={{ border: `1px solid ${C.border}`, background: C.card, borderRadius: 12, padding: "10px 16px", minWidth: 130 }}>
+            <div style={{ fontSize: 12, color: C.sub, fontWeight: 600 }}>{label as string}</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: col as string }}>{n as number}</div>
+          </div>
+        ))}
+        <button onClick={loadQueue} style={{ ...sqBtn(C.card), padding: "9px 14px" }}>↻ Refresh</button>
+        <div style={{ color: C.sub, fontSize: 12.5, flex: "1 1 220px" }}>
+          Phone check = our WhatsApp reachability (delivered / replied / failed) + number format. It's a strong proxy, not a live telecom check.
+        </div>
+      </div>
+
+      {loading && <div style={{ color: C.sub, padding: 16 }}>Loading call queue…</div>}
+      {err && <div style={{ color: C.bad, padding: 12, background: "#FBE3E1", borderRadius: 10 }}>⚠ {err}</div>}
+      {!loading && !err && rows.length === 0 && <div style={{ color: C.sub, padding: 16 }}>Nothing to call right now — every open order has a valid phone + address. 🎉</div>}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {rows.map((row) => {
+          const ph = PHONE_STYLE[row.phoneCheck.status];
+          const st = f(row.orderId);
+          const isOpen = open[row.orderId];
+          const b = busy[row.orderId];
+          const done = b && /✓/.test(b);
+          return (
+            <div key={row.orderId} style={{ border: `1px solid ${C.border}`, background: C.card, borderRadius: 14, padding: 14, opacity: done ? 0.6 : 1 }}>
+              {/* header */}
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+                <div style={{ minWidth: 220 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>#{row.orderId} · {row.name}</div>
+                  <div style={{ color: C.sub, fontSize: 12.5 }}>{row.product}{row.colour ? ` · ${row.colour}` : ""}{row.qty > 1 ? ` · ×${row.qty}` : ""} · {row.paymentMode} {rupee(row.sellingPrice)}</div>
+                  <div style={{ color: C.sub, fontSize: 12.5, marginTop: 2 }}>{row.city || "—"}, {row.state || "—"} {row.pin && `· ${row.pin}`}{row.rtoPct != null && <> · <span style={{ color: rtoColor(row.rtoPct), fontWeight: 600 }}>RTO {row.rtoPct}%</span></>}</div>
+                </div>
+                {/* phone box */}
+                <div style={{ background: ph.bg, color: ph.fg, borderRadius: 10, padding: "8px 12px", minWidth: 210 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                    <span>{ph.icon}</span>
+                    <a href={`tel:+91${row.phoneCheck.national || ""}`} style={{ color: ph.fg, textDecoration: "none" }}>
+                      {row.phoneCheck.national ? `+91 ${row.phoneCheck.national}` : (row.phone || "no number")}
+                    </a>
+                    {row.phoneCheck.wa && <a href={`https://wa.me/${row.phoneCheck.wa}`} target="_blank" rel="noreferrer" title="Open WhatsApp chat" style={{ color: ph.fg, fontSize: 12, textDecoration: "underline" }}>wa</a>}
+                  </div>
+                  <div style={{ fontSize: 11.5, marginTop: 2 }}>{row.phoneCheck.text}</div>
+                </div>
+              </div>
+
+              {/* reasons */}
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+                {row.reasons.map((rz, i) => (
+                  <span key={i} title={rz.text} style={{ background: C.cream2, color: C.text, borderRadius: 8, padding: "3px 9px", fontSize: 12, fontWeight: 600 }}>
+                    {REASON_LABEL[rz.type] || rz.type}
+                  </span>
+                ))}
+              </div>
+              {/* why + what to ask */}
+              <div style={{ marginTop: 8, fontSize: 12.5, color: C.text, lineHeight: 1.55 }}>
+                {row.reasons.map((rz, i) => <div key={i} style={{ color: C.sub }}>• {rz.text}</div>)}
+                <div style={{ marginTop: 6, fontWeight: 700, color: C.plumDark }}>Ask on the call:</div>
+                {row.whatToAsk.map((q, i) => <div key={i}>— {q}</div>)}
+              </div>
+
+              {/* answer toggle */}
+              {!done && (
+                <div style={{ marginTop: 10 }}>
+                  <button onClick={() => setOpen((o) => ({ ...o, [row.orderId]: !isOpen }))} style={{ ...sqBtn(isOpen ? C.cream2 : "#FFF3D6"), padding: "6px 14px", fontSize: 13 }}>
+                    {isOpen ? "▲ Hide answer" : "📝 Write answer"}
+                  </button>
+                </div>
+              )}
+
+              {/* answer form */}
+              {isOpen && !done && (
+                <div style={{ marginTop: 12, borderTop: `1px solid ${C.border}`, paddingTop: 12, display: "grid", gap: 10 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <div>
+                      <label style={lbl}>Correct pincode (if changed)</label>
+                      <input style={field} inputMode="numeric" maxLength={6} placeholder={row.pin || "6-digit pincode"} value={st.pincode} onChange={(e) => checkPin(row.orderId, e.target.value)} />
+                      {st.pincode.length === 6 && st.pinInfo && (
+                        <div style={{ fontSize: 11.5, marginTop: 3, color: st.pinInfo.valid ? C.ok : C.bad }}>
+                          {st.pinInfo.valid ? `✓ ${st.pinInfo.city}, ${st.pinInfo.state}` : "✕ invalid pincode"}
+                        </div>
+                      )}
+                      {row.pin && row.pinPlace && (
+                        <div style={{ fontSize: 11, marginTop: 2, color: C.sub }}>current {row.pin} = {row.pinPlace.city}, {row.pinPlace.state}</div>
+                      )}
+                    </div>
+                    <div>
+                      <label style={lbl}>Landmark</label>
+                      <input style={field} placeholder="e.g. near Shiv Mandir" value={st.landmark} onChange={(e) => setF(row.orderId, { landmark: e.target.value })} />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={lbl}>Full address line (optional — overwrite if the whole line was wrong)</label>
+                    <input style={field} placeholder={row.line || "house / building, street, area"} value={st.addressLine} onChange={(e) => setF(row.orderId, { addressLine: e.target.value })} />
+                  </div>
+                  <div>
+                    <label style={lbl}>Note (optional)</label>
+                    <input style={field} placeholder="anything the customer said" value={st.note} onChange={(e) => setF(row.orderId, { note: e.target.value })} />
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button onClick={() => resolve(row, "confirmed")} disabled={b === "saving"} style={{ ...sqBtn("#1E874B"), color: "#fff", border: "none", padding: "8px 18px", fontSize: 13 }}>
+                      {b === "saving" ? "Saving…" : "✓ Confirmed — save & send to Ship Queue"}
+                    </button>
+                    <button onClick={() => resolve(row, "cancelled")} disabled={b === "saving"} style={{ ...sqBtn("#C0392B"), color: "#fff", border: "none", padding: "8px 18px", fontSize: 13 }}>
+                      ✕ Cancelled
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: C.sub }}>Confirmed saves the corrected pincode/landmark into the address automatically (city + state auto-filled from the pincode) and moves the order to the Ship Queue. Cancelled is silent — no WhatsApp.</div>
+                </div>
+              )}
+              {b && <div style={{ marginTop: 8, fontSize: 12, color: b.startsWith("failed") ? C.bad : C.ok, fontWeight: 600 }}>{b}</div>}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
