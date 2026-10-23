@@ -113,6 +113,10 @@ export async function GET(req: NextRequest) {
         // High return-rate destination.
         if (r && r.rtoPct >= 80) reasons.push({ type: "high-rto", rtoPct: r.rtoPct, sample: r.res, text: `High return area — ${r.rtoPct}% of our COD orders here came back (n=${r.res}).` });
 
+        // Multi-quantity COD order — bigger money at stake, so confirm before shipping.
+        const qty = Number(o.qty) || (Array.isArray(o.items) ? o.items.reduce((s: number, it: any) => s + (Number(it.quantity) || 1), 0) : 1) || 1;
+        if (qty > 1) reasons.push({ type: "multi-qty", qty, text: `Multi-quantity order (×${qty}) — higher COD value, confirm the customer wants all ${qty} pieces.` });
+
         // Phone check: offline validity + WhatsApp reachability (did our messages
         // land / did they ever reply). A bad number is itself a reason to flag.
         const ph = checkPhone(o.phone);
@@ -134,6 +138,7 @@ export async function GET(req: NextRequest) {
         const asks: string[] = [];
         if (phoneStatus === "bad") asks.push("FIRST confirm you have the right phone number (ask them to confirm their number).");
         if (reasons.some((x) => x.type === "high-rto")) asks.push("Confirm the customer still wants this COD order (delivery will be attempted).");
+        if (reasons.some((x) => x.type === "multi-qty")) asks.push(`Confirm the customer wants all ${qty} pieces (bigger COD — confirm to avoid a costly return).`);
         if (reasons.some((x) => x.type === "pin-mismatch")) asks.push("Confirm the correct pincode (the state and pincode don't match).");
         if (reasons.some((x) => x.type === "invalid-pin" || x.type === "no-pin")) asks.push("Get the correct 6-digit pincode.");
         if (reasons.some((x) => x.type === "address-incomplete")) asks.push("Get the house/building + street + locality (village/area), and a nearby landmark — shop, temple, school or main chowk.");
