@@ -98,7 +98,17 @@ export async function GET(req: NextRequest) {
             }
           }
         }
-        if (line.length < 12) reasons.push({ type: "thin-address", text: `Address line looks incomplete ("${line || "—"}").` });
+        // Only flag an address as INCOMPLETE when, after removing the city / state
+        // / pin, there's basically no house/street/locality text left — i.e. a
+        // courier could justifiably bounce it. A short-but-real line with a valid
+        // pin + city is deliverable (the rider reaches the area + calls), so we do
+        // NOT flag it just for being short. (Boss rule: don't flag every address.)
+        let strip = line;
+        for (const tok of [claimedState, String(a.city || "")].filter((t) => t && t.length > 1)) {
+          strip = strip.replace(new RegExp(tok.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig"), " ");
+        }
+        const meaningful = strip.replace(/\d{6}/g, " ").replace(/[^a-z0-9]/gi, "");
+        if (meaningful.length < 4) reasons.push({ type: "address-incomplete", text: `No house / street / locality — only "${line || "—"}".` });
 
         // High return-rate destination.
         if (r && r.rtoPct >= 80) reasons.push({ type: "high-rto", rtoPct: r.rtoPct, sample: r.res, text: `High return area — ${r.rtoPct}% of our COD orders here came back (n=${r.res}).` });
@@ -126,7 +136,7 @@ export async function GET(req: NextRequest) {
         if (reasons.some((x) => x.type === "high-rto")) asks.push("Confirm the customer still wants this COD order (delivery will be attempted).");
         if (reasons.some((x) => x.type === "pin-mismatch")) asks.push("Confirm the correct pincode (the state and pincode don't match).");
         if (reasons.some((x) => x.type === "invalid-pin" || x.type === "no-pin")) asks.push("Get the correct 6-digit pincode.");
-        if (reasons.some((x) => x.type === "thin-address")) asks.push("Get the full house/building + street, and a nearby landmark.");
+        if (reasons.some((x) => x.type === "address-incomplete")) asks.push("Get the house/building + street + locality (village/area), and a nearby landmark — shop, temple, school or main chowk.");
 
         const best = best3(a.state).slice(0, 3);
         return {
@@ -141,7 +151,7 @@ export async function GET(req: NextRequest) {
           // Order the queue: bad phone first (can't even reach them), then
           // broken address, then plain high-RTO confirmations.
           priority: phoneStatus === "bad" ? 0
-            : reasons.some((x) => x.type === "invalid-pin" || x.type === "pin-mismatch" || x.type === "no-pin") ? 1 : 2,
+            : reasons.some((x) => x.type === "invalid-pin" || x.type === "pin-mismatch" || x.type === "no-pin" || x.type === "address-incomplete") ? 1 : 2,
         };
       })
     );
