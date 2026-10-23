@@ -799,8 +799,8 @@ function ShipQueueTab({ orders, loading, apiKey, onChanged }: { orders: Order[];
       if (o.callOutcome === "confirmed" && r.bucket === "CALL") r.bucket = "SHIP";
       return { o, r };
     });
-    // Sorted by order number (ascending) so the queue reads in order.
-    return list.sort((a, b) => (parseInt(a.o.orderId, 10) || 0) - (parseInt(b.o.orderId, 10) || 0));
+    // Newest order first (descending #), like the Wix order list.
+    return list.sort((a, b) => (parseInt(b.o.orderId, 10) || 0) - (parseInt(a.o.orderId, 10) || 0));
   }, [orders]);
   const counts = useMemo(() => {
     const c = { SHIP: 0, MESSAGE: 0, CALL: 0 };

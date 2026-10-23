@@ -158,6 +158,8 @@ export async function GET(req: NextRequest) {
     for (const d of done) if (d) rows.push(d);
   }
 
-  rows.sort((a, b) => a.priority - b.priority || (parseInt(a.orderId, 10) || 0) - (parseInt(b.orderId, 10) || 0));
+  // Urgent tier first (bad phone -> address -> RTO), then newest order first within
+  // each tier (descending #), like the Wix order list.
+  rows.sort((a, b) => a.priority - b.priority || (parseInt(b.orderId, 10) || 0) - (parseInt(a.orderId, 10) || 0));
   return NextResponse.json({ ok: true, count: rows.length, rows });
 }
