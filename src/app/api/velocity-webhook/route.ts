@@ -94,9 +94,16 @@ export async function POST(req: NextRequest) {
     // Recover the customer from Wix. `reference` (order_external_id) is now the
     // human order NUMBER we sent to Velocity — look it up by number first, then
     // by GUID (in case an older order sent the GUID), then by AWB as a last resort.
+    // A combined parcel or a re-ship carries a suffixed external_id like
+    // "VJ-#10875-C" / "VJ-#10640-R" so its id doesn't collide with the original.
+    // Velocity echoes that suffixed ref back, but the customer lives under the BASE
+    // order number — so also try the base (digits before any "-suffix").
+    const baseM = String(reference || "").match(/^(?:VJ-#?)?(\d+)-[A-Za-z0-9]+$/i);
+    const baseRef = baseM ? baseM[1] : "";
     const order =
       (reference && (await wix.findOrderByNumber(reference))) ||
       (reference && (await wix.getOrder(reference))) ||
+      (baseRef && (await wix.findOrderByNumber(baseRef))) ||
       (awb && (await wix.findOrderByAwb(awb))) ||
       null;
     if (!order) {

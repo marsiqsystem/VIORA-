@@ -143,10 +143,17 @@ export async function POST(req: NextRequest) {
   const items = [...prepaidItems, ...codItems];
   const totalUnits = items.reduce((s, it) => s + (Number(it.quantity) || 1), 0) || 1;
 
+  // Optional suffix for the Velocity external_id (e.g. "-C"), so a combined parcel
+  // gets a DISTINCT id that doesn't collide with an already-created VJ-#<num> (and
+  // can never be re-created once Velocity has reserved it). The Velocity webhook
+  // strips the suffix back to the base order number, so status + WhatsApp still
+  // correlate to the real order. All OUR bookkeeping stays on the base cod.orderId.
+  const refSuffix = String(body?.refSuffix || "").trim().replace(/[^A-Za-z0-9-]/g, "");
+
   // The shipment is keyed to the COD order (the one being collected). Address +
   // contact come from the COD order.
   const shipInput = {
-    orderId: cod.orderId,
+    orderId: cod.orderId + refSuffix,
     orderGuid: cod.orderGuid,
     name: cod.name,
     phone: cod.phone,
@@ -160,7 +167,7 @@ export async function POST(req: NextRequest) {
 
   // Preview the exact parcel maths (mirrors velocity.buildShipmentPayload).
   const preview = {
-    order_id: `VJ-#${cod.orderId}`,
+    order_id: `VJ-#${cod.orderId}${refSuffix}`,
     customer: cod.name,
     phone: cod.phone,
     address: cod.address,
