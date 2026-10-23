@@ -1153,7 +1153,7 @@ function CallQueueTab({ apiKey, onChanged }: { apiKey: string; onChanged: () => 
         ))}
         <button onClick={loadQueue} style={{ ...sqBtn(C.card), padding: "9px 14px" }}>↻ Refresh</button>
         <div style={{ color: C.sub, fontSize: 12.5, flex: "1 1 220px" }}>
-          Phone check = our WhatsApp reachability (delivered / replied / failed) + number format. It's a strong proxy, not a live telecom check.
+          Phone check = our WhatsApp reachability (delivered / replied / failed) + number format. A strong proxy, not a live telecom check.
         </div>
       </div>
 
