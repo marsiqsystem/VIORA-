@@ -210,7 +210,7 @@ async function sendOrderConfirmation(o) {
     : [o.name, o.orderId, o.amount, o.paymentMode];
   const headerImageUrl = o.productImage || T.orderConfirmation.headerImageUrl;
   const res = await sendTemplate({
-    to: o.phone,
+    to: o.waPhone || o.phone,
     templateName: T.orderConfirmation.name,
     languageCode: T.orderConfirmation.lang,
     // The template's IMAGE header: use this order's product photo when we have
@@ -219,7 +219,7 @@ async function sendOrderConfirmation(o) {
     bodyParams,
   });
   const text = await realText(T.orderConfirmation.name, T.orderConfirmation.lang, bodyParams, render.orderConfirmation(o));
-  await logOutbound(o.phone, text, res, o.name, headerImageUrl);
+  await logOutbound(o.waPhone || o.phone, text, res, o.name, headerImageUrl);
   return res;
 }
 
@@ -230,14 +230,14 @@ async function sendDispatched(o) {
   const bodyParams = [o.name, o.orderId, trackingLink(o)];
   const headerImageUrl = o.productImage || T.dispatched.headerImageUrl;
   const res = await sendTemplate({
-    to: o.phone,
+    to: o.waPhone || o.phone,
     templateName: T.dispatched.name,
     languageCode: T.dispatched.lang,
     headerImageUrl,
     bodyParams,
   });
   const text = await realText(T.dispatched.name, T.dispatched.lang, bodyParams, render.dispatched(o));
-  await logOutbound(o.phone, text, res, o.name, headerImageUrl);
+  await logOutbound(o.waPhone || o.phone, text, res, o.name, headerImageUrl);
   return res;
 }
 
@@ -253,14 +253,14 @@ async function sendOutForDelivery(o) {
   const bodyParams = [o.name, o.orderId, o.product, amountParam];
   const headerImageUrl = o.productImage || T.outForDelivery.headerImageUrl;
   const res = await sendTemplate({
-    to: o.phone,
+    to: o.waPhone || o.phone,
     templateName: T.outForDelivery.name,
     languageCode: T.outForDelivery.lang,
     headerImageUrl,
     bodyParams,
   });
   const text = await realText(T.outForDelivery.name, T.outForDelivery.lang, bodyParams, render.outForDelivery(o));
-  await logOutbound(o.phone, text, res, o.name, headerImageUrl);
+  await logOutbound(o.waPhone || o.phone, text, res, o.name, headerImageUrl);
   return res;
 }
 
@@ -271,14 +271,14 @@ async function sendDelivered(o) {
   const bodyParams = [o.name, o.orderId];
   const headerImageUrl = o.productImage || T.delivered.headerImageUrl;
   const res = await sendTemplate({
-    to: o.phone,
+    to: o.waPhone || o.phone,
     templateName: T.delivered.name,
     languageCode: T.delivered.lang,
     headerImageUrl,
     bodyParams,
   });
   const text = await realText(T.delivered.name, T.delivered.lang, bodyParams, render.delivered(o));
-  await logOutbound(o.phone, text, res, o.name, headerImageUrl);
+  await logOutbound(o.waPhone || o.phone, text, res, o.name, headerImageUrl);
   return res;
 }
 
@@ -295,7 +295,7 @@ async function sendReviewRequest(o) {
     ? o.productImage || T.reviewRequest.headerImageUrl
     : undefined;
   const res = await sendTemplate({
-    to: o.phone,
+    to: o.waPhone || o.phone,
     templateName: T.reviewRequest.name,
     languageCode: T.reviewRequest.lang,
     ...(headerImageUrl ? { headerImageUrl } : {}),
@@ -304,7 +304,7 @@ async function sendReviewRequest(o) {
     urlButtons: [{ index: "0", param: slugify(o.product) }],
   });
   const text = await realText(T.reviewRequest.name, T.reviewRequest.lang, bodyParams, render.reviewRequest(o));
-  await logOutbound(o.phone, text, res, o.name, headerImageUrl);
+  await logOutbound(o.waPhone || o.phone, text, res, o.name, headerImageUrl);
   return res;
 }
 
@@ -315,7 +315,7 @@ async function sendAbandonedCart(o) {
   const bodyParams = [o.name, o.product, o.amount];
   const headerImageUrl = o.productImage || T.abandonedCart.headerImageUrl;
   const res = await sendTemplate({
-    to: o.phone,
+    to: o.waPhone || o.phone,
     templateName: T.abandonedCart.name,
     languageCode: T.abandonedCart.lang,
     headerImageUrl,
@@ -323,7 +323,7 @@ async function sendAbandonedCart(o) {
     urlButtons: [{ index: "0", param: o.cartToken }],
   });
   const text = await realText(T.abandonedCart.name, T.abandonedCart.lang, bodyParams, render.abandonedCart(o));
-  await logOutbound(o.phone, text, res, o.name, headerImageUrl);
+  await logOutbound(o.waPhone || o.phone, text, res, o.name, headerImageUrl);
   return res;
 }
 
@@ -336,7 +336,7 @@ async function sendOrderCancelled(o) {
   const bodyParams = [o.name, o.orderId, o.product, o.amount, prettyPayment(o.paymentMode)];
   const headerImageUrl = o.productImage || T.orderCancelled.headerImageUrl;
   const res = await sendTemplate({
-    to: o.phone,
+    to: o.waPhone || o.phone,
     templateName: T.orderCancelled.name,
     languageCode: T.orderCancelled.lang,
     // Same as confirmation: this order's product photo when we have it, else the logo.
@@ -344,7 +344,7 @@ async function sendOrderCancelled(o) {
     bodyParams,
   });
   const text = await realText(T.orderCancelled.name, T.orderCancelled.lang, bodyParams, render.orderCancelled(o));
-  await logOutbound(o.phone, text, res, o.name, headerImageUrl);
+  await logOutbound(o.waPhone || o.phone, text, res, o.name, headerImageUrl);
   return res;
 }
 
@@ -357,14 +357,14 @@ async function sendReattempt(o) {
   const bodyParams = [o.name, o.orderId, o.product, o.amount];
   const headerImageUrl = o.productImage || T.deliveryReattempt.headerImageUrl;
   const res = await sendTemplate({
-    to: o.phone,
+    to: o.waPhone || o.phone,
     templateName: T.deliveryReattempt.name,
     languageCode: T.deliveryReattempt.lang,
     headerImageUrl,
     bodyParams,
   });
   const text = await realText(T.deliveryReattempt.name, T.deliveryReattempt.lang, bodyParams, render.deliveryReattempt(o));
-  await logOutbound(o.phone, text, res, o.name, headerImageUrl);
+  await logOutbound(o.waPhone || o.phone, text, res, o.name, headerImageUrl);
   return res;
 }
 

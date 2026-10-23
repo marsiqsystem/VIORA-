@@ -22,6 +22,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as wix from "@/lib/crm/wix";
 import * as notify from "@/lib/crm/notify";
+import * as ordersStore from "@/lib/crm/orders-store";
 import * as idempotency from "@/lib/crm/idempotency";
 import { authOk, authConfigured, keyFromRequest } from "@/lib/crm/inbox-store";
 
@@ -70,6 +71,11 @@ export async function POST(req: NextRequest) {
       continue;
     }
     if (awb && !order.awb) order.awb = awb;
+    // Honor a waPhone override (WhatsApp number ≠ courier/calling number).
+    try {
+      const kv: any = await ordersStore.getOrder(order.orderId);
+      if (kv?.waPhone) (order as any).waPhone = kv.waPhone;
+    } catch { /* ignore */ }
 
     // Tracking link for the dispatched WhatsApp ({{3}}). notify.trackingLink()'s
     // AWB fallback builds the Velocity-branded host — a DEAD link for a Shiprocket

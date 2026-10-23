@@ -104,6 +104,12 @@ export async function POST(req: NextRequest) {
       return new NextResponse(null, { status: 200 });
     }
     if (awb && !order.awb) order.awb = awb; // ensure the tracking link has a value
+    // Route WhatsApp to the customer's `waPhone` override (if any) — set when the
+    // WhatsApp number differs from the courier/calling number. Best-effort.
+    try {
+      const kv: any = await ordersStore.getOrder((order as any).orderId);
+      if (kv?.waPhone) (order as any).waPhone = kv.waPhone;
+    } catch { /* ignore */ }
     // Carry a tracking URL for the dispatched message's {{3}} (webhook value,
     // else whatever Wix stored; notify falls back to building it from the AWB).
     if (trackingUrl && !order.trackingUrl) order.trackingUrl = trackingUrl;

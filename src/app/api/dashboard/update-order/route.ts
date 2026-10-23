@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 const NUMERIC = new Set(["freight", "rtoCost", "goodsCost", "prepaidFee", "sellingPrice", "qty"]);
-const STRING = new Set(["status", "courier", "awb", "trackingUrl", "paymentReceived", "deliveryStatus", "transitStatus", "pickupStatus", "dCode", "colour"]);
+const STRING = new Set(["status", "courier", "awb", "trackingUrl", "paymentReceived", "deliveryStatus", "transitStatus", "pickupStatus", "dCode", "colour", "waPhone"]);
 
 export async function POST(req: NextRequest) {
   if (!authConfigured()) return NextResponse.json({ ok: false, error: "INBOX_SECRET not set" }, { status: 503 });

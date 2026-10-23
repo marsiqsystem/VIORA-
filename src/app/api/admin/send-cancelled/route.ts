@@ -18,6 +18,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import * as wix from "@/lib/crm/wix";
+import * as ordersStore from "@/lib/crm/orders-store";
 import { dispatchCancellationOnce } from "@/lib/crm/cancel";
 import { release } from "@/lib/crm/idempotency";
 import { authOk, authConfigured, keyFromRequest } from "@/lib/crm/inbox-store";
@@ -58,6 +59,11 @@ export async function POST(req: NextRequest) {
       results.push({ number, name: order.name, sent: false, reason: "no phone" });
       continue;
     }
+    // Honor a waPhone override (WhatsApp number ≠ courier/calling number).
+    try {
+      const kv: any = await ordersStore.getOrder(order.orderId);
+      if (kv?.waPhone) (order as any).waPhone = kv.waPhone;
+    } catch { /* ignore */ }
     if (!doSend) {
       results.push({
         number,

@@ -92,6 +92,13 @@ export async function handleCourierWebhook(req: NextRequest) {
       return new NextResponse(null, { status: 200 });
     }
     if (awb && !order.awb) order.awb = awb;
+    // A customer whose WhatsApp number differs from the courier/calling number has
+    // a `waPhone` override in our store — route the notification there, not to the
+    // Wix phone (which stays the courier's calling number). Best-effort.
+    try {
+      const kv: any = await ordersStore.getOrder(order.orderId);
+      if (kv?.waPhone) order.waPhone = kv.waPhone;
+    } catch { /* ignore */ }
     // Tracking link for the dispatched WhatsApp ({{3}}). Prefer the URL in the
     // webhook; otherwise build Shiprocket's OWN public tracking page from the AWB.
     // We must NOT let notify.js fall back to its default TRACK_BASE — that's the
