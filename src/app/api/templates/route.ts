@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listTemplates } from "@/lib/crm/whatsapp";
 import { authOk, authConfigured, keyFromRequest } from "@/lib/crm/inbox-store";
+import T from "@/lib/crm/templates";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -140,6 +141,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       count: raw.length,
+      // Which template each workflow is actually WIRED to send right now (driven
+      // by the TPL_* env vars). Lets us confirm e.g. the order-confirmation flip
+      // to v2 took effect without reading a hidden env value.
+      active: {
+        orderConfirmation: (T as any).orderConfirmation?.name,
+        orderConfirmationLang: (T as any).orderConfirmation?.lang,
+      },
       raw: raw.map((t: any) => ({
         name: t?.name,
         status: t?.status,
