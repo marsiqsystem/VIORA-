@@ -85,7 +85,7 @@ function StatusBadge({ status }: { status: string }) {
 
 const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
 
-type Tab = "summary" | "shipqueue" | "callqueue" | "orders" | "rto" | "products" | "inventory" | "cod";
+type Tab = "summary" | "shipqueue" | "toship" | "callqueue" | "orders" | "rto" | "products" | "inventory" | "cod";
 type Meta = {
   inventory: { code: string; colour: string; qty: number }[];
   cod: Record<string, { label: string; value: string }[]>;
@@ -232,7 +232,7 @@ export default function DashboardPage() {
     );
   }
 
-  const TABS: [Tab, string][] = [["summary", "Summary"], ["shipqueue", "Ship Queue"], ["callqueue", "Call Queue"], ["orders", "Orders"], ["rto", "RTO Report"], ["products", "Products"], ["inventory", "Inventory"], ["cod", "COD & Freight"]];
+  const TABS: [Tab, string][] = [["summary", "Summary"], ["shipqueue", "Ship Queue"], ["toship", "To Ship"], ["callqueue", "Call Queue"], ["orders", "Orders"], ["rto", "RTO Report"], ["products", "Products"], ["inventory", "Inventory"], ["cod", "COD & Freight"]];
 
   return (
     <div style={{ minHeight: "100vh", background: C.bg, color: C.text }}>
@@ -258,6 +258,7 @@ export default function DashboardPage() {
 
         {tab === "summary" && <SummaryTab kpi={kpi} monthly={monthly} byProduct={byProduct} statusBreakdown={statusBreakdown} />}
         {tab === "shipqueue" && <ShipQueueTab orders={orders} loading={loading} apiKey={key} onChanged={() => load(key)} />}
+        {tab === "toship" && <ToShipTab orders={orders} loading={loading} />}
         {tab === "callqueue" && <CallQueueTab apiKey={key} onChanged={() => load(key)} />}
         {tab === "orders" && <OrdersTab orders={orders} loading={loading} apiKey={key} onChanged={() => load(key)} />}
         {tab === "rto" && <RtoTab kpi={kpi} byProduct={byProduct} rtoByCourier={rtoByCourier} rtoByPayment={rtoByPayment} />}
@@ -785,6 +786,70 @@ function pickCarrierRate(velRates: any[], best: { carrier: string }[]): { carrie
 
 type ShipModal = { o: Order; r: Reco; loading: boolean; carrier?: string; cost?: number; gst?: number; total?: number; err?: string } | null;
 type EditModal = { o: Order; sellingPrice: string; qty: string; colour: string; dCode: string; line1: string; line2: string; city: string; state: string; postalCode: string } | null;
+
+// --- To Ship: orders CREATE-ONLY'd onto Velocity (status "created"), awaiting a
+// panel-ship. They leave the Ship Queue the moment they're created (no wallet
+// debit, we pick the courier ourselves), so this view keeps the recommended
+// courier visible per order — the operator ships each from the Velocity panel
+// with the carrier shown, then it drops off here automatically once dispatched.
+function ToShipTab({ orders, loading }: { orders: Order[]; loading: boolean }) {
+  const rows = useMemo(
+    () =>
+      orders
+        .filter((o) => o.status === "created")
+        .map((o) => ({ o, r: recoFor(o) as Reco }))
+        .sort((a, b) => (parseInt(b.o.orderId, 10) || 0) - (parseInt(a.o.orderId, 10) || 0)),
+    [orders]
+  );
+  // Amazon is excluded from our courier choices per policy, so drop it from the pick.
+  const pick = (r: Reco) => r.best.filter((b) => !/amazon/i.test(b.carrier)).slice(0, 3);
+
+  return (
+    <div>
+      <div style={{ background: "#E7EEF7", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#2C5282" }}>
+        📦 These orders are <b>created on Velocity (no charge)</b> and waiting to be shipped from the Velocity panel.
+        Ship each with the <b>first courier</b> shown — the others are backups if it isn’t serviceable.
+        An order drops off this list automatically once it’s shipped.
+      </div>
+      <TableWrap>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead>
+            <tr style={{ textAlign: "left", color: C.sub, borderBottom: `2px solid ${C.border}` }}>
+              {["Order", "Customer", "Destination", "Item", "COD", "RTO%", "Ship with (in order)"].map((h) => (
+                <th key={h} style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <tr><td colSpan={7} style={{ padding: 16, color: C.sub }}>Loading…</td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={7} style={{ padding: 16, color: C.sub }}>Nothing waiting to ship. 🎉</td></tr>}
+            {rows.map(({ o, r }) => {
+              const best = pick(r);
+              return (
+                <tr key={o.orderId} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "8px 10px", fontWeight: 600, whiteSpace: "nowrap" }}>#{o.orderId}</td>
+                  <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{o.name}<div style={{ color: C.sub, fontSize: 11 }}>{o.phone}</div></td>
+                  <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{o.address?.city || ""}<div style={{ color: C.sub, fontSize: 11 }}>{r.state}</div></td>
+                  <td style={{ padding: "8px 10px", fontSize: 12 }}>{o.product || o.dCode}{o.colour ? ` – ${o.colour}` : ""}<div style={{ color: C.sub, fontSize: 11 }}>×{o.qty || 1}</div></td>
+                  <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>₹{o.sellingPrice}<div style={{ color: C.sub, fontSize: 11 }}>{r.payment}</div></td>
+                  <td style={{ padding: "8px 10px", fontWeight: 700, color: rtoColor(r.rtoPct) }}>{r.rtoPct == null ? "?" : r.rtoPct + "%"}<div style={{ color: C.sub, fontSize: 10, fontWeight: 400 }}>n={r.sample}</div></td>
+                  <td style={{ padding: "8px 10px" }}>
+                    {best.length ? (
+                      <span><b style={{ color: C.plumDark }}>🥇 {best[0].carrier}</b>{best.length > 1 && <span style={{ color: C.sub }}> → {best.slice(1).map((b) => b.carrier).join(" → ")}</span>}</span>
+                    ) : (
+                      <span style={{ color: C.sub }}>no data — use Delhivery / DTDC</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </TableWrap>
+      <p style={{ color: C.sub, fontSize: 12, marginTop: 10 }}>🥇 Ship with the first courier; the rest are fallbacks if it isn’t serviceable. Amazon is excluded per policy. Recommendations come from our own Velocity + Shiprocket delivery history (per state).</p>
+    </div>
+  );
+}
 
 function ShipQueueTab({ orders, loading, apiKey, onChanged }: { orders: Order[]; loading: boolean; apiKey: string; onChanged: () => void }) {
   const [filter, setFilter] = useState<"ALL" | "SHIP" | "MESSAGE" | "CALL">("ALL");
