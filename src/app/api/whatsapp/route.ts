@@ -80,18 +80,22 @@ export async function POST(req: NextRequest) {
   } catch {
     /* empty / non-JSON body — treat as no-op */
   }
-  try {
-    await handleInbound(body);
-  } catch (err) {
-    console.error("Inbound handling error:", err);
-  }
-  // Persist the same body into the two-way inbox store (customer replies +
-  // delivery/read ticks). Purely additive to the auto-reply pipeline above and
-  // failure-isolated — a store hiccup must never break the webhook ack.
+  // Record the customer's inbound message into the inbox store FIRST, then run
+  // the auto-reply (which may send + store our reply). Order matters: the inbox
+  // thread is ordered by the order rows are written, so storing the inbound
+  // before our reply keeps the chat in the right sequence — otherwise our
+  // "No problem…" / "Thank you…" reply appears ABOVE the button tap that
+  // triggered it. Both are failure-isolated; a store hiccup must never break
+  // the webhook ack.
   try {
     await ingestWebhook(body);
   } catch (err) {
     console.error("Inbox ingest error:", err);
+  }
+  try {
+    await handleInbound(body);
+  } catch (err) {
+    console.error("Inbound handling error:", err);
   }
   // Always 200 so Meta doesn't disable the webhook or retry-storm.
   return new NextResponse(null, { status: 200 });

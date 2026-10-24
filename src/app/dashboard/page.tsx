@@ -1078,6 +1078,7 @@ const PHONE_STYLE: Record<string, { bg: string; fg: string; icon: string }> = {
 const REASON_LABEL: Record<string, string> = {
   "bad-phone": "📵 Phone problem", "pin-mismatch": "📍 Pincode ≠ state", "invalid-pin": "📍 Invalid pincode",
   "no-pin": "📍 No pincode", "address-incomplete": "🏠 Address incomplete", "high-rto": "↩️ High return area", "multi-qty": "🔢 Multi-quantity",
+  "duplicate-customer": "🔗 Combine — same customer",
 };
 
 function CallQueueTab({ apiKey, onChanged }: { apiKey: string; onChanged: () => void }) {

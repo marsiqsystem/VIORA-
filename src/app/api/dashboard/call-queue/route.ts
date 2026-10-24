@@ -65,6 +65,37 @@ export async function GET(req: NextRequest) {
       o.callOutcome !== "cancelled"
   );
 
+  // --- Same-customer detection (combine before shipping) ----------------------
+  // Index every still-COMBINABLE order (not yet dispatched/finished) by phone
+  // (last 10 digits) and by email, so that when a customer has TWO or more such
+  // orders we flag them to be merged into ONE parcel — one shipping + one COD
+  // fee instead of two. (Costly miss otherwise, e.g. a red + a black of the same
+  // set shipped separately.)
+  const tail10 = (p: string) => String(p || "").replace(/\D/g, "").slice(-10);
+  const emailKey = (e: string) => String(e || "").trim().toLowerCase();
+  const COMBINABLE = new Set(["new", "created", "on_hold", "not_shipped", "confirmed", ""]);
+  const byPhone = new Map<string, AnyOrder[]>();
+  const byEmail = new Map<string, AnyOrder[]>();
+  const pushTo = (m: Map<string, AnyOrder[]>, k: string, v: AnyOrder) => {
+    const arr = m.get(k) || [];
+    arr.push(v);
+    m.set(k, arr);
+  };
+  for (const o of orders) {
+    if (!COMBINABLE.has(String(o.status || "").toLowerCase())) continue;
+    const p = tail10(o.phone);
+    if (p.length === 10) pushTo(byPhone, p, o);
+    const e = emailKey(o.email);
+    if (e) pushTo(byEmail, e, o);
+  }
+  // For a given order, the OTHER still-combinable orders from the same customer.
+  const twinsOf = (o: AnyOrder): AnyOrder[] => {
+    const seen = new Map<string, AnyOrder>();
+    for (const t of byPhone.get(tail10(o.phone)) || []) if (String(t.orderId) !== String(o.orderId)) seen.set(String(t.orderId), t);
+    for (const t of byEmail.get(emailKey(o.email)) || []) if (String(t.orderId) !== String(o.orderId)) seen.set(String(t.orderId), t);
+    return Array.from(seen.values());
+  };
+
   // Verify pincodes in parallel batches (cached in KV, so fast after the first pass).
   const rows: any[] = [];
   const BATCH = 12;
@@ -117,6 +148,19 @@ export async function GET(req: NextRequest) {
         const qty = Number(o.qty) || (Array.isArray(o.items) ? o.items.reduce((s: number, it: any) => s + (Number(it.quantity) || 1), 0) : 1) || 1;
         if (qty > 1) reasons.push({ type: "multi-qty", qty, text: `Multi-quantity order (×${qty}) — higher COD value, confirm the customer wants all ${qty} pieces.` });
 
+        // Same customer has other still-unshipped orders -> combine into one parcel.
+        const twins = twinsOf(o);
+        if (twins.length) {
+          const list = twins
+            .map((t) => `#${t.orderId}${t.product ? ` (${t.product})` : ""}`)
+            .join(", ");
+          reasons.push({
+            type: "duplicate-customer",
+            twins: twins.map((t) => ({ orderId: t.orderId, product: t.product || "", status: t.status || "", amount: t.sellingPrice ?? t.amount ?? null })),
+            text: `Same customer also has pending order(s): ${list}. Combine into ONE parcel before shipping — saves a second shipping + COD fee.`,
+          });
+        }
+
         // Phone check: offline validity + WhatsApp reachability (did our messages
         // land / did they ever reply). A bad number is itself a reason to flag.
         const ph = checkPhone(o.phone);
@@ -142,6 +186,11 @@ export async function GET(req: NextRequest) {
         if (reasons.some((x) => x.type === "pin-mismatch")) asks.push("Confirm the correct pincode (the state and pincode don't match).");
         if (reasons.some((x) => x.type === "invalid-pin" || x.type === "no-pin")) asks.push("Get the correct 6-digit pincode.");
         if (reasons.some((x) => x.type === "address-incomplete")) asks.push("Get the house/building + street + locality (village/area), and a nearby landmark — shop, temple, school or main chowk.");
+        if (reasons.some((x) => x.type === "duplicate-customer")) {
+          const dc: any = reasons.find((x) => x.type === "duplicate-customer");
+          const list = (dc?.twins || []).map((t: any) => `#${t.orderId}`).join(", ");
+          asks.push(`COMBINE with ${list} into one shipment before booking (one shipping + one COD fee instead of two).`);
+        }
 
         const best = best3(a.state).slice(0, 3);
         return {
@@ -156,7 +205,7 @@ export async function GET(req: NextRequest) {
           // Order the queue: bad phone first (can't even reach them), then
           // broken address, then plain high-RTO confirmations.
           priority: phoneStatus === "bad" ? 0
-            : reasons.some((x) => x.type === "invalid-pin" || x.type === "pin-mismatch" || x.type === "no-pin" || x.type === "address-incomplete") ? 1 : 2,
+            : reasons.some((x) => x.type === "invalid-pin" || x.type === "pin-mismatch" || x.type === "no-pin" || x.type === "address-incomplete" || x.type === "duplicate-customer") ? 1 : 2,
         };
       })
     );
