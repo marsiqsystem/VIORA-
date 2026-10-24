@@ -282,4 +282,40 @@ async function listOrders({ limit = 200, offset = 0 } = {}) {
   }
 }
 
-export { recordOrder, updateOrder, applyCourierStatus, getOrder, listOrders, isConfigured, blankRecord };
+// Last-10-digit view of a phone, so "+91 90067…", "9190067…" and "090067…" all
+// compare equal. Returns "" when there aren't 10 usable digits.
+function phoneTail(p) {
+  const d = String(p || "").replace(/\D/g, "");
+  return d.length >= 10 ? d.slice(-10) : "";
+}
+
+/**
+ * Find the order a customer's WhatsApp number most likely refers to — used when
+ * a Confirm / Cancel / Change-address button tap gives us only the sender's
+ * phone, not an order id. Matches on either the courier/calling number (`phone`)
+ * or the WhatsApp-override number (`waPhone`), compared on the last 10 digits.
+ * Prefers a still-open order (not delivered/cancelled/rto) and, among those,
+ * the newest one placed. Returns null when nothing matches. Never throws.
+ */
+async function findLatestOrderByPhone(phone) {
+  const tail = phoneTail(phone);
+  if (!tail) return null;
+  try {
+    const { orders } = await listOrders({ limit: 5000 });
+    const matches = orders.filter(
+      (o) => phoneTail(o.phone) === tail || phoneTail(o.waPhone) === tail
+    );
+    if (!matches.length) return null;
+    const terminal = (s) => s === "delivered" || s === "cancelled" || s === "rto";
+    const open = matches.filter((o) => !terminal(o.status));
+    const pool = open.length ? open : matches;
+    // listOrders already sorts newest-first by createdAt, so the first survivor
+    // is the most recent.
+    return pool[0] || null;
+  } catch (e) {
+    console.warn("[orders-store] findLatestOrderByPhone failed:", e?.message || e);
+    return null;
+  }
+}
+
+export { recordOrder, updateOrder, applyCourierStatus, getOrder, listOrders, findLatestOrderByPhone, isConfigured, blankRecord };

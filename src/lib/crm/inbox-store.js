@@ -873,6 +873,42 @@ async function getReachability(phone) {
   }
 }
 
+// --- "Change address" capture state -----------------------------------------
+// When a customer taps the ✏️ Change address button on order_confirmation_v2 we
+// ask them to type their corrected address and remember WHICH order we're
+// waiting on, keyed by their phone. The very next text they send is folded into
+// that order's address (see autoReply.js). Self-expiring so an abandoned flow
+// never traps a thread. Fail-safe: any KV hiccup just behaves as "not waiting".
+const AWAIT_ADDR_TTL_S = 24 * 60 * 60; // 24h to reply with the new address
+function awaitAddrKey(phone) {
+  return `${PREFIX}await_addr:${normPhone(phone)}`;
+}
+async function setAwaitingAddress(phone, orderId) {
+  if (!isConfigured() || !orderId) return false;
+  try {
+    await command(["SET", awaitAddrKey(phone), String(orderId), "EX", String(AWAIT_ADDR_TTL_S)]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function getAwaitingAddress(phone) {
+  if (!isConfigured()) return "";
+  try {
+    return (await command(["GET", awaitAddrKey(phone)])) || "";
+  } catch {
+    return "";
+  }
+}
+async function clearAwaitingAddress(phone) {
+  if (!isConfigured()) return;
+  try {
+    await command(["DEL", awaitAddrKey(phone)]);
+  } catch {
+    /* best-effort */
+  }
+}
+
 export {
   isConfigured,
   ingestWebhook,
@@ -880,6 +916,9 @@ export {
   getConversations,
   getMessages,
   getReachability,
+  setAwaitingAddress,
+  getAwaitingAddress,
+  clearAwaitingAddress,
   markRead,
   deleteMessage,
   deleteConversation,

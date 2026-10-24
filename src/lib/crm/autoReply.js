@@ -17,7 +17,14 @@ import { logLead } from "./sheets";
 import { generateReply, isConfigured as aiConfigured } from "./gemini";
 import { sendText } from "./whatsapp";
 import { VIORA_SYSTEM_PROMPT } from "./prompts";
-import { recordOutbound } from "./inbox-store";
+import {
+  recordOutbound,
+  setAwaitingAddress,
+  getAwaitingAddress,
+  clearAwaitingAddress,
+} from "./inbox-store";
+import { findLatestOrderByPhone, updateOrder, getOrder } from "./orders-store";
+import { extractPincode, lookupPincode, buildStructuredAddress } from "./pincode";
 
 const aiEnabled = () =>
   String(process.env.AI_AUTOREPLY_ENABLED).toLowerCase() === "true";
@@ -32,18 +39,125 @@ const CONFIRM_REPLY =
 const CANCEL_REPLY =
   process.env.WA_CANCEL_REPLY ||
   "We've received your cancellation request. Our team will reach out to you shortly. If you tapped this by mistake, just reply here and we'll keep your order safe. — Team Viora Jewels";
+// Shown when the customer taps ✏️ Change address — we then capture their very
+// next message as the corrected delivery address (see handleAddressCapture).
+const CHANGE_ADDR_PROMPT =
+  process.env.WA_CHANGE_ADDR_PROMPT ||
+  "No problem! 📍 Please reply to this chat with your full delivery address — house/flat, street, area, city, state and your 6-digit pincode. We'll update your order right away. — Team Viora Jewels";
 
 /**
- * Classify a message as a Confirm/Cancel button tap. Quick-reply taps arrive as
- * type "button" (button.text) or "interactive" (button_reply.title); parseInbound
- * already put that title into msg.text. Returns "CONFIRM" | "CANCEL" | null.
+ * Classify a message as an order_confirmation button tap. Quick-reply taps arrive
+ * as type "button" (button.text) or "interactive" (button_reply.title);
+ * parseInbound already put that title into msg.text. The v2 template has three
+ * buttons — ✅ Confirm order, ❌ Cancel order, ✏️ Change address.
+ * Returns "CONFIRM" | "CANCEL" | "CHANGE_ADDRESS" | null. Order matters: "change
+ * address" is checked before "cancel"/"confirm" so its wording can't collide.
  */
 function buttonIntent(msg) {
   if (msg.type !== "button" && msg.type !== "interactive") return null;
   const t = String(msg.text || "").toLowerCase();
-  if (t.includes("confirm")) return "CONFIRM";
+  if (t.includes("address") || t.includes("change")) return "CHANGE_ADDRESS";
   if (t.includes("cancel")) return "CANCEL";
+  if (t.includes("confirm")) return "CONFIRM";
   return null;
+}
+
+/**
+ * Mark the order a Confirm/Cancel tap refers to. The button tap only tells us
+ * the sender's phone, so we resolve it to their latest open order. Mirrors the
+ * dashboard call-resolve semantics: CONFIRM stamps callOutcome=confirmed (the
+ * order leaves the Call Queue and is ship-ready); CANCEL sets status=cancelled.
+ * Best-effort — a missing order or KV blip just means no status change (the
+ * customer still gets the acknowledgement). Never throws.
+ */
+async function markOrderFromButton(phone, intent) {
+  try {
+    const order = await findLatestOrderByPhone(phone);
+    if (!order?.orderId) {
+      console.log(`[auto-reply] ${intent}: no order matched phone ${phone} — ack only.`);
+      return null;
+    }
+    const now = Date.now();
+    if (intent === "CANCEL") {
+      await updateOrder(order.orderId, {
+        status: "cancelled",
+        statusAt: now,
+        callOutcome: "cancelled",
+        callNote: "Customer tapped ❌ Cancel on the WhatsApp confirmation.",
+        callResolvedAt: now,
+      });
+    } else {
+      await updateOrder(order.orderId, {
+        callOutcome: "confirmed",
+        callNote: "Customer tapped ✅ Confirm on the WhatsApp confirmation.",
+        callResolvedAt: now,
+      });
+    }
+    console.log(`[auto-reply] ${intent} applied to order #${order.orderId}.`);
+    return order;
+  } catch (e) {
+    console.error("[auto-reply] markOrderFromButton failed:", e?.message || e);
+    return null;
+  }
+}
+
+/**
+ * Fold a free-text message into the awaiting order's delivery address. Fires only
+ * when the customer earlier tapped ✏️ Change address (we stored the order id
+ * against their phone). Resolves any 6-digit pincode in the text to city+state,
+ * saves a structured address, stamps the order confirmed, clears the wait, and
+ * acknowledges with the captured address. Returns true when it handled the
+ * message (so the caller skips the AI path). Never throws.
+ */
+async function handleAddressCapture(msg) {
+  if (!msg.text) return false;
+  let orderId = "";
+  try { orderId = await getAwaitingAddress(msg.from); } catch { orderId = ""; }
+  if (!orderId) return false;
+
+  try {
+    const order = (await getOrder(orderId)) || {};
+    const a = order.address || {};
+    const text = String(msg.text).trim();
+    const pin = extractPincode(text) || String(a.postalCode || "").replace(/\D/g, "");
+    let city = a.city || "";
+    let state = a.state || "";
+    if (pin && pin.length === 6) {
+      try {
+        const looked = await lookupPincode(pin);
+        if (looked.city) city = looked.city;
+        if (looked.state) state = looked.state;
+      } catch { /* lookup blip — keep existing city/state */ }
+    }
+    const address = buildStructuredAddress(text, { pincode: pin, city, state, country: "India" });
+    const now = Date.now();
+    await updateOrder(orderId, {
+      address,
+      addressText: text,
+      addressEdited: true,
+      callOutcome: "confirmed",
+      callNote: "Customer sent a corrected address via WhatsApp (Change address).",
+      callResolvedAt: now,
+    });
+  } catch (e) {
+    console.error("[auto-reply] handleAddressCapture update failed:", e?.message || e);
+    // fall through to still clear the wait + acknowledge, so we don't loop.
+  }
+
+  await clearAwaitingAddress(msg.from);
+  const ack =
+    "Thank you! ✅ We've updated your delivery address to:\n" +
+    `“${String(msg.text).trim()}”\n` +
+    "Your order is confirmed and we'll ship it here. If anything looks wrong, just reply. — Team Viora Jewels";
+  const sent = await sendText({ to: msg.from, body: ack });
+  await recordOutbound({
+    to: msg.from,
+    text: ack,
+    wamid: sent?.data?.messages?.[0]?.id,
+    status: sent?.dryRun ? "pending" : "sent",
+  });
+  console.log(`[auto-reply] address captured for order #${orderId} from ${msg.from}.`);
+  return true;
 }
 
 /** Handle one parsed inbound message. Never throws. */
@@ -59,10 +173,32 @@ async function handleMessage(msg) {
   // 1) Lead logging (independent of AI).
   await logLead({ name: msg.name, phone: msg.from, message: msg.text, timestamp: iso });
 
-  // 2) Order-confirmation button taps get a fixed acknowledgement (no AI). This
-  //    is the "Confirm Order" / "Cancel Order" flow from order_confirmation_v1.
+  // 2) Order-confirmation button taps (order_confirmation_v2: ✅ Confirm /
+  //    ❌ Cancel / ✏️ Change address) get a fixed acknowledgement (no AI) AND
+  //    update the order so the dashboard reflects the customer's choice.
   const intent = buttonIntent(msg);
   if (intent) {
+    if (intent === "CHANGE_ADDRESS") {
+      // Remember which order to attach the next reply to, then ask for the
+      // address. If we can't match an order, still ask (capture just won't fire).
+      const order = await findLatestOrderByPhone(msg.from);
+      if (order?.orderId) await setAwaitingAddress(msg.from, order.orderId);
+      const sent = await sendText({ to: msg.from, body: CHANGE_ADDR_PROMPT });
+      await recordOutbound({
+        to: msg.from,
+        text: CHANGE_ADDR_PROMPT,
+        wamid: sent?.data?.messages?.[0]?.id,
+        status: sent?.dryRun ? "pending" : "sent",
+      });
+      console.log(
+        `[auto-reply] CHANGE_ADDRESS: awaiting new address from ${msg.from}` +
+          (order?.orderId ? ` for order #${order.orderId}.` : " (no order matched).")
+      );
+      return; // handled
+    }
+
+    // Confirm / Cancel: mark the order, then acknowledge.
+    await markOrderFromButton(msg.from, intent);
     const body = intent === "CONFIRM" ? CONFIRM_REPLY : CANCEL_REPLY;
     const sent = await sendText({ to: msg.from, body });
     if (sent.dryRun)
@@ -78,6 +214,11 @@ async function handleMessage(msg) {
     });
     return; // handled — don't also run the AI path on a button tap
   }
+
+  // 2b) If the customer earlier tapped ✏️ Change address, their next text is
+  //     their corrected address — capture it into the order (no AI). This runs
+  //     before the AI path so the address never gets treated as a chat message.
+  if (await handleAddressCapture(msg)) return;
 
   // Only text-bearing messages get an AI reply.
   if (!msg.text) {
