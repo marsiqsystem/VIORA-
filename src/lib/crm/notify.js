@@ -372,6 +372,7 @@ export {
   fromRow,
   slugify,
   prettyPayment,
+  buildConfirmV2Params,
   sendOrderConfirmation,
   sendDispatched,
   sendOutForDelivery,
