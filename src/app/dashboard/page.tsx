@@ -49,6 +49,7 @@ type Order = {
   addressText?: string; addressEdited?: boolean;
   courierService?: string; // actual iThink carrier booked (e.g. "shadowfax")
   callOutcome?: string; // "confirmed" | "cancelled" — set from the Call Queue
+  toShipCleared?: boolean; // operator shipped it from the Velocity panel -> hide from "To Ship"
 };
 
 const rupee = (v: number | null | undefined) =>
@@ -258,7 +259,7 @@ export default function DashboardPage() {
 
         {tab === "summary" && <SummaryTab kpi={kpi} monthly={monthly} byProduct={byProduct} statusBreakdown={statusBreakdown} />}
         {tab === "shipqueue" && <ShipQueueTab orders={orders} loading={loading} apiKey={key} onChanged={() => load(key)} />}
-        {tab === "toship" && <ToShipTab orders={orders} loading={loading} />}
+        {tab === "toship" && <ToShipTab orders={orders} loading={loading} apiKey={key} onChanged={() => load(key)} />}
         {tab === "callqueue" && <CallQueueTab apiKey={key} onChanged={() => load(key)} />}
         {tab === "orders" && <OrdersTab orders={orders} loading={loading} apiKey={key} onChanged={() => load(key)} />}
         {tab === "rto" && <RtoTab kpi={kpi} byProduct={byProduct} rtoByCourier={rtoByCourier} rtoByPayment={rtoByPayment} />}
@@ -792,17 +793,35 @@ type EditModal = { o: Order; sellingPrice: string; qty: string; colour: string; 
 // debit, we pick the courier ourselves), so this view keeps the recommended
 // courier visible per order — the operator ships each from the Velocity panel
 // with the carrier shown, then it drops off here automatically once dispatched.
-function ToShipTab({ orders, loading }: { orders: Order[]; loading: boolean }) {
+function ToShipTab({ orders, loading, apiKey, onChanged }: { orders: Order[]; loading: boolean; apiKey: string; onChanged: () => void }) {
+  const [busy, setBusy] = useState<Record<string, string>>({});
   const rows = useMemo(
     () =>
       orders
-        .filter((o) => o.status === "created")
+        // Created on Velocity but not yet shipped, and not already cleared by the operator.
+        .filter((o) => o.status === "created" && !o.toShipCleared)
         .map((o) => ({ o, r: recoFor(o) as Reco }))
         .sort((a, b) => (parseInt(b.o.orderId, 10) || 0) - (parseInt(a.o.orderId, 10) || 0)),
     [orders]
   );
   // Amazon is excluded from our courier choices per policy, so drop it from the pick.
   const pick = (r: Reco) => r.best.filter((b) => !/amazon/i.test(b.carrier)).slice(0, 3);
+
+  // Operator shipped this one from the Velocity panel -> mark it done so it leaves this list.
+  const clearOne = async (orderId: string) => {
+    setBusy((b) => ({ ...b, [orderId]: "clearing" }));
+    try {
+      const res = await fetch(`/api/dashboard/update-order?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-inbox-key": apiKey },
+        body: JSON.stringify({ orderId, patch: { toShipCleared: true } }),
+      });
+      const j = await res.json();
+      if (j.ok) onChanged();
+      else setBusy((b) => ({ ...b, [orderId]: "failed: " + (j.error || "err") }));
+    } catch (e: any) {
+      setBusy((b) => ({ ...b, [orderId]: "failed: " + (e?.message || "err") }));
+    }
+  };
 
   return (
     <div>
@@ -815,14 +834,14 @@ function ToShipTab({ orders, loading }: { orders: Order[]; loading: boolean }) {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr style={{ textAlign: "left", color: C.sub, borderBottom: `2px solid ${C.border}` }}>
-              {["Order", "Customer", "Destination", "Item", "COD", "RTO%", "Ship with (in order)"].map((h) => (
+              {["Order", "Customer", "Destination", "Item", "COD", "RTO%", "Ship with (in order)", "Shipped?"].map((h) => (
                 <th key={h} style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={7} style={{ padding: 16, color: C.sub }}>Loading…</td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={7} style={{ padding: 16, color: C.sub }}>Nothing waiting to ship. 🎉</td></tr>}
+            {loading && <tr><td colSpan={8} style={{ padding: 16, color: C.sub }}>Loading…</td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={8} style={{ padding: 16, color: C.sub }}>Nothing waiting to ship. 🎉</td></tr>}
             {rows.map(({ o, r }) => {
               const best = pick(r);
               return (
@@ -839,6 +858,11 @@ function ToShipTab({ orders, loading }: { orders: Order[]; loading: boolean }) {
                     ) : (
                       <span style={{ color: C.sub }}>no data — use Delhivery / DTDC</span>
                     )}
+                  </td>
+                  <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                    <button onClick={() => clearOne(o.orderId)} disabled={busy[o.orderId] === "clearing"} title="I've shipped this from the Velocity panel — remove it from this list"
+                      style={sqBtn(C.card)}>{busy[o.orderId] === "clearing" ? "…" : "✓ Shipped — clear"}</button>
+                    {busy[o.orderId]?.startsWith("failed") && <div style={{ color: C.bad, fontSize: 10, marginTop: 2 }}>{busy[o.orderId]}</div>}
                   </td>
                 </tr>
               );

@@ -19,6 +19,9 @@ export const maxDuration = 30;
 
 const NUMERIC = new Set(["freight", "rtoCost", "goodsCost", "prepaidFee", "sellingPrice", "qty"]);
 const STRING = new Set(["status", "courier", "awb", "trackingUrl", "paymentReceived", "deliveryStatus", "transitStatus", "pickupStatus", "dCode", "colour", "waPhone"]);
+// Booleans the dashboard can toggle. `toShipCleared` hides a created order from
+// the "To Ship" tab once the operator has shipped it from the Velocity panel.
+const BOOLEAN = new Set(["toShipCleared"]);
 
 export async function POST(req: NextRequest) {
   if (!authConfigured()) return NextResponse.json({ ok: false, error: "INBOX_SECRET not set" }, { status: 503 });
@@ -40,6 +43,8 @@ export async function POST(req: NextRequest) {
       else { const n = Number(v); if (Number.isFinite(n)) patch[k] = n; }
     } else if (STRING.has(k)) {
       patch[k] = String(v);
+    } else if (BOOLEAN.has(k)) {
+      patch[k] = v === true || v === "true" || v === 1 || v === "1";
     }
   }
 
