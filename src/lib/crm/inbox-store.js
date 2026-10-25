@@ -909,6 +909,83 @@ async function clearAwaitingAddress(phone) {
   }
 }
 
+// --- "Cancel / keep" decision state -----------------------------------------
+// The ❌ Cancel button is now two-step: a tap does NOT cancel the order — we ask
+// the customer to confirm, and remember WHICH order we're waiting on, keyed by
+// phone. Their next "CANCEL" text actually cancels it (and sends the firm
+// cancellation message); a "CONFIRM" keeps it. The same state is used when we
+// detect conflicting taps (Confirm & Cancel) and ask the customer to clarify.
+// Self-expiring so an abandoned flow never traps a thread. Fail-safe: any KV
+// hiccup just behaves as "not waiting".
+const AWAIT_CHOICE_TTL_S = 24 * 60 * 60; // 24h to reply CANCEL / CONFIRM
+function awaitChoiceKey(phone) {
+  return `${PREFIX}await_choice:${normPhone(phone)}`;
+}
+async function setAwaitingChoice(phone, orderId) {
+  if (!isConfigured() || !orderId) return false;
+  try {
+    await command(["SET", awaitChoiceKey(phone), String(orderId), "EX", String(AWAIT_CHOICE_TTL_S)]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function getAwaitingChoice(phone) {
+  if (!isConfigured()) return "";
+  try {
+    return (await command(["GET", awaitChoiceKey(phone)])) || "";
+  } catch {
+    return "";
+  }
+}
+async function clearAwaitingChoice(phone) {
+  if (!isConfigured()) return;
+  try {
+    await command(["DEL", awaitChoiceKey(phone)]);
+  } catch {
+    /* best-effort */
+  }
+}
+
+// --- Last button tap (for conflict detection) -------------------------------
+// Remembers the customer's most recent order-confirmation button tap (intent +
+// when), so a quick opposite tap — ✅ Confirm then ❌ Cancel, or vice-versa,
+// within a few minutes — is recognised as CONFLICTING and handled by asking the
+// customer to clarify instead of blindly acting on the last tap. Short-lived.
+const LAST_TAP_TTL_S = 20 * 60; // 20 min window
+function lastTapKey(phone) {
+  return `${PREFIX}last_tap:${normPhone(phone)}`;
+}
+async function setLastTap(phone, intent) {
+  if (!isConfigured() || !intent) return false;
+  try {
+    const val = JSON.stringify({ intent, at: Date.now() });
+    await command(["SET", lastTapKey(phone), val, "EX", String(LAST_TAP_TTL_S)]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function getLastTap(phone) {
+  if (!isConfigured()) return null;
+  try {
+    const raw = await command(["GET", lastTapKey(phone)]);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    return o && o.intent ? o : null;
+  } catch {
+    return null;
+  }
+}
+async function clearLastTap(phone) {
+  if (!isConfigured()) return;
+  try {
+    await command(["DEL", lastTapKey(phone)]);
+  } catch {
+    /* best-effort */
+  }
+}
+
 export {
   isConfigured,
   ingestWebhook,
@@ -919,6 +996,12 @@ export {
   setAwaitingAddress,
   getAwaitingAddress,
   clearAwaitingAddress,
+  setAwaitingChoice,
+  getAwaitingChoice,
+  clearAwaitingChoice,
+  setLastTap,
+  getLastTap,
+  clearLastTap,
   markRead,
   deleteMessage,
   deleteConversation,

@@ -49,6 +49,8 @@ type Order = {
   addressText?: string; addressEdited?: boolean;
   courierService?: string; // actual iThink carrier booked (e.g. "shadowfax")
   callOutcome?: string; // "confirmed" | "cancelled" — set from the Call Queue
+  callNote?: string; // human-readable why / outcome note
+  tapConflict?: boolean; // customer tapped conflicting WhatsApp buttons (Confirm & Cancel)
   toShipCleared?: boolean; // operator shipped it from the Velocity panel -> hide from "To Ship"
 };
 
@@ -1035,7 +1037,17 @@ function ShipQueueTab({ orders, loading, apiKey, onChanged }: { orders: Order[];
             {shown.map(({ o, r }) => (
               <tr key={o.orderId} style={{ borderBottom: `1px solid ${C.border}` }}>
                 <td style={{ padding: "8px 10px", fontWeight: 600, whiteSpace: "nowrap" }}>#{o.orderId}</td>
-                <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{o.name}<div style={{ color: C.sub, fontSize: 11 }}>{o.phone}</div></td>
+                <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                  {o.name}
+                  <div style={{ color: C.sub, fontSize: 11 }}>{o.phone}</div>
+                  {o.callOutcome === "confirmed" ? (
+                    <div style={{ marginTop: 3, display: "inline-block", background: "#DCF3E5", color: "#176b3a", padding: "1px 7px", borderRadius: 6, fontSize: 10.5, fontWeight: 700 }}>✅ Confirmed by customer</div>
+                  ) : o.tapConflict ? (
+                    <div style={{ marginTop: 3, display: "inline-block", background: "#FBE3E1", color: C.bad, padding: "1px 7px", borderRadius: 6, fontSize: 10.5, fontWeight: 700 }}>⚠️ Conflicting taps — clarify</div>
+                  ) : (
+                    <div style={{ marginTop: 3, display: "inline-block", background: "#FDECC8", color: "#8a5a00", padding: "1px 7px", borderRadius: 6, fontSize: 10.5, fontWeight: 700 }}>⏳ Not confirmed yet</div>
+                  )}
+                </td>
                 <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{(o.address?.city || "") + ""}<div style={{ color: C.sub, fontSize: 11 }}>{r.state}</div></td>
                 <td style={{ padding: "8px 10px", fontWeight: 700, color: rtoColor(r.rtoPct) }}>{r.rtoPct == null ? "?" : r.rtoPct + "%"}<div style={{ color: C.sub, fontSize: 10, fontWeight: 400 }}>n={r.sample}</div></td>
                 <td style={{ padding: "8px 10px" }}>

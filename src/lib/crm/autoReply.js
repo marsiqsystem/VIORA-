@@ -22,9 +22,16 @@ import {
   setAwaitingAddress,
   getAwaitingAddress,
   clearAwaitingAddress,
+  setAwaitingChoice,
+  getAwaitingChoice,
+  clearAwaitingChoice,
+  setLastTap,
+  getLastTap,
+  clearLastTap,
 } from "./inbox-store";
 import { findLatestOrderByPhone, updateOrder, getOrder } from "./orders-store";
 import { extractPincode, lookupPincode, buildStructuredAddress } from "./pincode";
+import { sendOrderCancelled } from "./notify";
 
 const aiEnabled = () =>
   String(process.env.AI_AUTOREPLY_ENABLED).toLowerCase() === "true";
@@ -36,9 +43,25 @@ const aiEnabled = () =>
 const CONFIRM_REPLY =
   process.env.WA_CONFIRM_REPLY ||
   "Thank you for confirming your order! 🎉 We're preparing it now and will notify you the moment it's dispatched. — Team Viora Jewels";
-const CANCEL_REPLY =
-  process.env.WA_CANCEL_REPLY ||
-  "We've received your cancellation request. Our team will reach out to you shortly. If you tapped this by mistake, just reply here and we'll keep your order safe. — Team Viora Jewels";
+// Two-step cancel: a ❌ Cancel tap no longer cancels on its own — we ask the
+// customer to confirm. Only a "CANCEL" text reply actually cancels the order
+// (and triggers the firm order_cancelled_v1 message); "CONFIRM" keeps it. This
+// prevents a mis-tap (or the multi-button glitch) from silently killing a live
+// order.
+const CANCEL_CONFIRM_PROMPT =
+  process.env.WA_CANCEL_CONFIRM_PROMPT ||
+  "Are you sure you want to *cancel* this order? 😟\n\nReply *CANCEL* to confirm the cancellation, or *CONFIRM* to keep your order and we'll ship it. — Team Viora Jewels";
+// Sent when the customer taps conflicting buttons (e.g. ✅ Confirm and then
+// ❌ Cancel within a few minutes). We take NO automatic action and ask them to
+// clarify; the order is also flagged in the dashboard Call Queue for a human.
+const CONFLICT_CLARIFY_PROMPT =
+  process.env.WA_CONFLICT_CLARIFY_PROMPT ||
+  "We noticed a couple of taps on your order and want to get it right 🙏\n\nDo you want to *keep* this order or *cancel* it?\n\nReply *CONFIRM* to keep it (we'll ship it), or *CANCEL* to cancel. — Team Viora Jewels";
+// Final acknowledgement after the customer confirms they really want to cancel
+// (the firm order_cancelled_v1 template is also sent — this is the inline ack).
+const CANCELLED_DONE_REPLY =
+  process.env.WA_CANCELLED_DONE_REPLY ||
+  "Your order has been cancelled. 💛 If this was a mistake or you'd like to reorder, just reply here — we're happy to help. — Team Viora Jewels";
 // Shown when the customer taps ✏️ Change address — we then capture their very
 // next message as the corrected delivery address (see handleAddressCapture).
 const CHANGE_ADDR_PROMPT =
@@ -111,6 +134,8 @@ async function markOrderFromButton(phone, intent) {
         callOutcome: "confirmed",
         callNote: "Customer tapped ✅ Confirm on the WhatsApp confirmation.",
         callResolvedAt: now,
+        // A clean Confirm clears any earlier conflicting-taps flag.
+        tapConflict: false,
       });
     }
     console.log(`[auto-reply] ${intent} applied to order #${order.orderId}.`);
@@ -118,6 +143,45 @@ async function markOrderFromButton(phone, intent) {
   } catch (e) {
     console.error("[auto-reply] markOrderFromButton failed:", e?.message || e);
     return null;
+  }
+}
+
+/**
+ * Actually cancel an order the customer has confirmed they want cancelled (typed
+ * "CANCEL" after the two-step prompt). Respects the shipped/finished safety guard
+ * — a parcel already on its way is never turned into "cancelled" from a chat
+ * reply; the operator handles those by hand. Sends the firm order_cancelled_v1
+ * message on a real cancellation. Returns "cancelled" | "too-late" | "no-order".
+ * Never throws.
+ */
+async function hardCancelOrder(orderId) {
+  try {
+    const order = (await getOrder(orderId)) || null;
+    if (!order?.orderId) return "no-order";
+    const status = String(order.status || "").toLowerCase();
+    if (SHIPPED_OR_DONE.has(status) && status !== "cancelled") {
+      console.log(`[auto-reply] hardCancel: order #${orderId} is '${status}' — too late, operator handles.`);
+      return "too-late";
+    }
+    const now = Date.now();
+    await updateOrder(orderId, {
+      status: "cancelled",
+      statusAt: now,
+      callOutcome: "cancelled",
+      callNote: "Customer confirmed cancellation via WhatsApp (two-step Cancel).",
+      callResolvedAt: now,
+      tapConflict: false,
+    });
+    // Firm, branded cancellation message (order_cancelled_v1) — logs itself into
+    // the inbox thread. Best-effort; never blocks the flow.
+    try { await sendOrderCancelled({ ...order, status: "cancelled" }); } catch (e) {
+      console.error("[auto-reply] sendOrderCancelled failed:", e?.message || e);
+    }
+    console.log(`[auto-reply] order #${orderId} cancelled (customer-confirmed).`);
+    return "cancelled";
+  } catch (e) {
+    console.error("[auto-reply] hardCancelOrder failed:", e?.message || e);
+    return "no-order";
   }
 }
 
@@ -134,6 +198,28 @@ async function handleAddressCapture(msg) {
   let orderId = "";
   try { orderId = await getAwaitingAddress(msg.from); } catch { orderId = ""; }
   if (!orderId) return false;
+
+  // Never let a late address reply REVIVE an order that's already cancelled (or
+  // otherwise shipped/finished). If the customer cancelled and then sends an
+  // address, the order stays cancelled — we don't silently re-open and ship it.
+  try {
+    const existing = (await getOrder(orderId)) || {};
+    const st = String(existing.status || "").toLowerCase();
+    if (SHIPPED_OR_DONE.has(st)) {
+      await clearAwaitingAddress(msg.from);
+      const note =
+        st === "cancelled"
+          ? "This order was cancelled, so we haven't changed its address. If you'd like to reorder or need help, just reply here. — Team Viora Jewels"
+          : "This order is already on its way, so the delivery address can't be changed here. Reply if you need help and our team will assist. — Team Viora Jewels";
+      const s = await sendText({ to: msg.from, body: note });
+      await recordOutbound({
+        to: msg.from, text: note, wamid: s?.data?.messages?.[0]?.id,
+        status: s?.dryRun ? "pending" : "sent",
+      });
+      console.log(`[auto-reply] address capture skipped for #${orderId} — status '${st}' (no revive).`);
+      return true;
+    }
+  } catch { /* if we can't read it, fall through to the normal capture */ }
 
   const text = String(msg.text).trim();
 
@@ -225,6 +311,178 @@ async function handleAddressCapture(msg) {
   return true;
 }
 
+// Send a text reply AND mirror it into the inbox thread (best-effort). Keeps the
+// three near-identical send+record blocks below to one line each.
+async function replyText(to, body) {
+  const sent = await sendText({ to, body });
+  if (sent?.dryRun) console.log(`[auto-reply] reply simulated (WHATSAPP_SEND_ENABLED=false).`);
+  else if (sent?.ok) console.log(`[auto-reply] reply delivered to ${to}.`);
+  else console.error(`[auto-reply] reply send failed:`, sent?.error || sent?.data);
+  await recordOutbound({
+    to, text: body, wamid: sent?.data?.messages?.[0]?.id,
+    status: sent?.dryRun ? "pending" : "sent",
+  });
+  return sent;
+}
+
+// A ✅ Confirm then ❌ Cancel (or vice-versa) landing within this window is read
+// as a CONFLICT rather than "the last tap wins".
+const TAP_CONFLICT_WINDOW_MS = 15 * 60 * 1000;
+const isOppositeTap = (prev, next) =>
+  (prev === "CONFIRM" && next === "CANCEL") || (prev === "CANCEL" && next === "CONFIRM");
+
+/**
+ * Handle one order_confirmation_v2 button tap (✅ Confirm / ❌ Cancel / ✏️ Change
+ * address) with conflict-awareness and a two-step Cancel:
+ *  - While a cancel/keep decision is already pending, a tap RESOLVES it (Confirm
+ *    keeps; Cancel is nudged to a typed CANCEL so a stray tap can't kill a live
+ *    order; Change address drops the pending cancel and fixes the address).
+ *  - A quick OPPOSITE tap (Confirm↔Cancel) is a CONFLICT: no auto-action, ask the
+ *    customer to clarify, and flag the order in the Call Queue for a human.
+ *  - ❌ Cancel is two-step: it asks to confirm instead of cancelling outright.
+ * Never throws.
+ */
+async function handleButtonTap(msg, intent) {
+  const phone = msg.from;
+
+  // (a) Already waiting on a cancel/keep decision? A tap resolves THAT, and is
+  //     never re-interpreted as a fresh (possibly conflicting) tap.
+  let pending = "";
+  try { pending = await getAwaitingChoice(phone); } catch { pending = ""; }
+  if (pending) {
+    if (intent === "CONFIRM") {
+      await clearAwaitingChoice(phone);
+      await clearLastTap(phone);
+      await markOrderFromButton(phone, "CONFIRM");
+      await replyText(phone, CONFIRM_REPLY);
+      console.log(`[auto-reply] pending choice -> KEEP (Confirm tap) for #${pending}.`);
+      return;
+    }
+    if (intent === "CANCEL") {
+      // Don't cancel on a button tap — a stray tap must never kill the order.
+      // Require a typed CANCEL to actually cancel.
+      await replyText(
+        phone,
+        "To cancel, please *type* the word CANCEL and send it. Or tap/type *CONFIRM* to keep your order. — Team Viora Jewels"
+      );
+      console.log(`[auto-reply] pending choice: Cancel tap for #${pending} — asked to TYPE cancel.`);
+      return;
+    }
+    // CHANGE_ADDRESS while pending: they clearly want the order — fall through to
+    // the change-address branch, which clears the pending cancel first.
+  }
+
+  // (b) Conflict detection (only for a brand-new tap, not a pending resolution).
+  const prev = await getLastTap(phone);
+  const conflict =
+    prev && isOppositeTap(prev.intent, intent) &&
+    Date.now() - Number(prev.at || 0) < TAP_CONFLICT_WINDOW_MS;
+  await setLastTap(phone, intent);
+
+  if (conflict) {
+    await clearAwaitingAddress(phone);
+    const order = await findLatestOrderByPhone(phone);
+    if (order?.orderId) {
+      await setAwaitingChoice(phone, order.orderId); // a CONFIRM/CANCEL reply resolves it
+      await updateOrder(order.orderId, {
+        callOutcome: "", // re-enter the Call Queue
+        tapConflict: true,
+        callNote:
+          "⚠️ Conflicting WhatsApp taps (Confirm & Cancel) within minutes — call to clarify whether to ship or cancel.",
+      });
+    }
+    await replyText(phone, CONFLICT_CLARIFY_PROMPT);
+    console.log(`[auto-reply] CONFLICT ${prev.intent}->${intent} from ${phone} — clarify asked, flagged.`);
+    return;
+  }
+
+  // (c) Change address: fixing the address means they want the order.
+  if (intent === "CHANGE_ADDRESS") {
+    await clearAwaitingChoice(phone);
+    const order = await findLatestOrderByPhone(phone);
+    if (order?.orderId) await setAwaitingAddress(phone, order.orderId);
+    await replyText(phone, CHANGE_ADDR_PROMPT);
+    console.log(
+      `[auto-reply] CHANGE_ADDRESS: awaiting new address from ${phone}` +
+        (order?.orderId ? ` for order #${order.orderId}.` : " (no order matched).")
+    );
+    return;
+  }
+
+  // (d) Cancel: two-step — ask to confirm, don't cancel yet.
+  if (intent === "CANCEL") {
+    const order = await findLatestOrderByPhone(phone);
+    if (order?.orderId) {
+      const st = String(order.status || "").toLowerCase();
+      if (SHIPPED_OR_DONE.has(st) && st !== "cancelled") {
+        await replyText(
+          phone,
+          "Your order is already on its way, so it can't be auto-cancelled here. Our team will reach out to help. — Team Viora Jewels"
+        );
+        console.log(`[auto-reply] CANCEL tap on '${st}' order #${order.orderId} — not auto-cancelled (safety).`);
+        return;
+      }
+      await setAwaitingChoice(phone, order.orderId);
+    }
+    await replyText(phone, CANCEL_CONFIRM_PROMPT);
+    console.log(`[auto-reply] CANCEL tap from ${phone} — asked to confirm (two-step).`);
+    return;
+  }
+
+  // (e) Confirm: clean confirm.
+  await clearAwaitingChoice(phone);
+  await markOrderFromButton(phone, "CONFIRM");
+  await replyText(phone, CONFIRM_REPLY);
+  console.log(`[auto-reply] CONFIRM tap from ${phone} — order confirmed.`);
+}
+
+/**
+ * Resolve a pending cancel/keep decision from the customer's TEXT reply (they
+ * tapped ❌ Cancel, or we flagged conflicting taps). A typed "CANCEL" cancels the
+ * order and sends the firm cancellation message; "CONFIRM"/"keep"/"yes" keeps it;
+ * anything ambiguous re-asks once. Returns true when handled. Never throws.
+ */
+async function handleChoiceReply(msg) {
+  if (!msg.text) return false;
+  let orderId = "";
+  try { orderId = await getAwaitingChoice(msg.from); } catch { orderId = ""; }
+  if (!orderId) return false;
+
+  const t = String(msg.text).trim().toLowerCase();
+  const saysCancel = /\bcancel/.test(t);
+  const saysKeep =
+    /\b(confirm|keep|ship|haan|haa|rakh|rakho|chahiye|yes|yess|y)\b/.test(t) ||
+    /\bdon'?t cancel\b/.test(t);
+
+  if (saysCancel && !saysKeep) {
+    await clearAwaitingChoice(msg.from);
+    await clearLastTap(msg.from);
+    const outcome = await hardCancelOrder(orderId);
+    const body =
+      outcome === "too-late"
+        ? "Your order is already on its way, so it can't be cancelled here — our team will reach out to help. — Team Viora Jewels"
+        : CANCELLED_DONE_REPLY;
+    await replyText(msg.from, body); // firm template already sent by hardCancelOrder on a real cancel
+    console.log(`[auto-reply] choice=CANCEL for #${orderId} (${outcome}).`);
+    return true;
+  }
+  if (saysKeep && !saysCancel) {
+    await clearAwaitingChoice(msg.from);
+    await clearLastTap(msg.from);
+    await markOrderFromButton(msg.from, "CONFIRM");
+    await replyText(msg.from, CONFIRM_REPLY);
+    console.log(`[auto-reply] choice=KEEP for #${orderId} — confirmed.`);
+    return true;
+  }
+  // Ambiguous — keep waiting, re-ask once.
+  await replyText(
+    msg.from,
+    "Just to confirm — reply *CANCEL* to cancel this order, or *CONFIRM* to keep it. — Team Viora Jewels"
+  );
+  console.log(`[auto-reply] choice reply from ${msg.from} ambiguous ("${t}") — re-asked.`);
+  return true;
+}
+
 /** Handle one parsed inbound message. Never throws. */
 async function handleMessage(msg) {
   const iso = msg.timestamp
@@ -239,46 +497,17 @@ async function handleMessage(msg) {
   await logLead({ name: msg.name, phone: msg.from, message: msg.text, timestamp: iso });
 
   // 2) Order-confirmation button taps (order_confirmation_v2: ✅ Confirm /
-  //    ❌ Cancel / ✏️ Change address) get a fixed acknowledgement (no AI) AND
-  //    update the order so the dashboard reflects the customer's choice.
+  //    ❌ Cancel / ✏️ Change address). Conflict-aware, two-step Cancel — see
+  //    handleButtonTap. Marks the order so the dashboard reflects the choice.
   const intent = buttonIntent(msg);
   if (intent) {
-    if (intent === "CHANGE_ADDRESS") {
-      // Remember which order to attach the next reply to, then ask for the
-      // address. If we can't match an order, still ask (capture just won't fire).
-      const order = await findLatestOrderByPhone(msg.from);
-      if (order?.orderId) await setAwaitingAddress(msg.from, order.orderId);
-      const sent = await sendText({ to: msg.from, body: CHANGE_ADDR_PROMPT });
-      await recordOutbound({
-        to: msg.from,
-        text: CHANGE_ADDR_PROMPT,
-        wamid: sent?.data?.messages?.[0]?.id,
-        status: sent?.dryRun ? "pending" : "sent",
-      });
-      console.log(
-        `[auto-reply] CHANGE_ADDRESS: awaiting new address from ${msg.from}` +
-          (order?.orderId ? ` for order #${order.orderId}.` : " (no order matched).")
-      );
-      return; // handled
-    }
-
-    // Confirm / Cancel: mark the order, then acknowledge.
-    await markOrderFromButton(msg.from, intent);
-    const body = intent === "CONFIRM" ? CONFIRM_REPLY : CANCEL_REPLY;
-    const sent = await sendText({ to: msg.from, body });
-    if (sent.dryRun)
-      console.log(`[auto-reply] ${intent} ack simulated (WHATSAPP_SEND_ENABLED=false).`);
-    else if (sent.ok) console.log(`[auto-reply] ${intent} ack delivered to ${msg.from}.`);
-    else console.error(`[auto-reply] ${intent} ack send failed:`, sent.error || sent.data);
-    // Mirror the ack into the inbox thread (best-effort, never blocks).
-    await recordOutbound({
-      to: msg.from,
-      text: body,
-      wamid: sent?.data?.messages?.[0]?.id,
-      status: sent?.dryRun ? "pending" : "sent",
-    });
+    await handleButtonTap(msg, intent);
     return; // handled — don't also run the AI path on a button tap
   }
+
+  // 2a) If a cancel/keep decision is pending (they tapped ❌ Cancel, or we flagged
+  //     conflicting taps), interpret their typed CANCEL / CONFIRM reply.
+  if (await handleChoiceReply(msg)) return;
 
   // 2b) If the customer earlier tapped ✏️ Change address, their next text is
   //     their corrected address — capture it into the order (no AI). This runs

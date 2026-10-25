@@ -110,6 +110,15 @@ export async function GET(req: NextRequest) {
         const line = lineOf(a);
         const reasons: any[] = [];
 
+        // Conflicting WhatsApp taps (Confirm & Cancel) flagged by the inbound
+        // handler — ambiguous whether to ship or cancel; a human must clarify.
+        if (o.tapConflict) {
+          reasons.push({
+            type: "tap-conflict",
+            text: o.callNote || "Customer tapped BOTH Confirm and Cancel on WhatsApp — clarify whether to ship or cancel.",
+          });
+        }
+
         // Address checks (India Post).
         let pinPlace: { city: string; state: string } | null = null;
         if (!pin) {
@@ -180,6 +189,7 @@ export async function GET(req: NextRequest) {
 
         // What to ask, in priority order.
         const asks: string[] = [];
+        if (reasons.some((x) => x.type === "tap-conflict")) asks.push("Customer tapped BOTH Confirm and Cancel on WhatsApp — ask directly whether they want it SHIPPED or CANCELLED, then set the outcome here.");
         if (phoneStatus === "bad") asks.push("FIRST confirm you have the right phone number (ask them to confirm their number).");
         if (reasons.some((x) => x.type === "high-rto")) asks.push("Confirm the customer still wants this COD order (delivery will be attempted).");
         if (reasons.some((x) => x.type === "multi-qty")) asks.push(`Confirm the customer wants all ${qty} pieces (bigger COD — confirm to avoid a costly return).`);
@@ -204,7 +214,8 @@ export async function GET(req: NextRequest) {
           reasons, whatToAsk: asks,
           // Order the queue: bad phone first (can't even reach them), then
           // broken address, then plain high-RTO confirmations.
-          priority: phoneStatus === "bad" ? 0
+          priority: reasons.some((x) => x.type === "tap-conflict") ? 0
+            : phoneStatus === "bad" ? 0
             : reasons.some((x) => x.type === "invalid-pin" || x.type === "pin-mismatch" || x.type === "no-pin" || x.type === "address-incomplete" || x.type === "duplicate-customer") ? 1 : 2,
         };
       })

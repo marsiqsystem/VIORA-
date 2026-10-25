@@ -156,9 +156,21 @@ const normStateName = (s) => {
 // variables) and never throws (a pincode-lookup blip just skips that check).
 async function buildConfirmV2Params(o) {
   const a = o.address || {};
-  const qty = Number(o.qty) || 1;
+  // Total quantity must count EVERY line item, not just the first. A "4 sets"
+  // order comes through as 4 line items (product shows "… (+3 more)") but o.qty
+  // is only the first item's quantity — so a naive Number(o.qty) read showed
+  // "Qty: 1" for a 4-set order and never asked the customer to confirm all of
+  // them. Sum the real items; fall back to o.qty when items aren't present.
+  const items = Array.isArray(o.items) ? o.items : [];
+  const totalQty = items.length
+    ? items.reduce((s, it) => s + (Number(it.quantity) || 1), 0)
+    : Number(o.qty) || 1;
+  const multiItem = items.length > 1;
   const item = [o.product, o.colour].filter(Boolean).join(" - ") || o.product || "your order";
-  const qtyText = qty >= 2 ? `${qty} — please confirm you want ${qty} pieces` : String(qty);
+  const qtyText =
+    totalQty >= 2
+      ? `${totalQty} — please confirm you want ${multiItem ? `all ${totalQty} sets` : `${totalQty} pieces`}`
+      : String(totalQty);
   const amt = Number(String(o.amount).replace(/[^\d.]/g, "")) || 0;
   const amtText = amt ? amt.toLocaleString("en-IN") : String(o.amount || "");
   const pin = String(a.postalCode || "").replace(/\D/g, "");
