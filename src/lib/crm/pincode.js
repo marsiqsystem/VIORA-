@@ -118,4 +118,77 @@ function buildStructuredAddress(text, { pincode = "", city = "", state = "", cou
   };
 }
 
-export { extractPincode, lookupPincode, buildStructuredAddress };
+// --- Fuller pincode data (district + state + the post-office AREA names) -------
+// Same India Post source as lookupPincode, but also returns every PostOffice
+// Name for the pincode (the real localities). Cached separately. Never throws.
+const PIN_AREAS_PREFIX = "pincode:areas:v1:";
+async function lookupPincodeAreas(pin) {
+  const p = String(pin || "").replace(/\D/g, "");
+  if (p.length !== 6) return { city: "", state: "", areas: [] };
+  const cached = await kv(["GET", `${PIN_AREAS_PREFIX}${p}`]);
+  if (cached) {
+    try {
+      const v = typeof cached === "string" ? JSON.parse(cached) : cached;
+      if (v && v.state) return { city: v.city || "", state: v.state || "", areas: Array.isArray(v.areas) ? v.areas : [] };
+    } catch { /* fall through */ }
+  }
+  try {
+    const res = await fetch(`https://api.postalpincode.in/pincode/${p}`, { headers: { Accept: "application/json" } });
+    const data = await res.json().catch(() => null);
+    const first = Array.isArray(data) ? data[0] : null;
+    const pos = Array.isArray(first?.PostOffice) ? first.PostOffice : [];
+    if (first?.Status === "Success" && pos.length) {
+      const po0 = pos[0];
+      const areas = [...new Set(pos.map((x) => String(x?.Name || "").trim()).filter(Boolean))];
+      const out = { city: po0.District || po0.Division || po0.Region || "", state: po0.State || "", areas };
+      await kv(["SET", `${PIN_AREAS_PREFIX}${p}`, JSON.stringify(out), "EX", String(PIN_CACHE_TTL_S)]);
+      return out;
+    }
+  } catch { /* network blip */ }
+  return { city: "", state: "", areas: [] };
+}
+
+// --- Shipping address enricher ------------------------------------------------
+// Run right before a parcel is handed to a courier. It (1) STANDARDISES city +
+// state against the pincode's authoritative India Post data (couriers route by
+// pincode, so a wrong state causes failed deliveries), (2) NEVER drops any line,
+// and (3) only when the street text is genuinely thin AND the pincode maps to a
+// SINGLE unambiguous post-office area, appends that REAL locality as a reference
+// — it never invents a landmark and never guesses among multiple areas. Returns
+// the (possibly) enriched address plus flags. Best-effort: on any failure it
+// returns the original address untouched so shipping is never blocked.
+const _norm = (s) => String(s || "").trim().toLowerCase();
+const _alnum = (s) => String(s || "").replace(/[^a-z0-9]/gi, "").length;
+async function enrichShippingAddress(address) {
+  const a = { ...(address || {}) };
+  const pin = String(a.postalCode || "").replace(/\D/g, "");
+  const res = { address: a, standardized: false, localityAdded: "", stillThin: false, pin };
+  const streetLen = () => _alnum([a.line1, a.line2, a.line3].filter(Boolean).join(" "));
+  if (pin.length !== 6) { res.stillThin = streetLen() < 12; return res; }
+
+  let info;
+  try { info = await lookupPincodeAreas(pin); } catch { info = { city: "", state: "", areas: [] }; }
+  if (!info.state) { res.stillThin = streetLen() < 12; return res; } // unresolved — leave as-is
+
+  // (1) Standardise. State: align to the pincode when clearly different (routing
+  // truth). City: only FILL when missing — never overwrite a non-empty city.
+  if (info.state && _norm(a.state || "") !== _norm(info.state)) { a.state = info.state; res.standardized = true; }
+  if (info.city && !String(a.city || "").trim()) { a.city = info.city; res.standardized = true; }
+
+  // (3) Locality append — thin street text + exactly one post-office area that
+  // isn't already mentioned. Conservative on purpose (no wrong guesses).
+  const street = [a.line1, a.line2, a.line3].filter(Boolean).join(" ").trim();
+  const thin = _alnum(street) < 12;
+  const inText = info.areas.some((ar) => _norm(street).includes(_norm(ar))) || (!!info.city && _norm(street).includes(_norm(info.city)));
+  if (thin && !inText && info.areas.length === 1 && info.areas[0]) {
+    const loc = `near ${info.areas[0]}${info.city ? `, ${info.city}` : ""}`;
+    a.line3 = [a.line3, loc].filter(Boolean).join(", ");
+    res.localityAdded = loc;
+  }
+
+  res.address = a;
+  res.stillThin = _alnum([a.line1, a.line2, a.line3].filter(Boolean).join(" ")) < 8 && !res.localityAdded;
+  return res;
+}
+
+export { extractPincode, lookupPincode, lookupPincodeAreas, buildStructuredAddress, enrichShippingAddress };

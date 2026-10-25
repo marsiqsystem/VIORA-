@@ -27,6 +27,27 @@
 
 import { withRetry } from "./reliability";
 import { PACKAGE_BOX, parcelWeightKg, parcelHeightCm } from "./packageBox";
+import { enrichShippingAddress } from "./pincode";
+
+// Standardise + enrich an order's ship-to address (correct city/state from the
+// pincode, keep every line, add a real locality when the street text is thin)
+// right before it's handed to Velocity. Best-effort — never blocks a shipment.
+async function enrichOrderAddress(o) {
+  try {
+    const r = await enrichShippingAddress(o.address);
+    if (r.standardized || r.localityAdded) {
+      console.log(
+        `[velocity] address enriched for #${o.orderId}: standardized=${r.standardized}` +
+          (r.localityAdded ? ` locality+="${r.localityAdded}"` : "") +
+          (r.stillThin ? " (still thin — Call Queue should flag)" : "")
+      );
+    }
+    return { ...o, address: r.address };
+  } catch (e) {
+    console.warn("[velocity] address enrich skipped:", e?.message || e);
+    return o;
+  }
+}
 
 // Refresh the token this many ms before its stated expiry so an in-flight
 // request never races the expiry boundary.
@@ -239,6 +260,7 @@ function buildShipmentPayload(o) {
  */
 async function createShipment(o) {
   const c = cfg();
+  o = await enrichOrderAddress(o);
   const body = buildShipmentPayload(o);
 
   // Mock / disabled -> fabricate a deterministic AWB so downstream (Wix tracking
@@ -335,6 +357,7 @@ async function createShipment(o) {
  */
 async function createOrderOnly(o) {
   const c = cfg();
+  o = await enrichOrderAddress(o);
   const body = buildShipmentPayload(o);
 
   if (c.mock || !c.enabled) {
