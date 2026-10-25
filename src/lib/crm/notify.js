@@ -166,7 +166,13 @@ async function buildConfirmV2Params(o) {
     ? items.reduce((s, it) => s + (Number(it.quantity) || 1), 0)
     : Number(o.qty) || 1;
   const multiItem = items.length > 1;
-  const item = [o.product, o.colour].filter(Boolean).join(" - ") || o.product || "your order";
+  // For a multi-item order the single o.colour is only the FIRST item's colour —
+  // appending "- Red" wrongly implies every set is red. The product already
+  // carries "(+N more)", so show it without a colour when there are several.
+  const item =
+    (multiItem ? o.product : [o.product, o.colour].filter(Boolean).join(" - ")) ||
+    o.product ||
+    "your order";
   const qtyText =
     totalQty >= 2
       ? `${totalQty} — please confirm you want ${multiItem ? `all ${totalQty} sets` : `${totalQty} pieces`}`
