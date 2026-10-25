@@ -371,8 +371,22 @@ function extractAddress(order = {}, body = {}) {
     [a.streetAddress?.number, a.streetAddress?.name].filter(Boolean).join(" ") || undefined,
     a.formattedAddress
   );
+  // Wix keeps the street / area / landmark on a SECOND line (addressLine2, e.g.
+  // "Anant Vishram Nagvekar Marg" or "Vivekanand Puri, Sarai Rohilla"). Earlier
+  // this was dropped entirely — only line1 was kept — which shortened the
+  // ship-to address and risked "address incomplete" RTOs. Capture it (and the
+  // apartment/comment fallbacks) so the FULL address reaches every courier.
+  let line2 = firstDefined(
+    a.addressLine2,
+    a.addressLine2WithComment,
+    a.streetAddress?.apt,
+    a.streetAddress?.formattedApt
+  ) || "";
+  // Guard against a source that duplicated line1 into line2.
+  if (line2 && line1 && line2.trim().toLowerCase() === String(line1).trim().toLowerCase()) line2 = "";
   return {
     line1: line1 || "",
+    line2,
     city: firstDefined(a.city, a.cityName) || "",
     // Wix uses ISO subdivision codes like "IN-DL"; strip the country prefix so
     // Velocity gets a plain state name/code.

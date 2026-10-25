@@ -788,7 +788,7 @@ function pickCarrierRate(velRates: any[], best: { carrier: string }[]): { carrie
 }
 
 type ShipModal = { o: Order; r: Reco; loading: boolean; carrier?: string; cost?: number; gst?: number; total?: number; err?: string } | null;
-type EditModal = { o: Order; sellingPrice: string; qty: string; colour: string; dCode: string; line1: string; line2: string; city: string; state: string; postalCode: string } | null;
+type EditModal = { o: Order; sellingPrice: string; qty: string; colour: string; dCode: string; line1: string; line2: string; line3: string; city: string; state: string; postalCode: string } | null;
 
 // --- To Ship: orders CREATE-ONLY'd onto Velocity (status "created"), awaiting a
 // panel-ship. They leave the Ship Queue the moment they're created (no wallet
@@ -976,7 +976,7 @@ function ShipQueueTab({ orders, loading, apiKey, onChanged }: { orders: Order[];
 
   const openEdit = (o: Order) => setEditM({
     o, sellingPrice: String(o.sellingPrice ?? ""), qty: String(o.qty ?? 1), colour: o.colour || "", dCode: o.dCode || "",
-    line1: o.address?.line1 || "", line2: o.address?.line2 || "", city: o.address?.city || "", state: o.address?.state || "", postalCode: o.address?.postalCode || "",
+    line1: o.address?.line1 || "", line2: o.address?.line2 || "", line3: o.address?.line3 || "", city: o.address?.city || "", state: o.address?.state || "", postalCode: o.address?.postalCode || "",
   });
   const saveEdit = async () => {
     if (!editM) return;
@@ -989,7 +989,7 @@ function ShipQueueTab({ orders, loading, apiKey, onChanged }: { orders: Order[];
       });
       await fetch(`/api/dashboard/update-address?key=${encodeURIComponent(apiKey)}`, {
         method: "POST", headers: { "Content-Type": "application/json", "x-inbox-key": apiKey },
-        body: JSON.stringify({ orderId: o.orderId, address: { line1: editM.line1, line2: editM.line2, city: editM.city, state: editM.state, postalCode: editM.postalCode } }),
+        body: JSON.stringify({ orderId: o.orderId, address: { line1: editM.line1, line2: editM.line2, line3: editM.line3, city: editM.city, state: editM.state, postalCode: editM.postalCode } }),
       }).catch(() => {});
       setBusy((b) => ({ ...b, [o.orderId]: "saved ✓" }));
       setEditM(null); onChanged();
@@ -1123,8 +1123,9 @@ function ShipQueueTab({ orders, loading, apiKey, onChanged }: { orders: Order[];
             <div><label style={lbl}>Qty</label><input style={field} value={editM.qty} onChange={(e) => setEditM({ ...editM, qty: e.target.value })} /></div>
             <div><label style={lbl}>Colour</label><input style={field} value={editM.colour} onChange={(e) => setEditM({ ...editM, colour: e.target.value })} /></div>
             <div><label style={lbl}>Product (D-code)</label><input style={field} value={editM.dCode} onChange={(e) => setEditM({ ...editM, dCode: e.target.value })} /></div>
-            <div style={{ gridColumn: "1 / 3" }}><label style={lbl}>Address line 1</label><input style={field} value={editM.line1} onChange={(e) => setEditM({ ...editM, line1: e.target.value })} /></div>
-            <div style={{ gridColumn: "1 / 3" }}><label style={lbl}>Address line 2 / landmark</label><input style={field} value={editM.line2} onChange={(e) => setEditM({ ...editM, line2: e.target.value })} /></div>
+            <div style={{ gridColumn: "1 / 3" }}><label style={lbl}>Address line 1 (house/flat no., building)</label><input style={field} value={editM.line1} onChange={(e) => setEditM({ ...editM, line1: e.target.value })} /></div>
+            <div style={{ gridColumn: "1 / 3" }}><label style={lbl}>Address line 2 (street / area / locality)</label><input style={field} value={editM.line2} onChange={(e) => setEditM({ ...editM, line2: e.target.value })} /></div>
+            <div style={{ gridColumn: "1 / 3" }}><label style={lbl}>Address line 3 (nearby landmark — never remove detail)</label><input style={field} value={editM.line3} onChange={(e) => setEditM({ ...editM, line3: e.target.value })} /></div>
             <div><label style={lbl}>City</label><input style={field} value={editM.city} onChange={(e) => setEditM({ ...editM, city: e.target.value })} /></div>
             <div><label style={lbl}>State</label><input style={field} value={editM.state} onChange={(e) => setEditM({ ...editM, state: e.target.value })} /></div>
             <div><label style={lbl}>Pincode</label><input style={field} value={editM.postalCode} onChange={(e) => setEditM({ ...editM, postalCode: e.target.value })} /></div>
