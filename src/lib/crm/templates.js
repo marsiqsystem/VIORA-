@@ -57,9 +57,14 @@ export default {
     // review_request_util_v1 is UTILITY (not MARKETING) so it isn't hit by Meta's
     // per-user marketing frequency cap (error 131049) that was silently dropping
     // the old review_request_v1 for some customers. See send fn: it is HEADER-LESS.
+    // To switch to the new photo-review loop, set TPL_REVIEW_REQUEST=
+    // review_request_photo_v1 AND TPL_REVIEW_HEADER_IMAGE_URL to the instruction
+    // card (the MARKETING template HAS an image header; the util one does not).
     name: process.env.TPL_REVIEW_REQUEST || "review_request_util_v1",
     lang: LANG,
-    headerImageUrl: null, // UTILITY review template has NO header — send none
+    // null (default) = header-less util template → send no header. When the env is
+    // set, it's the fixed "how to review" instruction card shown on every send.
+    headerImageUrl: process.env.TPL_REVIEW_HEADER_IMAGE_URL || null,
     // body {{1}} name, {{2}} order id ; button url {{1}} product slug
   },
   abandonedCart: {

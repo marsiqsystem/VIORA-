@@ -305,13 +305,14 @@ async function sendDelivered(o) {
 async function sendReviewRequest(o) {
   await applyOverride(o);
   const bodyParams = [o.name, o.orderId];
-  // review_request_util_v1 (UTILITY) is HEADER-LESS. Only send a header if the
-  // configured review template actually has one (keeps this correct if the env
-  // is ever pointed back at an image-header template). Sending an image header to
-  // a header-less template gives Meta's "header: Format mismatch" error.
-  const headerImageUrl = T.reviewRequest.headerImageUrl
-    ? o.productImage || T.reviewRequest.headerImageUrl
-    : undefined;
+  // review_request_util_v1 (UTILITY) is HEADER-LESS → headerImageUrl is null, so we
+  // send no header (an image header to a header-less template gives Meta's "header:
+  // Format mismatch" error). review_request_photo_v1 (MARKETING) HAS an image header
+  // and it must ALWAYS be the fixed "how to review" instruction card — NOT the
+  // order's product photo — so customers see the step-by-step. Hence we use the
+  // configured headerImageUrl verbatim here (unlike other workflows that prefer
+  // o.productImage); when it's set it's the instruction card.
+  const headerImageUrl = T.reviewRequest.headerImageUrl || undefined;
   const res = await sendTemplate({
     to: o.waPhone || o.phone,
     templateName: T.reviewRequest.name,
