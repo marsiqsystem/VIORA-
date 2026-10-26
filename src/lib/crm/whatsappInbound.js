@@ -48,6 +48,12 @@ function parseInbound(body) {
       statusCount += (value.statuses || []).length;
 
       for (const msg of value.messages || []) {
+        // For image messages, surface the media id + caption too, so downstream
+        // handlers (e.g. the WhatsApp-native review capture) can download the
+        // photo and read any text the customer typed alongside it. messageText()
+        // deliberately returns "" for images (nothing to AI-reply to), so caption
+        // is carried separately and never changes the AI path.
+        const image = msg.type === "image" ? msg.image : null;
         messages.push({
           from: msg.from, // sender phone, international digits (no +)
           name: nameByWaId[msg.from] || "",
@@ -55,6 +61,8 @@ function parseInbound(body) {
           type: msg.type,
           messageId: msg.id,
           timestamp: msg.timestamp, // epoch seconds as string
+          ...(image?.id ? { imageId: image.id } : {}),
+          ...(image?.caption ? { caption: image.caption } : {}),
         });
       }
     }

@@ -32,6 +32,7 @@ import {
 import { findLatestOrderByPhone, updateOrder, getOrder } from "./orders-store";
 import { extractPincode, lookupPincode, buildStructuredAddress } from "./pincode";
 import { sendOrderCancelled } from "./notify";
+import { handleReviewReply } from "./reviewCapture";
 
 const aiEnabled = () =>
   String(process.env.AI_AUTOREPLY_ENABLED).toLowerCase() === "true";
@@ -513,6 +514,12 @@ async function handleMessage(msg) {
   //     their corrected address — capture it into the order (no AI). This runs
   //     before the AI path so the address never gets treated as a chat message.
   if (await handleAddressCapture(msg)) return;
+
+  // 2c) WhatsApp-native review capture (gated by REVIEW_CAPTURE_ENABLED): after a
+  //     review request, fold the customer's rating / words / photo into a review
+  //     and post it to the website. Runs before the (text-only) AI guard so a
+  //     photo-only reply is still captured. No-op when the feature is off.
+  if (await handleReviewReply(msg)) return;
 
   // Only text-bearing messages get an AI reply.
   if (!msg.text) {

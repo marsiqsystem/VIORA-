@@ -11,6 +11,7 @@
 
 import * as notify from "./notify";
 import * as reviewQueue from "./reviewQueue";
+import { beginReviewCapture } from "./reviewCapture";
 
 const DELAY_DAYS = Number(process.env.REVIEW_DELAY_DAYS || 2);
 
@@ -35,6 +36,9 @@ async function processDueReviews() {
         const result = await notify.sendReviewRequest(order);
         if (result.ok && !result.dryRun) {
           await reviewQueue.dequeue(id); // done — remove from the queue
+          // Open the WhatsApp review-capture window (no-op unless the feature is
+          // on) so the customer's reply (rating/words/photo) posts to the website.
+          try { await beginReviewCapture(order.phone, id); } catch { /* best-effort */ }
           console.log(`[scheduler] WF4 review sent for ${id}.`);
         } else {
           // Dry-run or failure: release the claim so a later tick can retry.

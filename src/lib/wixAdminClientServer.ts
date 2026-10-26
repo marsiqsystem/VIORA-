@@ -1,6 +1,8 @@
 import { ApiKeyStrategy, createClient } from "@wix/sdk";
 import { checkout, orders, orderTransactions, draftOrders, orderFulfillments } from "@wix/ecom";
 import { contacts, labels } from "@wix/crm";
+import { reviews } from "@wix/reviews";
+import { files } from "@wix/media";
 
 export const wixAdminClientServer = () => {
   const apiKey = process.env.WIX_API_KEY;
@@ -13,8 +15,11 @@ export const wixAdminClientServer = () => {
     );
   }
 
+  // `reviews` + `files` let the server post a product review and upload its photo
+  // as ADMIN — used by the WhatsApp-native review capture (no customer login). The
+  // API key must carry "Wix Reviews — Manage Reviews" + Media Manager permissions.
   return createClient({
-    modules: { checkout, orders, orderTransactions, draftOrders, orderFulfillments, contacts, labels },
+    modules: { checkout, orders, orderTransactions, draftOrders, orderFulfillments, contacts, labels, reviews, files },
     auth: ApiKeyStrategy({
       apiKey,
       ...(siteId ? { siteId } : { accountId: accountId! }),

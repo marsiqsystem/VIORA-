@@ -986,6 +986,45 @@ async function clearLastTap(phone) {
   }
 }
 
+// --- WhatsApp-native review capture draft ------------------------------------
+// After we send a review request, we remember (keyed by phone) that we're
+// expecting the customer's review reply, and ACCUMULATE the pieces they send
+// across messages — a rating, a few words, and a photo may arrive separately.
+// The blob is { orderId, rating, body, photoMediaId, startedAt }. Self-expiring
+// so an abandoned reply never traps the thread into "review mode". Fail-safe:
+// any KV hiccup behaves as "no draft" (the message then flows to the AI path).
+const REVIEW_DRAFT_TTL_S = 7 * 24 * 60 * 60; // 7 days to reply with the review
+function reviewDraftKey(phone) {
+  return `${PREFIX}review_draft:${normPhone(phone)}`;
+}
+async function setReviewDraft(phone, draft) {
+  if (!isConfigured() || !draft) return false;
+  try {
+    await command(["SET", reviewDraftKey(phone), JSON.stringify(draft), "EX", String(REVIEW_DRAFT_TTL_S)]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function getReviewDraft(phone) {
+  if (!isConfigured()) return null;
+  try {
+    const raw = await command(["GET", reviewDraftKey(phone)]);
+    if (!raw) return null;
+    return typeof raw === "object" ? raw : JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+async function clearReviewDraft(phone) {
+  if (!isConfigured()) return;
+  try {
+    await command(["DEL", reviewDraftKey(phone)]);
+  } catch {
+    /* best-effort */
+  }
+}
+
 export {
   isConfigured,
   ingestWebhook,
@@ -1002,6 +1041,9 @@ export {
   setLastTap,
   getLastTap,
   clearLastTap,
+  setReviewDraft,
+  getReviewDraft,
+  clearReviewDraft,
   markRead,
   deleteMessage,
   deleteConversation,
