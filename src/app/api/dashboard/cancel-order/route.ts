@@ -64,12 +64,15 @@ export async function POST(req: NextRequest) {
     statusAt: Date.now(),
   });
 
-  // 2) Message the customer exactly once (shared idempotency key).
+  // 2) Message the customer exactly once (shared idempotency key). Pass the
+  //    order's product photo so the cancellation WhatsApp shows it in the image
+  //    header (sendOrderCancelled falls back to the logo when it's missing).
   const dispatch = await dispatchCancellationOnce({
     orderId: order.orderId,
     phone: order.phone,
     name: order.name,
     product: order.product || order.dCode,
+    productImage: order.productImage,
     amount: order.sellingPrice,
     paymentMode: order.paymentMode,
   });

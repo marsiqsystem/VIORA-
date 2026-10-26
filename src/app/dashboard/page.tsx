@@ -931,6 +931,30 @@ function ShipQueueTab({ orders, loading, apiKey, onChanged }: { orders: Order[];
     } catch (e: any) { setBusy((b) => ({ ...b, [o.orderId]: "failed: " + (e?.message || "err") })); }
   };
 
+  // Cancel the order straight from the Ship Queue: marks it cancelled and sends
+  // the customer the cancellation WhatsApp (with their product photo in the
+  // header). Shares the one-send idempotency key, so it can never double-message.
+  const cancelOrder = async (o: Order) => {
+    const onCourier = o.awb
+      ? `\n\n⚠️ It's already on ${o.courier || "a courier"} (AWB ${o.awb}) — you'll still need to cancel that shipment in the courier's own dashboard.`
+      : "";
+    if (!window.confirm(`Cancel order #${o.orderId}?${onCourier}\n\nThe customer WILL get a cancellation WhatsApp (with their product photo). This can't be undone.`)) return;
+    setBusy((b) => ({ ...b, [o.orderId]: "cancelling" }));
+    try {
+      const res = await fetch(`/api/dashboard/cancel-order?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-inbox-key": apiKey },
+        body: JSON.stringify({ orderId: o.orderId }),
+      });
+      const j = await res.json();
+      if (j.ok) {
+        setBusy((b) => ({ ...b, [o.orderId]: j.messaged ? "cancelled ✓ — messaged" : "cancelled ✓ (not messaged)" }));
+        onChanged();
+      } else {
+        setBusy((b) => ({ ...b, [o.orderId]: `failed: ${typeof j.error === "string" ? j.error : "err"}` }));
+      }
+    } catch (e: any) { setBusy((b) => ({ ...b, [o.orderId]: "failed: " + (e?.message || "err") })); }
+  };
+
   // Open the ship confirm modal and fetch the recommended carrier's live cost + 18% GST.
   const openShip = async (o: Order, r: Reco) => {
     setShipM({ o, r, loading: true });
@@ -1070,6 +1094,9 @@ function ShipQueueTab({ orders, loading, apiKey, onChanged }: { orders: Order[];
                     <button onClick={() => createOnVelocity(o)} disabled={busy[o.orderId] === "creating"} title="Create on Velocity (no charge) — ship from its New Orders"
                       style={sqBtn(busy[o.orderId]?.startsWith("created") ? "#DCF3E5" : C.card)}>📦 Create</button>
                     <button onClick={() => openEdit(o)} title="Edit address / product / amount / qty" style={sqBtn(C.card)}>✏️ Edit</button>
+                    <button onClick={() => cancelOrder(o)} disabled={busy[o.orderId] === "cancelling"} title="Cancel this order and WhatsApp the customer a cancellation (with their product photo)"
+                      style={{ ...sqBtn(busy[o.orderId]?.startsWith("cancelled") ? "#F0E6E6" : "#FBE3E1"), color: "#c0392b", borderColor: "#e3b3ae" }}>
+                      {busy[o.orderId] === "cancelling" ? "…" : "✕ Cancel"}</button>
                   </div>
                   {busy[o.orderId] && !/sent|shipped|created|saved/.test(busy[o.orderId]) && <div style={{ color: busy[o.orderId].startsWith("failed") ? C.bad : C.sub, fontSize: 10, marginTop: 2 }}>{busy[o.orderId]}</div>}
                 </td>
@@ -1078,7 +1105,7 @@ function ShipQueueTab({ orders, loading, apiKey, onChanged }: { orders: Order[];
           </tbody>
         </table>
       </TableWrap>
-      <p style={{ color: C.sub, fontSize: 12, marginTop: 10 }}>📩 Confirm sends the YES-reply WhatsApp · 🚀 Ship books + AWB on Velocity (shows cost + 18% GST, charges wallet) · 📦 Create lands in Velocity New Orders (no charge) · ✏️ Edit updates address / product / amount.</p>
+      <p style={{ color: C.sub, fontSize: 12, marginTop: 10 }}>📩 Confirm sends the YES-reply WhatsApp · 🚀 Ship books + AWB on Velocity (shows cost + 18% GST, charges wallet) · 📦 Create lands in Velocity New Orders (no charge) · ✏️ Edit updates address / product / amount · ✕ Cancel marks the order cancelled and WhatsApps the customer (with their product photo).</p>
 
       {/* SHIP CONFIRM MODAL — delivery cost + 18% GST, charges wallet on confirm */}
       {shipM && (
