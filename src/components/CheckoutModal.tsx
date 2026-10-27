@@ -24,7 +24,10 @@ import {
   PREPAID_DISCOUNT,
   REVIEW_REWARD,
   fallbackCouponDiscount,
+  computeCoinsOrder,
+  bestTierFor,
 } from "@/lib/checkoutPricing";
+import { getCoinBalance } from "@/lib/coinsActions";
 import {
   automaticDiscountTotal,
   estimatedCouponTotal,
@@ -98,6 +101,10 @@ const normalizeIndianMobile = (raw: string) => {
   else if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
   return digits.slice(0, 10);
 };
+
+// Viora Coins checkout UI — off until the program is live (same gate the server
+// uses). When unset, the toggle/display never render and pricing is untouched.
+const COINS_UI = process.env.NEXT_PUBLIC_COINS_ENABLED === "1";
 
 const isValidMobile = (phone: string) => /^[6-9]\d{9}$/.test(phone);
 const isValidPincode = (pin: string) => /^[1-9]\d{5}$/.test(pin);
@@ -211,6 +218,23 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   // window (above that the spend ladder wins). No-op unless the review loop is
   // live (NEXT_PUBLIC_REVIEW_VOUCHER_ENABLED).
   useReviewVoucher(open, phone, email);
+  // Viora Coins: this signed-in customer's wallet balance (0 for guests / when
+  // the program is off). Default the toggle ON so earned coins apply like a
+  // reward; the customer can switch it off.
+  const [coinBalance, setCoinBalance] = useState(0);
+  const [useCoins, setUseCoins] = useState(true);
+  useEffect(() => {
+    if (!open || !COINS_UI) return;
+    let cancelled = false;
+    getCoinBalance()
+      .then((b) => {
+        if (!cancelled) setCoinBalance(Number(b) || 0);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   useEffect(() => {
     setMounted(true);
@@ -375,7 +399,22 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   // it — see /api/wix/checkout). `total` is the real amount charged/collected.
   const prepaidTotal = Math.max(0, discountedSubtotal - PREPAID_DISCOUNT);
   const codTotal = discountedSubtotal + COD_CHARGE;
-  const total = isPrepaid ? prepaidTotal : codTotal;
+  // Viora Coins: when the customer spends coins, the WHOLE total is recomputed by
+  // the single shared formula (Style A — the ₹49 is baked into the base, coins
+  // come off first, then the ladder % on the remainder, then the prepaid ₹25).
+  // Otherwise everything below is exactly the normal order. The server re-verifies
+  // the balance and recomputes this same number before charging/collecting.
+  const ladderPercent = bestTierFor(subtotal)?.percent || 0;
+  const coinsActive = COINS_UI && useCoins && coinBalance > 0;
+  const coinsBreakdown = coinsActive
+    ? computeCoinsOrder({
+        productSubtotal: subtotal,
+        paymentMethod: isPrepaid ? "PREPAID" : "COD",
+        coins: coinBalance,
+        ladderPercent,
+      })
+    : null;
+  const total = coinsBreakdown ? coinsBreakdown.finalTotal : isPrepaid ? prepaidTotal : codTotal;
   // Difference between COD and prepaid (₹49 charge avoided + ₹25 off gained).
   const prepaidSaving = COD_CHARGE + PREPAID_DISCOUNT;
   // Only real savings: MRP discount, coupon, automatic discounts, prepaid discount.
@@ -575,6 +614,11 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
           // Stamped on the order so the CRM/Velocity read it race-proof, exactly
           // like the prepaid "Amount Paid" field — independent of the draft edit.
           codAmount: method === "COD" ? total.toFixed(2) : undefined,
+          // Viora Coins the buyer chose to spend. The server re-verifies the
+          // member's balance and recomputes the total before trusting these —
+          // the client figure is only a request.
+          useCoins: coinsActive || undefined,
+          coins: coinsBreakdown ? coinsBreakdown.usedCoins : undefined,
         },
       }),
     });
@@ -1437,45 +1481,108 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
             />
           </section>
 
+          {/* Viora Coins toggle — only when the program is live */}
+          {COINS_UI && (
+            <section className="mb-2 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🪙</span>
+                {coinBalance > 0 ? (
+                  <span className="font-medium text-amber-900">
+                    Use Viora Coins ({coinBalance}) — ₹{coinBalance} off
+                  </span>
+                ) : (
+                  <span className="text-amber-900/80">
+                    Use coins (0) ·{" "}
+                    <a href="/viora-coins" className="underline">
+                      How to earn coins
+                    </a>
+                  </span>
+                )}
+              </div>
+              {coinBalance > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setUseCoins((v) => !v)}
+                  aria-pressed={useCoins}
+                  className={`relative h-6 w-11 rounded-full transition-colors ${useCoins ? "bg-amber-600" : "bg-gray-300"}`}
+                >
+                  <span
+                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${useCoins ? "left-[22px]" : "left-0.5"}`}
+                  />
+                </button>
+              )}
+            </section>
+          )}
+
           {/* Price breakdown */}
           <section className="space-y-1.5 rounded-lg border border-gray-100 bg-gray-50 p-4 text-sm">
-            <div className="flex justify-between text-gray-600">
-              <span>Subtotal</span>
-              <span className="tabular-nums">₹{rupees(subtotal)}</span>
-            </div>
-            {wixCouponDiscount > 0 && (
-              <div className="flex justify-between font-medium text-green-700">
-                <span>Coupon{appliedCouponCode ? ` (${appliedCouponCode})` : ""}</span>
-                <span className="tabular-nums">- ₹{rupees(wixCouponDiscount)}</span>
-              </div>
-            )}
-            {/* Automatic discounts, e.g. the festive combo */}
-            {automaticLines.map((line) => (
-              <div key={line.label} className="flex justify-between font-medium text-green-700">
-                <span>{line.label}</span>
-                <span className="tabular-nums">- ₹{rupees(line.amount)}</span>
-              </div>
-            ))}
-            <div className="flex justify-between text-gray-600">
-              <span>{isPrepaid ? "Delivery" : "Delivery + COD charge"}</span>
-              {isPrepaid ? (
-                <span className="font-semibold text-green-700">FREE</span>
-              ) : (
-                <span className="font-semibold text-amber-700">+ ₹{COD_CHARGE}</span>
-              )}
-            </div>
-            {isPrepaid && (
-              <div className="flex justify-between font-medium text-green-700">
-                <span>Pay-online discount</span>
-                <span className="tabular-nums">- ₹{PREPAID_DISCOUNT}</span>
-              </div>
+            {coinsBreakdown ? (
+              <>
+                {/* Style A: the ₹49 is baked into the subtotal (not itemised). */}
+                <div className="flex justify-between text-gray-600">
+                  <span>Subtotal</span>
+                  <span className="tabular-nums">₹{rupees(coinsBreakdown.base)}</span>
+                </div>
+                <div className="flex justify-between font-medium text-amber-700">
+                  <span>🪙 Viora Coins</span>
+                  <span className="tabular-nums">- ₹{rupees(coinsBreakdown.usedCoins)}</span>
+                </div>
+                {coinsBreakdown.ladderDiscount > 0 && (
+                  <div className="flex justify-between font-medium text-green-700">
+                    <span>Member discount{appliedCouponCode ? ` (${appliedCouponCode})` : ""}</span>
+                    <span className="tabular-nums">- ₹{rupees(coinsBreakdown.ladderDiscount)}</span>
+                  </div>
+                )}
+                {isPrepaid && (
+                  <div className="flex justify-between font-medium text-green-700">
+                    <span>Pay-online discount</span>
+                    <span className="tabular-nums">- ₹{PREPAID_DISCOUNT}</span>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="flex justify-between text-gray-600">
+                  <span>Subtotal</span>
+                  <span className="tabular-nums">₹{rupees(subtotal)}</span>
+                </div>
+                {wixCouponDiscount > 0 && (
+                  <div className="flex justify-between font-medium text-green-700">
+                    <span>Coupon{appliedCouponCode ? ` (${appliedCouponCode})` : ""}</span>
+                    <span className="tabular-nums">- ₹{rupees(wixCouponDiscount)}</span>
+                  </div>
+                )}
+                {/* Automatic discounts, e.g. the festive combo */}
+                {automaticLines.map((line) => (
+                  <div key={line.label} className="flex justify-between font-medium text-green-700">
+                    <span>{line.label}</span>
+                    <span className="tabular-nums">- ₹{rupees(line.amount)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between text-gray-600">
+                  <span>{isPrepaid ? "Delivery" : "Delivery + COD charge"}</span>
+                  {isPrepaid ? (
+                    <span className="font-semibold text-green-700">FREE</span>
+                  ) : (
+                    <span className="font-semibold text-amber-700">+ ₹{COD_CHARGE}</span>
+                  )}
+                </div>
+                {isPrepaid && (
+                  <div className="flex justify-between font-medium text-green-700">
+                    <span>Pay-online discount</span>
+                    <span className="tabular-nums">- ₹{PREPAID_DISCOUNT}</span>
+                  </div>
+                )}
+              </>
             )}
             <div className="mt-2 flex justify-between border-t border-gray-200 pt-3 text-base font-bold text-primary">
               <span>{isPrepaid ? "Total" : "Total (pay on delivery)"}</span>
               <span className="tabular-nums">₹{rupees(total)}</span>
             </div>
             <p className="pt-1 text-[11px] text-gray-500">
-              📸 After delivery, a photo review gets you ₹{REVIEW_REWARD.amount} off your next order.
+              {coinsBreakdown
+                ? "🎉 Your Viora Coins have been applied to this order."
+                : `📸 After delivery, a photo review gets you ₹${REVIEW_REWARD.amount} off your next order.`}
             </p>
           </section>
 

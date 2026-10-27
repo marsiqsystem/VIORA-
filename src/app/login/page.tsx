@@ -10,6 +10,7 @@ import BackButton from "@/components/BackButton";
 import Link from "next/link";
 import { REVIEW_REWARD } from "@/lib/checkoutPricing";
 import GoogleSignInButton from "@/components/GoogleSignInButton";
+import { grantLoginBonus } from "@/lib/coinsActions";
 import {
   getInvisibleCaptchaToken,
   getVisibleCaptchaResponse,
@@ -265,6 +266,9 @@ const LoginContent = () => {
           if (mode === MODE.REGISTER) {
             trackCompleteRegistration("email");
           }
+          // Viora Coins: one-time login bonus (idempotent per account). Fire and
+          // forget — never block the redirect; the congratulations popup shows it.
+          grantLoginBonus().catch(() => {});
           setMessage("Successful! You are being redirected.");
           router.push(redirectTo);
           break;

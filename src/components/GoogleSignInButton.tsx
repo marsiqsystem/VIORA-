@@ -62,6 +62,8 @@ export default function GoogleSignInButton({
           expires: 30,
         });
         wixClient.auth.setTokens(tokens);
+        // Viora Coins: one-time login bonus (idempotent). Fire and forget.
+        import("@/lib/coinsActions").then((m) => m.grantLoginBonus().catch(() => {})).catch(() => {});
         try {
           trackCompleteRegistration("google");
         } catch {

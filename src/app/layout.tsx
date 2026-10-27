@@ -25,6 +25,7 @@ const PendingReviewFlusher = dynamic(
 );
 // The site's single bag drawer + checkout modal (each loads on first use).
 const CommerceOverlays = dynamic(() => import("@/components/CommerceOverlays"));
+const CoinsCongratsPopup = dynamic(() => import("@/components/CoinsCongratsPopup"));
 
 const SITE_URL = (
   process.env.NEXT_PUBLIC_SITE_URL || "https://www.viorajewel.in"
@@ -284,6 +285,7 @@ export default function RootLayout({
               <Footer />
               <MobileBottomNav />
               <CommerceOverlays />
+              <CoinsCongratsPopup />
             </FloatingReelProvider>
           </ToastProvider>
           <GoogleOneTap />

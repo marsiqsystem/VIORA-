@@ -47,6 +47,8 @@ export default function GoogleOneTap({
           expires: 30,
         });
         wixClient.auth.setTokens(tokens);
+        // Viora Coins: one-time login bonus (idempotent). Fire and forget.
+        import("@/lib/coinsActions").then((m) => m.grantLoginBonus().catch(() => {})).catch(() => {});
         onLoggedIn?.();
         window.location.reload();
       } catch (err) {

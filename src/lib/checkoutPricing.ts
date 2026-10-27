@@ -84,6 +84,64 @@ export const VIORA_COINS = {
   codDelivered: 20, // each COD order, when it is delivered
 };
 
+// ---- Coins spend math (the ONE place both client & server compute it) -------
+// Applies ONLY when the customer chooses to spend coins (coins > 0). A normal
+// order never calls this and its pricing is completely unchanged.
+//
+// The owner's approved rules (Style A billing):
+//   base      = productSubtotal + COD_CHARGE   (the ₹49 is BAKED into the base
+//               for BOTH COD and prepaid, and is NEVER shown as its own line)
+//   − coins   first (capped so the order can't drop to ₹0)
+//   − ladder% on the REMAINDER (coins-first ordering, so the % is a bit smaller)
+//   − ₹25     prepaid discount, only when paying online
+// Examples: ₹500+75coins → COD ₹474, Prepaid ₹449. ₹1000+75coins+10% →
+//   COD ₹876.6, Prepaid ₹851.6.
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+export type CoinsOrderBreakdown = {
+  productSubtotal: number;
+  base: number; // productSubtotal + COD_CHARGE (Style A)
+  usedCoins: number; // coins actually spent (<= balance, capped so total > 0)
+  afterCoins: number;
+  ladderPercent: number;
+  ladderDiscount: number;
+  afterLadder: number;
+  prepaidDiscount: number;
+  finalTotal: number; // what the customer pays (COD cash / Razorpay amount)
+};
+
+/**
+ * Compute a coins order's totals. `ladderPercent` is the spend-ladder % the cart
+ * qualifies for (0 when none); pass it from bestTierFor(productSubtotal).
+ */
+export function computeCoinsOrder(input: {
+  productSubtotal: number;
+  paymentMethod: "COD" | "PREPAID";
+  coins: number;
+  ladderPercent: number;
+}): CoinsOrderBreakdown {
+  const productSubtotal = Math.max(0, round2(input.productSubtotal));
+  const base = round2(productSubtotal + COD_CHARGE);
+  const usedCoins = Math.max(0, Math.min(Math.round(input.coins) || 0, Math.floor(base) - 1));
+  const afterCoins = round2(base - usedCoins);
+  const ladderPercent = input.ladderPercent > 0 ? input.ladderPercent : 0;
+  const ladderDiscount = ladderPercent > 0 ? round2((afterCoins * ladderPercent) / 100) : 0;
+  const afterLadder = round2(afterCoins - ladderDiscount);
+  const prepaidDiscount = input.paymentMethod === "PREPAID" ? PREPAID_DISCOUNT : 0;
+  const finalTotal = Math.max(0, round2(afterLadder - prepaidDiscount));
+  return {
+    productSubtotal,
+    base,
+    usedCoins,
+    afterCoins,
+    ladderPercent,
+    ladderDiscount,
+    afterLadder,
+    prepaidDiscount,
+    finalTotal,
+  };
+}
+
 // ---- Pay online after a COD order -------------------------------------------
 // Waives the COD charge. This label is written onto the Wix order as the
 // discount description; normalizePaymentMode (src/lib/crm/wixOrder.js) keys on it.
