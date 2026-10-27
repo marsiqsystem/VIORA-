@@ -71,6 +71,19 @@ export const isFestiveComboLive = (now: number = Date.now()) =>
 // with a photo (see createProductReview in src/lib/reviewsActions.ts).
 export const REVIEW_REWARD = { code: "PHOTO75", amount: 75, minimum: 699 };
 
+// ---- Viora Coins (loyalty wallet) -------------------------------------------
+// 1 coin = ₹1. Coins are a server-side wallet (src/lib/crm/vioraCoins.js), NOT a
+// Wix coupon, so they stack on top of the spend-ladder coupon at checkout. Each
+// amount below is granted once per the event named. Instagram-follow (5) is on
+// hold for a future release. Dormant until COINS_ENABLED=1.
+export const COIN_VALUE_INR = 1;
+export const VIORA_COINS = {
+  review: 75, // photo review on the website (once per account)
+  signup: 10, // first login / account (once per account)
+  prepaid: 30, // each prepaid order, on success
+  codDelivered: 20, // each COD order, when it is delivered
+};
+
 // ---- Pay online after a COD order -------------------------------------------
 // Waives the COD charge. This label is written onto the Wix order as the
 // discount description; normalizePaymentMode (src/lib/crm/wixOrder.js) keys on it.

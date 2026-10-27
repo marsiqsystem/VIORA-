@@ -2,7 +2,8 @@
 
 import { wixClientServer } from "@/lib/wixClientServer";
 import { wixAdminClientServer } from "@/lib/wixAdminClientServer";
-import { REVIEW_REWARD } from "@/lib/checkoutPricing";
+import { REVIEW_REWARD, VIORA_COINS } from "@/lib/checkoutPricing";
+import { earn as earnCoins } from "@/lib/crm/vioraCoins";
 import type { PublicReview, CreateReviewResult } from "@/lib/reviewsTypes";
 
 const NAMESPACE = "stores";
@@ -155,12 +156,31 @@ export async function createProductReview(input: {
       },
     } as any);
 
-    // Reward any photo review from a past customer, whatever the rating.
-    const reward =
-      input.mediaUrl && (await hasOrderedBefore(member)) ? { ...REVIEW_REWARD } : undefined;
+    // Reward any photo review from a past customer, whatever the rating. The
+    // same gate (photo + has ordered) that keeps the coupon un-farmable also
+    // guards the coins; earnCoins is idempotent per account (reasonKey
+    // "review:<contactId>"), so re-reviewing never grants twice. No-op unless
+    // COINS_ENABLED=1.
+    const earnsReward = !!input.mediaUrl && (await hasOrderedBefore(member));
+    const reward = earnsReward ? { ...REVIEW_REWARD } : undefined;
+    let coinsEarned = 0;
+    if (earnsReward) {
+      try {
+        const res = await earnCoins({
+          contactId: member.contactId,
+          amount: VIORA_COINS.review,
+          reasonKey: `review:${member.contactId}`,
+          note: "Photo review",
+        });
+        if (res.earned) coinsEarned = res.amount;
+      } catch (e) {
+        console.error("[reviews] coin grant failed (non-blocking):", e);
+      }
+    }
 
     return {
       ok: true,
+      ...(coinsEarned ? { coinsEarned } : {}),
       review: {
         id: created._id,
         authorName: created.author?.authorName || displayName,

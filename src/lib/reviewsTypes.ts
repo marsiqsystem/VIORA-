@@ -16,7 +16,7 @@ export type ReviewReward = {
 };
 
 export type CreateReviewResult =
-  | { ok: true; review: PublicReview; reward?: ReviewReward }
+  | { ok: true; review: PublicReview; reward?: ReviewReward; coinsEarned?: number }
   | {
       ok: false;
       error: "LOGIN_REQUIRED" | "INVALID" | "SERVER_ERROR";

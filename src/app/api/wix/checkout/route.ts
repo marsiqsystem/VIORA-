@@ -4,8 +4,9 @@ import { sendOrderConfirmationEmail } from "@/lib/orderEmail";
 import { sendServerCapi } from "@/lib/metaCapiServer";
 import { readCookieRaw } from "@/lib/metaFbc";
 import { slugFromUrl } from "@/lib/metaCatalogId";
-import { COD_CHARGE, PREPAID_DISCOUNT, REVIEW_REWARD } from "@/lib/checkoutPricing";
+import { COD_CHARGE, PREPAID_DISCOUNT, REVIEW_REWARD, VIORA_COINS } from "@/lib/checkoutPricing";
 import { consumeReviewReward } from "@/lib/crm/reviewReward";
+import { earn as earnCoins } from "@/lib/crm/vioraCoins";
 import { makePaymentSeal } from "@/lib/crm/paymentSeal";
 import { fetchRazorpayPayment } from "@/lib/razorpayVerify";
 import { claimOnce, release } from "@/lib/crm/idempotency";
@@ -455,6 +456,29 @@ export async function POST(req: Request) {
       orderId,
       "APPROVED"
     );
+
+    // Viora Coins: a prepaid order that succeeded earns 30 coins to the member's
+    // wallet (keyed per orderId, so idempotent). Only a logged-in member has a
+    // contactId / wallet — guests earn nothing. Best-effort + no-op unless
+    // COINS_ENABLED=1, so it never affects the order or a normal checkout.
+    if (paymentMethod === "PREPAID") {
+      try {
+        const contactId =
+          (approvedOrderResult as any)?.order?.buyerInfo?.contactId ||
+          (orderResult as any)?.order?.buyerInfo?.contactId ||
+          "";
+        if (contactId) {
+          await earnCoins({
+            contactId,
+            amount: VIORA_COINS.prepaid,
+            reasonKey: `prepaid:${orderId}`,
+            note: "Prepaid order",
+          });
+        }
+      } catch (coinErr) {
+        console.error("[viora-coins] prepaid grant failed (non-blocking):", coinErr);
+      }
+    }
 
     // The total Wix computed for the order (already reflects any coupon or
     // automatic discount). This is the pre-prepaid-discount figure.

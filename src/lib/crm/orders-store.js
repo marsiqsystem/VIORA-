@@ -244,6 +244,40 @@ async function applyCourierStatus(orderId, canonical, extra = {}) {
       patch.status = next;
     }
     await updateOrder(orderId, patch);
+
+    // Viora Coins: the FIRST time a COD order reaches "delivered", credit 20
+    // coins to the member who placed it. On delivery (not on order), per the
+    // spec. Keyed per orderId so a duplicate/late webhook never grants twice.
+    // All dynamic + gated on COINS_ENABLED so webhooks are untouched when off,
+    // and fully best-effort (a failure never affects the status update).
+    if (
+      patch.status === "delivered" &&
+      cur !== "delivered" &&
+      String(existing?.paymentMode || "").toUpperCase() === "COD" &&
+      process.env.COINS_ENABLED === "1" &&
+      existing?.orderGuid
+    ) {
+      try {
+        const { wixAdminClientServer } = await import("@/lib/wixAdminClientServer");
+        const wo = await wixAdminClientServer().orders.getOrder(existing.orderGuid);
+        const contactId = wo?.buyerInfo?.contactId || "";
+        if (contactId) {
+          const [{ earn }, { VIORA_COINS }] = await Promise.all([
+            import("./vioraCoins"),
+            import("@/lib/checkoutPricing"),
+          ]);
+          await earn({
+            contactId,
+            amount: VIORA_COINS.codDelivered,
+            reasonKey: `coddeliv:${orderId}`,
+            note: "COD order delivered",
+          });
+        }
+      } catch (e) {
+        console.warn("[viora-coins] COD-delivered grant failed (non-blocking):", e?.message || e);
+      }
+    }
+
     return { ok: true, status: patch.status || cur };
   } catch (e) {
     console.warn("[orders-store] applyCourierStatus failed:", e?.message || e);
