@@ -27,7 +27,10 @@ const isConfigured = () => Boolean(config().apiKey);
  * @returns {Promise<{ok:boolean, text?:string, error?:any}>}
  */
 async function generateReply(userMessage, opts = {}) {
-  const { apiKey, model } = config();
+  const { apiKey, model: defaultModel } = config();
+  // Callers can pick a cheaper model per task (e.g. flash-lite for the address
+  // formatter — 5× cheaper than flash and plenty for structured cleanup).
+  const model = opts.model || defaultModel;
   if (!apiKey) {
     return { ok: false, error: "GEMINI_API_KEY not set." };
   }
