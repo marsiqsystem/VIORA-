@@ -34,19 +34,6 @@ async function handle(req: NextRequest) {
       /* query params only */
     }
   }
-  // Diagnostic: &selftest=1 — probe Gemini directly (which models work, is the
-  // key set) without touching an order. Remove once the formatter is verified.
-  if (sp.get("selftest") === "1") {
-    const { generateReply, isConfigured } = await import("@/lib/crm/gemini");
-    const models = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-flash-lite-latest"];
-    const out: any = { geminiKeySet: isConfigured(), tries: {} };
-    for (const m of models) {
-      const r = await generateReply("Reply with just: OK", { model: m, maxOutputTokens: 10, temperature: 0 });
-      out.tries[m] = { ok: r.ok, text: r.ok ? r.text : undefined, error: r.ok ? undefined : JSON.stringify(r.error).slice(0, 200) };
-    }
-    return NextResponse.json(out);
-  }
-
   orderId = String(orderId).trim();
   if (!orderId) return NextResponse.json({ ok: false, error: "orderId required" }, { status: 400 });
 

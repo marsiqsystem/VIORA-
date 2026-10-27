@@ -188,14 +188,18 @@ export async function formatAddress({ orderId, name, phone, address, force } = {
       cost: 0,
     };
   } else {
-    // 4) Model path (Flash-Lite, tiny output).
-    const ai = await generateReply(buildPrompt({ name, phone, address: a, pinInfo }), {
-      systemPrompt: SYSTEM_PROMPT,
-      model: MODEL,
-      temperature: 0.2,
-      maxOutputTokens: 350,
-    });
+    // 4) Model path. Try the cheap Flash-Lite first; if that model/call fails,
+    //    fall back to the default model (whatever autoReply uses) so a wrong
+    //    model id can never silently disable the formatter.
+    const prompt = buildPrompt({ name, phone, address: a, pinInfo });
+    const opts = { systemPrompt: SYSTEM_PROMPT, temperature: 0.2, maxOutputTokens: 350 };
+    let ai = await generateReply(prompt, { ...opts, model: MODEL });
+    if (!ai.ok) ai = await generateReply(prompt, opts); // default model fallback
     const parsed = ai.ok ? parseModelJson(ai.text) : null;
+    if (!parsed) {
+      console.warn("[addressFormatter] AI unusable:", JSON.stringify(ai.error || ai.text || "").slice(0, 200));
+    }
+    const aiErr = ai.ok ? "" : ` [${JSON.stringify(ai.error).slice(0, 120)}]`;
     if (parsed && Array.isArray(parsed.formatted) && parsed.formatted.length) {
       const formatted = parsed.formatted.map(clean).filter(Boolean);
       result = {
@@ -219,7 +223,7 @@ export async function formatAddress({ orderId, name, phone, address, force } = {
         verdict: pinInfo.state ? "SHIP" : "UNKNOWN",
         locality: pinInfo.city || clean(a.city),
         landmark: "",
-        limitation: ai.ok ? "AI output unreadable — showing arranged address." : "AI unavailable — showing arranged address.",
+        limitation: (ai.ok ? "AI output unreadable — showing arranged address." : "AI unavailable — showing arranged address.") + aiErr,
         reason: "",
         source: "deterministic",
         pin,
