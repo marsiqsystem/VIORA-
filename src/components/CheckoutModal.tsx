@@ -10,6 +10,7 @@ import { useCartStore } from "@/hooks/useCartStore";
 import { useWixClient } from "@/hooks/useWixClient";
 import { useCommerceUi } from "@/hooks/useCommerceUi";
 import { useAutoLadderCoupon } from "@/hooks/useAutoLadderCoupon";
+import { useReviewVoucher } from "@/hooks/useReviewVoucher";
 import { useSocialProof } from "@/hooks/useSocialProof";
 import { useToast } from "@/components/Toast";
 import {
@@ -206,6 +207,10 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   const requestCloseRef = useRef<() => void>(() => onClose());
 
   const autoCoupon = useAutoLadderCoupon(open);
+  // Auto-apply the customer's earned ₹75 photo-review voucher in the ₹699–₹998
+  // window (above that the spend ladder wins). No-op unless the review loop is
+  // live (NEXT_PUBLIC_REVIEW_VOUCHER_ENABLED).
+  useReviewVoucher(open, phone, email);
 
   useEffect(() => {
     setMounted(true);

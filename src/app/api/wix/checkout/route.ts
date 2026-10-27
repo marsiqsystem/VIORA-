@@ -4,7 +4,8 @@ import { sendOrderConfirmationEmail } from "@/lib/orderEmail";
 import { sendServerCapi } from "@/lib/metaCapiServer";
 import { readCookieRaw } from "@/lib/metaFbc";
 import { slugFromUrl } from "@/lib/metaCatalogId";
-import { COD_CHARGE, PREPAID_DISCOUNT } from "@/lib/checkoutPricing";
+import { COD_CHARGE, PREPAID_DISCOUNT, REVIEW_REWARD } from "@/lib/checkoutPricing";
+import { consumeReviewReward } from "@/lib/crm/reviewReward";
 import { makePaymentSeal } from "@/lib/crm/paymentSeal";
 import { fetchRazorpayPayment } from "@/lib/razorpayVerify";
 import { claimOnce, release } from "@/lib/crm/idempotency";
@@ -428,6 +429,27 @@ export async function POST(req: Request) {
 
     // No reminder for a shopper who just ordered.
     await checkoutLeads.removeByPhone(phone);
+
+    // If this order actually carried the ₹75 photo-review voucher (PHOTO75),
+    // burn it so it can't be auto-applied again. Best-effort + verified against
+    // what's really on the order, so a KV blip or a spoofed client flag can
+    // never consume a voucher that wasn't used. Orders at ₹999+ take the ladder
+    // coupon instead, so the voucher survives for a smaller future order.
+    try {
+      const discountSources: any[] = [
+        (updatedCheckout as any)?.appliedDiscounts,
+        (orderResult as any)?.order?.appliedDiscounts,
+      ];
+      const appliedCouponCode = discountSources
+        .flatMap((arr) => (Array.isArray(arr) ? arr : []))
+        .map((d: any) => String(d?.coupon?.code || "").toUpperCase())
+        .find((code) => code === REVIEW_REWARD.code);
+      if (appliedCouponCode) {
+        await consumeReviewReward({ phone, email });
+      }
+    } catch (rewardErr) {
+      console.error("[review-reward] consume failed (non-blocking):", rewardErr);
+    }
 
     const approvedOrderResult = await (wixClient.orders as any).updateOrderStatus(
       orderId,

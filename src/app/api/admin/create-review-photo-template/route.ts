@@ -114,6 +114,29 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  // &check=1 — just read back this template's review status from Meta (no create).
+  if (req.nextUrl.searchParams.get("check") === "1") {
+    const url =
+      `${GRAPH}/${version}/${businessId}/message_templates` +
+      `?name=${TEMPLATE_NAME}&access_token=${encodeURIComponent(token)}`;
+    const res = await fetch(url);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return NextResponse.json({ ok: false, status: res.status, error: data?.error || data }, { status: 502 });
+    }
+    return NextResponse.json({
+      ok: true,
+      templates: (data?.data || []).map((t: any) => ({
+        name: t.name,
+        language: t.language,
+        status: t.status,
+        category: t.category,
+        id: t.id,
+        rejected_reason: t.rejected_reason,
+      })),
+    });
+  }
+
   const imageUrl = req.nextUrl.searchParams.get("imageUrl") || DEFAULT_IMAGE;
   const dryRun = req.nextUrl.searchParams.get("dryRun") === "1";
 
