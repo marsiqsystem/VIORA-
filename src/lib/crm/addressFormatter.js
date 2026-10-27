@@ -18,6 +18,7 @@
 
 import { lookupPincodeAreas } from "./pincode";
 import { generateReply } from "./gemini";
+import { generateVertex, isConfigured as vertexConfigured } from "./vertexGemini";
 
 // Flash-Lite: $0.10 / $0.40 per 1M in/out tokens. ~750 tokens per address ⇒
 // ~₹0.01 each. Overridable, but keep it to a cheap model.
@@ -193,8 +194,12 @@ export async function formatAddress({ orderId, name, phone, address, force } = {
     //    model id can never silently disable the formatter.
     const prompt = buildPrompt({ name, phone, address: a, pinInfo });
     const opts = { systemPrompt: SYSTEM_PROMPT, temperature: 0.2, maxOutputTokens: 350 };
-    let ai = await generateReply(prompt, { ...opts, model: MODEL });
-    if (!ai.ok) ai = await generateReply(prompt, opts); // default model fallback
+    // Prefer Vertex AI (service-account on a GCP project with working billing)
+    // when it's configured; otherwise the AI Studio API key. Each tries the cheap
+    // flash-lite first, then the default model.
+    const gen = vertexConfigured() ? generateVertex : generateReply;
+    let ai = await gen(prompt, { ...opts, model: MODEL });
+    if (!ai.ok) ai = await gen(prompt, opts); // default model fallback
     const parsed = ai.ok ? parseModelJson(ai.text) : null;
     if (!parsed) {
       console.warn("[addressFormatter] AI unusable:", JSON.stringify(ai.error || ai.text || "").slice(0, 200));
