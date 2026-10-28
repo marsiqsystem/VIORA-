@@ -20,6 +20,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authOk, authConfigured, keyFromRequest } from "@/lib/crm/inbox-store";
 import * as ordersStore from "@/lib/crm/orders-store";
 import { extractPincode, lookupPincode, buildStructuredAddress } from "@/lib/crm/pincode";
+import { processOrder } from "@/lib/crm/addressPipeline";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -89,11 +90,26 @@ export async function POST(req: NextRequest) {
     addressEdited: true,
   });
 
-  const updated = await ordersStore.getOrder(orderId);
+  let updated = await ordersStore.getOrder(orderId);
+
+  // Re-review the just-edited address with the AI cleaner: if it now judges the
+  // address deliverable (SHIP) it re-arranges it into the proper courier-ready
+  // form and applies it; otherwise it only stamps the verdict (so it stays in the
+  // Call Queue). Best-effort — a failure here never fails the save.
+  let aiReview: any = null;
+  try {
+    const res: any = await processOrder(updated, { apply: true });
+    aiReview = { route: res.route, verdict: res.verdict, applied: res.applied, reason: res.review?.reason || "", suggestedPincode: res.review?.suggestedPincode || "" };
+    if (res.applied) updated = await ordersStore.getOrder(orderId);
+  } catch (e: any) {
+    console.warn("[update-address] AI re-review failed:", e?.message || e);
+  }
+
   return NextResponse.json({
     ok: true,
     order: updated,
     resolved: { pincode, city, state },
+    aiReview,
     note: pincode ? "" : "No 6-digit pincode found in the address — add one so couriers can quote/ship.",
   });
 }

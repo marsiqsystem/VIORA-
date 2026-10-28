@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authOk, authConfigured, keyFromRequest, normPhone, getReachability } from "@/lib/crm/inbox-store";
 import * as ordersStore from "@/lib/crm/orders-store";
-import { lookupPincode } from "@/lib/crm/pincode";
+import { lookupPincode, suggestPincode } from "@/lib/crm/pincode";
 import { fullState, stateRTO, best3 } from "@/lib/crm/carrierEngine";
 
 export const runtime = "nodejs";
@@ -150,6 +150,32 @@ export async function GET(req: NextRequest) {
         const meaningful = strip.replace(/\d{6}/g, " ").replace(/[^a-z0-9]/gi, "");
         if (meaningful.length < 4) reasons.push({ type: "address-incomplete", text: `No house / street / locality — only "${line || "—"}".` });
 
+        // When the pincode is missing / invalid / mismatched, try to RECOVER the
+        // correct one from the area or city the customer did give (India Post
+        // post-office search; only returns an unambiguous single match).
+        let suggestedPincode = "";
+        if (reasons.some((x) => ["no-pin", "invalid-pin", "pin-mismatch"].includes(x.type))) {
+          const hints = [a.city, a.line3, a.line2, a.line1].map((h: any) => String(h || "").trim()).filter((h) => h.length >= 3);
+          for (const h of hints) {
+            try {
+              const sug = await suggestPincode(h, a.state || pinPlace?.state || "");
+              if (sug.pincode && sug.pincode !== pin) { suggestedPincode = sug.pincode; break; }
+            } catch { /* best-effort */ }
+          }
+          if (suggestedPincode) {
+            const pm = reasons.find((x) => ["no-pin", "invalid-pin", "pin-mismatch"].includes(x.type));
+            if (pm) pm.suggestedPincode = suggestedPincode;
+          }
+        }
+
+        // The AI cleaner's own verdict (stamped on the order by the auto-format
+        // pipeline). A CONFIRM here means the model judged the address not safely
+        // deliverable even after cleaning.
+        const ai: any = o.aiAddr || null;
+        if (ai && (ai.verdict === "CONFIRM" || ai.route === "call") && !reasons.some((x) => ["address-incomplete", "no-pin", "invalid-pin", "pin-mismatch"].includes(x.type))) {
+          reasons.push({ type: "ai-confirm", text: ai.reason || ai.limitation || "AI flagged this address to confirm before shipping." });
+        }
+
         // High return-rate destination.
         if (r && r.rtoPct >= 80) reasons.push({ type: "high-rto", rtoPct: r.rtoPct, sample: r.res, text: `High return area — ${r.rtoPct}% of our COD orders here came back (n=${r.res}).` });
 
@@ -193,8 +219,9 @@ export async function GET(req: NextRequest) {
         if (phoneStatus === "bad") asks.push("FIRST confirm you have the right phone number (ask them to confirm their number).");
         if (reasons.some((x) => x.type === "high-rto")) asks.push("Confirm the customer still wants this COD order (delivery will be attempted).");
         if (reasons.some((x) => x.type === "multi-qty")) asks.push(`Confirm the customer wants all ${qty} pieces (bigger COD — confirm to avoid a costly return).`);
-        if (reasons.some((x) => x.type === "pin-mismatch")) asks.push("Confirm the correct pincode (the state and pincode don't match).");
-        if (reasons.some((x) => x.type === "invalid-pin" || x.type === "no-pin")) asks.push("Get the correct 6-digit pincode.");
+        if (reasons.some((x) => x.type === "pin-mismatch")) asks.push(`Confirm the correct pincode (the state and pincode don't match)${suggestedPincode ? ` — likely ${suggestedPincode}` : ""}.`);
+        if (reasons.some((x) => x.type === "invalid-pin" || x.type === "no-pin")) asks.push(`Get the correct 6-digit pincode${suggestedPincode ? ` (likely ${suggestedPincode})` : ""}.`);
+        if (reasons.some((x) => x.type === "ai-confirm")) asks.push("AI flagged this address — read it back to the customer and confirm the full house/street + a nearby landmark.");
         if (reasons.some((x) => x.type === "address-incomplete")) asks.push("Get the house/building + street + locality (village/area), and a nearby landmark — shop, temple, school or main chowk.");
         if (reasons.some((x) => x.type === "duplicate-customer")) {
           const dc: any = reasons.find((x) => x.type === "duplicate-customer");
@@ -207,8 +234,9 @@ export async function GET(req: NextRequest) {
           orderId: o.orderId, name: o.name, phone: o.phone, phoneCheck: phone,
           product: o.dCode || o.product || "", colour: o.colour || "", qty: o.qty || 1,
           sellingPrice: o.sellingPrice ?? null, paymentMode: o.paymentMode || "COD",
-          state: claimedState, city: a.city || "", pin,
+          state: claimedState, city: a.city || "", pin, suggestedPincode,
           pinPlace, address: a, line,
+          aiVerdict: o.aiAddr?.verdict || null, aiReason: o.aiAddr?.reason || "",
           rtoPct: r?.rtoPct ?? null, sample: r?.res ?? 0,
           best: best.map((b: any) => ({ carrier: b.carrier, adj: b.adj })),
           reasons, whatToAsk: asks,
@@ -216,7 +244,7 @@ export async function GET(req: NextRequest) {
           // broken address, then plain high-RTO confirmations.
           priority: reasons.some((x) => x.type === "tap-conflict") ? 0
             : phoneStatus === "bad" ? 0
-            : reasons.some((x) => x.type === "invalid-pin" || x.type === "pin-mismatch" || x.type === "no-pin" || x.type === "address-incomplete" || x.type === "duplicate-customer") ? 1 : 2,
+            : reasons.some((x) => x.type === "invalid-pin" || x.type === "pin-mismatch" || x.type === "no-pin" || x.type === "address-incomplete" || x.type === "ai-confirm" || x.type === "duplicate-customer") ? 1 : 2,
         };
       })
     );
