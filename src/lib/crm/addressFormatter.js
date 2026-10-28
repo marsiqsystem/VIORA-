@@ -23,7 +23,7 @@ import { generateVertex, isConfigured as vertexConfigured } from "./vertexGemini
 // Flash-Lite: $0.10 / $0.40 per 1M in/out tokens. ~750 tokens per address ⇒
 // ~₹0.01 each. Overridable, but keep it to a cheap model.
 const MODEL = process.env.GEMINI_ADDRESS_MODEL || "gemini-2.5-flash-lite";
-const CACHE_PREFIX = "addrfmt:v3:"; // v3: richer arrange/landmark prompt + AI runs on every address
+const CACHE_PREFIX = "addrfmt:v4:"; // v4: preserve customer-given district/tehsil
 const CACHE_TTL_S = 90 * 24 * 60 * 60; // 90 days
 
 function kvCfg() {
@@ -114,11 +114,11 @@ function buildPrompt({ name, phone, address, pinInfo }) {
 const SYSTEM_PROMPT =
   "You are an expert Indian courier shipping-address specialist. You get a customer's raw address plus VERIFIED India Post facts for its PIN (you have NO web search — use only the given facts and the input; never claim to have searched online). Turn it into a clean, properly ARRANGED, courier-ready address that minimises failed delivery/RTO. " +
   "ALWAYS REARRANGE into this delivery sequence (drop lines that don't apply — never pad): " +
-  "house/flat/building no. + building name; floor/block/street; locality/colony; 'Near|Opposite|Behind <landmark>'; village/town/city; district (only if it helps); 'State - PIN'; 'Mobile: <number>'. " +
+  "house/flat/building no. + building name; floor/block/street; locality/colony; 'Near|Opposite|Behind <landmark>'; village/town/city; district (KEEP the district/tehsil the customer wrote, e.g. 'Rewari'; or add the PIN's district when it helps routing); 'State - PIN'; 'Mobile: <number>'. " +
   "RULES: " +
   "(1) FIX spelling, capitalization, punctuation and obvious typos; expand clear abbreviations ('Bas stand'->'Bus Stand', 'ke pass/pas/pass'->'Near', 'oppo'->'Opposite', 'St'->'Street', 'rd'->'Road', 'nr'->'Near'). Do NOT change unfamiliar local names you can't confidently correct. " +
   "(2) LANDMARK PLACEMENT: keep the customer's own relation word EXACTLY — never turn 'Opposite'/'Behind' into 'Near'. If they wrote a bare landmark that is clearly the delivery reference (e.g. 'Bus Stand', 'XYZ Hospital') you MAY prefix 'Near' to arrange it. " +
-  "(3) PRESERVE every customer detail — recipient name, house/flat/building no., village, street, landmark, phone, and the PIN — EXACTLY. NEVER invent a house number, building, street, landmark or recipient detail, and NEVER silently change the PIN. " +
+  "(3) PRESERVE every customer detail — recipient name, house/flat/building no., village, town, district/tehsil, street, landmark, phone, and the PIN — EXACTLY. NEVER invent a house number, building, street, landmark or recipient detail, and NEVER silently change the PIN. " +
   "(4) KEEP any landmark the customer gave (temple/mandir, masjid, church, school, shop, hospital, chowk, bus stand, etc.) — never delete it or swap it for a post-office name. ONLY when the customer gave NO usable landmark AND the street is thin, you MAY add ONE nearest VERIFIED post-office area from the given facts as 'Near <Area>'. Never invent a landmark not in the input or the facts. " +
   "(5) Remove ACCIDENTAL repetition (same landmark/locality written twice), but keep two genuinely different components. " +
   "(6) Standardize city/state to the verified PIN facts when they clearly differ; if the customer's 'city' is really a locality, keep it as the locality line and use the PIN's district as the city/district. " +
