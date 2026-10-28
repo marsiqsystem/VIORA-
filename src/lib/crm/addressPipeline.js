@@ -23,6 +23,24 @@ import { formatAddress } from "./addressFormatter";
 import { lookupPincode, suggestPincode } from "./pincode";
 import * as ordersStore from "./orders-store";
 import { fullState, stateRTO } from "./carrierEngine";
+import { wixAdminClientServer } from "../wixAdminClientServer";
+
+// Restore a ship-to street line that our store dropped but Wix still has (the
+// addressLine2-drop safety-net — the root cause of several thin-label RTOs). Runs
+// before the AI sees the address so it formats the FULL address. Best-effort.
+async function restoreWixLine2(order, address) {
+  if (String(address.line2 || "").trim() || !order?.orderGuid) return "";
+  try {
+    const wo = await wixAdminClientServer().orders.getOrder(order.orderGuid);
+    const wa = wo?.shippingInfo?.logistics?.shippingDestination?.address || {};
+    const wl2 = String(wa.addressLine2 || "").trim();
+    if (wl2 && wl2.toLowerCase() !== String(address.line1 || "").trim().toLowerCase()) {
+      address.line2 = wl2;
+      return wl2;
+    }
+  } catch { /* best-effort — format with what we have */ }
+  return "";
+}
 
 const _norm = (s) => String(s || "").trim().toLowerCase();
 const _alnum = (s) => String(s || "").replace(/[^a-z0-9]/gi, "").length;
@@ -52,7 +70,9 @@ function isIncomplete(address) {
  *   pinIssue:string, rtoPct:number|null, problems:string[]}>}
  */
 export async function reviewOrderAddress(order, { force = false } = {}) {
-  const a = order?.address || {};
+  const a = { ...(order?.address || {}) }; // copy — never mutate the stored order
+  // Safety-net: restore a dropped street line from Wix before the AI looks at it.
+  const restoredLine2 = await restoreWixLine2(order, a);
   const pin = pinOf(a);
 
   // 1) AI clean (cached per order+fingerprint; an edit busts the cache on its own).
@@ -140,6 +160,7 @@ export async function reviewOrderAddress(order, { force = false } = {}) {
     pinIssue,
     rtoPct,
     problems,
+    restoredLine2,
   };
 }
 

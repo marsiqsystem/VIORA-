@@ -23,7 +23,7 @@ import { generateVertex, isConfigured as vertexConfigured } from "./vertexGemini
 // Flash-Lite: $0.10 / $0.40 per 1M in/out tokens. ~750 tokens per address ⇒
 // ~₹0.01 each. Overridable, but keep it to a cheap model.
 const MODEL = process.env.GEMINI_ADDRESS_MODEL || "gemini-2.5-flash-lite";
-const CACHE_PREFIX = "addrfmt:v1:";
+const CACHE_PREFIX = "addrfmt:v2:"; // v2: prompt now keeps the customer's own landmark (don't swap for a PO area)
 const CACHE_TTL_S = 90 * 24 * 60 * 60; // 90 days
 
 function kvCfg() {
