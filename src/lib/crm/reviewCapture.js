@@ -20,8 +20,8 @@ import {
 } from "./inbox-store";
 import { getOrder, findLatestOrderByPhone } from "./orders-store";
 import { uploadWhatsAppPhotoToWix, postReviewAsAdmin } from "./reviewAdmin";
-import { grantReviewReward } from "./reviewReward";
-import { REVIEW_REWARD } from "@/lib/checkoutPricing";
+import { earn as earnCoins, coinsEnabled } from "./vioraCoins";
+import { VIORA_COINS } from "@/lib/checkoutPricing";
 
 export function isReviewCaptureEnabled() {
   return String(process.env.REVIEW_CAPTURE_ENABLED).toLowerCase() === "true";
@@ -139,7 +139,7 @@ export async function handleReviewReply(msg) {
     await setReviewDraft(phone, draft);
     await reply(
       phone,
-      `Great, a ${draft.rating}-star review! 📸 Now send a *photo* of your piece to earn *₹${REVIEW_REWARD.amount} OFF* your next order.\n\n(Or reply *SKIP* to post your review without a photo.)`
+      `Great, a ${draft.rating}-star review! 📸 Now send a *photo* of your piece to earn *${VIORA_COINS.review} Viora Coins* (₹${VIORA_COINS.review} off your next order).\n\n(Or reply *SKIP* to post your review without a photo.)`
     );
     return true;
   }
@@ -194,16 +194,28 @@ async function finalize(phone, draft, { withPhoto, msgName }) {
     return;
   }
 
-  // Grant the ₹75 voucher only for a photo review (auto-applies next checkout).
-  let rewarded = false;
-  if (mediaUrl) {
-    rewarded = await grantReviewReward({ phone, email: order?.email, orderId: draft.orderId });
+  // Reward a PHOTO review with Viora Coins (1 coin = ₹1, stack at checkout). Coins
+  // are member-tied, so we need the buyer's Wix contactId + COINS_ENABLED; a pure
+  // guest (no member account) still gets the review posted — just no coins yet.
+  let coinsEarned = 0;
+  if (mediaUrl && coinsEnabled() && order?.contactId) {
+    try {
+      const res = await earnCoins({
+        contactId: order.contactId,
+        amount: VIORA_COINS.review,
+        reasonKey: `review:${order.contactId}`,
+        note: "WhatsApp photo review",
+      });
+      if (res?.earned) coinsEarned = res.amount;
+    } catch (e) {
+      console.warn("[reviewCapture] coin grant failed:", e?.message || e);
+    }
   }
 
   await clearReviewDraft(phone);
-  const body = rewarded
-    ? `🎉 Thank you! Your review is now live on our website.\n\nYou've earned *₹${REVIEW_REWARD.amount} OFF* your next order (on orders over ₹${REVIEW_REWARD.minimum}) — it applies *automatically* at checkout. 💛\n— Team Viora Jewels`
-    : `🙏 Thank you! Your review is now live on our website.\n\nTip: add a *photo* with your next review to earn *₹${REVIEW_REWARD.amount} OFF*! 💛\n— Team Viora Jewels`;
+  const body = coinsEarned
+    ? `🎉 Thank you! Your review is now live on our website.\n\nYou've earned *${coinsEarned} Viora Coins* (₹${coinsEarned} off) — use them on your next order. 💛\n— Team Viora Jewels`
+    : `🙏 Thank you! Your review is now live on our website.${mediaUrl ? "" : `\n\nTip: add a *photo* next time to earn *${VIORA_COINS.review} Viora Coins*!`} 💛\n— Team Viora Jewels`;
   await reply(phone, body);
-  console.log(`[reviewCapture] review posted for ${phone} on product ${productId} (reward=${rewarded}).`);
+  console.log(`[reviewCapture] review posted for ${phone} on product ${productId} (coins=${coinsEarned}).`);
 }
