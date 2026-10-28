@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
   }
 
   const rows: any[] = [];
-  const counts = { total: candidates.length, ship: 0, call: 0, applied: 0 };
+  const counts = { total: candidates.length, ship: 0, call: 0, willImprove: 0, applied: 0 };
   const BATCH = 6; // bounded concurrency — each does one (cached) AI call at most
   for (let i = 0; i < candidates.length; i += BATCH) {
     const slice = candidates.slice(i, i + BATCH);
@@ -74,22 +74,25 @@ export async function POST(req: NextRequest) {
       })
     );
     for (const d of done) {
+      const r: any = d.review || {};
       if (d.route === "ship") counts.ship++;
       else if (d.route === "call") counts.call++;
+      if (r.improved && d.route === "ship") counts.willImprove++;
       if (d.applied) counts.applied++;
-      const r: any = d.review || {};
       rows.push({
         orderId: d.orderId,
         route: d.route,
         verdict: d.verdict,
         applied: d.applied,
+        willApply: !!r.improved && d.route === "ship",
         source: r.source,
+        restoredLine2: r.restoredLine2 || "",
         suggestedPincode: r.suggestedPincode || "",
         pinIssue: r.pinIssue || "",
         problems: r.problems || [],
         reason: r.reason || "",
         before: d.before ? [d.before.line1, d.before.line2, d.before.line3, [d.before.city, d.before.state, d.before.postalCode].filter(Boolean).join(", ")].filter(Boolean).join(" | ") : "",
-        after: d.after ? [d.after.line1, d.after.line2, d.after.line3, [d.after.city, d.after.state, d.after.postalCode].filter(Boolean).join(", ")].filter(Boolean).join(" | ") : "",
+        after: (d.applied || r.improved) && d.after ? [d.after.line1, d.after.line2, d.after.line3, [d.after.city, d.after.state, d.after.postalCode].filter(Boolean).join(", ")].filter(Boolean).join(" | ") : "",
         error: d.error,
       });
     }

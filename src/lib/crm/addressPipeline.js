@@ -161,6 +161,7 @@ export async function reviewOrderAddress(order, { force = false } = {}) {
     rtoPct,
     problems,
     restoredLine2,
+    improved: fmt.source === "ai" || !!restoredLine2,
   };
 }
 
@@ -200,7 +201,12 @@ export async function processOrder(order, { apply = false, persist = true } = {}
     return { orderId: String(order?.orderId || ""), route: review.route, verdict: review.verdict, applied: false, before, after: review.shipAddress, review };
   }
 
-  if (apply && review.route === "ship" && review.shipAddress) {
+  // Only rewrite the stored address when the pipeline actually IMPROVED it — the
+  // AI cleaned a messy address, or we restored a Wix-dropped street line. An
+  // already-clean order (free deterministic pass) is left untouched (just stamped),
+  // so we never reshape a good ship-to address for no reason.
+  const improved = review.improved;
+  if (apply && review.route === "ship" && review.shipAddress && improved) {
     const patch = {
       address: review.shipAddress,
       addressText: [review.shipAddress.raw, [review.shipAddress.city, review.shipAddress.state].filter(Boolean).join(", ") + (review.shipAddress.postalCode ? ` - ${review.shipAddress.postalCode}` : "")]
