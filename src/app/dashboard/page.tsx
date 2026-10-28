@@ -435,7 +435,27 @@ function AssignCell({ order, apiKey, onChanged }: { order: Order; apiKey: string
   const [addrOpen, setAddrOpen] = useState(false);
   const [addrText, setAddrText] = useState("");
   const [addrMsg, setAddrMsg] = useState("");
-  const openAddr = () => { setAddrText(reconstructAddr()); setAddrMsg(""); setErr(""); setAddrOpen(true); };
+  const [fmt, setFmt] = useState<any>(null); // AI-formatter result for this order
+  const openAddr = () => { setAddrText(reconstructAddr()); setAddrMsg(""); setErr(""); setFmt(null); setAddrOpen(true); };
+
+  // ✨ AI FORMAT — ask the server to clean this order's address into a
+  // courier-ready one and judge SHIP vs CONFIRM. Read-only: it never writes or
+  // ships. Runs free (deterministic + India-Post PIN) and upgrades to Gemini
+  // automatically once the Vertex/AI key is set. `force` re-runs past the cache.
+  const aiFormat = async (force?: boolean) => {
+    setBusy("fmt"); setErr("");
+    try {
+      const res = await fetch(`/api/dashboard/format-address?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-inbox-key": apiKey },
+        body: JSON.stringify({ orderId: order.orderId, ...(force ? { force: true } : {}) }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) { setErr(typeof data.error === "string" ? data.error : `Error ${res.status}`); return; }
+      setFmt(data);
+    } catch (e: any) { setErr(e?.message || "Failed"); }
+    finally { setBusy(""); }
+  };
   const saveAddr = async () => {
     const text = addrText.trim();
     if (!text) { setErr("Address is empty."); return; }
@@ -610,14 +630,19 @@ function AssignCell({ order, apiKey, onChanged }: { order: Order; apiKey: string
             placeholder={"Near Bharka Devi Icecream\nChar Rasta, Tankal\nTaluka Chikhli, Navsari, Gujarat – 396560\nIndia"}
             style={{ width: "100%", boxSizing: "border-box", fontSize: 12, padding: 7, borderRadius: 6, border: `1px solid ${C.border}`, resize: "vertical", fontFamily: "inherit" }}
           />
-          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+          <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
             <button disabled={busy === "addr"} onClick={saveAddr} style={assignBtn("#0a7d5a")}>
               {busy === "addr" ? "Saving…" : "Save address"}
+            </button>
+            <button disabled={!!busy} onClick={() => aiFormat(false)} style={assignBtn("#6B21A8")}
+              title="Clean this address into a courier-ready one and check if it's deliverable (SHIP) or needs a call (CONFIRM). Read-only — nothing is saved or shipped.">
+              {busy === "fmt" ? "Formatting…" : "✨ AI format"}
             </button>
             <button disabled={busy === "addr"} onClick={() => setAddrOpen(false)} style={{ ...assignBtn("#999"), background: "#fff", color: C.sub, border: `1px solid ${C.border}` }}>
               Cancel
             </button>
           </div>
+          {fmt && <AddressFormatResult fmt={fmt} onUse={(text: string) => { setAddrText(text); setAddrMsg("Pasted the AI-cleaned address above — review, then Save."); }} onRerun={() => aiFormat(true)} busy={busy} />}
           {addrMsg && <div style={{ color: C.ok, fontSize: 10.5, marginTop: 5 }}>{addrMsg}</div>}
         </div>
       )}
@@ -740,6 +765,38 @@ function RateCompare({ rate, busy, onBookIthink }: { rate: any; busy?: string; o
 }
 function assignBtn(bg: string): React.CSSProperties {
   return { padding: "5px 9px", borderRadius: 7, border: "none", background: bg, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" };
+}
+
+// Shows the AI address-formatter result: the courier-ready lines, a SHIP /
+// CONFIRM verdict, the model's one-line reason, and where the answer came from
+// (AI vs free deterministic vs cache). "Use this" drops the cleaned address into
+// the editor so the operator can review and Save. Never ships on its own.
+function AddressFormatResult({ fmt, onUse, onRerun, busy }: { fmt: any; onUse: (t: string) => void; onRerun: () => void; busy: string }) {
+  const r = fmt?.result || {};
+  const lines: string[] = Array.isArray(r.formatted) ? r.formatted : [];
+  const text: string = r.text || lines.join("\n");
+  const verdict: string = r.verdict || "UNKNOWN";
+  const vTone = verdict === "SHIP" ? C.ok : verdict === "CONFIRM" ? C.bad : C.sub;
+  const vLabel = verdict === "SHIP" ? "✓ SHIP — deliverable" : verdict === "CONFIRM" ? "⚠ CONFIRM — call first" : "• Needs a look";
+  const srcLabel = r.source === "ai" ? "AI (Gemini)" : r.source === "cache" ? "cached" : "free (no AI) — set the key to enable AI";
+  return (
+    <div style={{ marginTop: 7, border: `1px solid ${C.border}`, borderRadius: 8, background: C.bg, padding: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 5 }}>
+        <span style={{ background: vTone, color: "#fff", fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: 999 }}>{vLabel}</span>
+        <span style={{ fontSize: 9.5, color: C.sub }}>{srcLabel}</span>
+      </div>
+      <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: 12, color: C.text, lineHeight: 1.45 }}>{text || "(no address)"}</pre>
+      {r.reason && <div style={{ fontSize: 10.5, color: C.sub, marginTop: 5, fontStyle: "italic" }}>{r.reason}</div>}
+      {r.limitation && <div style={{ fontSize: 10.5, color: C.warn, marginTop: 4 }}>{r.limitation}</div>}
+      {fmt?.restoredLine2 && <div style={{ fontSize: 10, color: C.sub, marginTop: 4 }}>Restored missing street line from Wix: “{fmt.restoredLine2}”.</div>}
+      <div style={{ display: "flex", gap: 6, marginTop: 7, flexWrap: "wrap" }}>
+        <button disabled={!!busy || !text} onClick={() => onUse(text)} style={assignBtn("#0a7d5a")}>Use this ↑</button>
+        <button disabled={!!busy} onClick={onRerun} style={{ ...assignBtn("#999"), background: "#fff", color: C.sub, border: `1px solid ${C.border}` }} title="Ignore the cached result and ask again">
+          {busy === "fmt" ? "…" : "↻ Re-run"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ===========================================================================
