@@ -17,6 +17,7 @@ import * as wix from "@/lib/crm/wix";
 import * as notify from "@/lib/crm/notify";
 import * as idempotency from "@/lib/crm/idempotency";
 import * as ordersStore from "@/lib/crm/orders-store";
+import { processOrder } from "@/lib/crm/addressPipeline";
 import { config as whatsappCfg } from "@/lib/crm/whatsapp";
 import T from "@/lib/crm/templates";
 
@@ -184,6 +185,23 @@ async function processOrder(body: any, trace: any = { steps: [] }) {
     trace.orderStore = rec;
   } catch (e: any) {
     console.warn("[wix-webhook] orders-store record failed:", e?.message || e);
+  }
+
+  // 2.8) AI-clean the ship-to address RIGHT AWAY (instant, not waiting for the
+  // hourly sweep) so the courier created just below ships the arranged address,
+  // and a vague/garbled/wrong-pincode one is routed to the Call Queue instead of
+  // auto-shipping. Applies only when the AI actually improved it (original kept in
+  // originalAddress). Best-effort + bounded — never breaks the webhook.
+  try {
+    const stored: any = await ordersStore.getOrder(order.orderId);
+    if (stored) {
+      const res: any = await processOrder(stored, { apply: true });
+      // Hand the cleaned address to the courier step below (SHIP verdict only).
+      if (res?.applied && res?.after) order.address = res.after;
+      trace.aiAddr = { route: res?.route, verdict: res?.verdict, applied: !!res?.applied };
+    }
+  } catch (e: any) {
+    console.warn("[wix-webhook] AI address process failed:", e?.message || e);
   }
 
   // 3) Courier.
