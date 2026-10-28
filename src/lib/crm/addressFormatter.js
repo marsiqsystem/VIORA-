@@ -23,7 +23,7 @@ import { generateVertex, isConfigured as vertexConfigured } from "./vertexGemini
 // Flash-Lite: $0.10 / $0.40 per 1M in/out tokens. ~750 tokens per address ⇒
 // ~₹0.01 each. Overridable, but keep it to a cheap model.
 const MODEL = process.env.GEMINI_ADDRESS_MODEL || "gemini-2.5-flash-lite";
-const CACHE_PREFIX = "addrfmt:v5:"; // v5: one place line, PIN appears once (no duplicate PIN lines)
+const CACHE_PREFIX = "addrfmt:v6:"; // v6: temp 0 (deterministic) + garbled/no-place -> CONFIRM
 const CACHE_TTL_S = 90 * 24 * 60 * 60; // 90 days
 
 function kvCfg() {
@@ -122,7 +122,7 @@ const SYSTEM_PROMPT =
   "(4) KEEP any landmark the customer gave (temple/mandir, masjid, church, school, shop, hospital, chowk, bus stand, etc.) — never delete it or swap it for a post-office name. ONLY when the customer gave NO usable landmark AND the street is thin, you MAY add ONE nearest VERIFIED post-office area from the given facts as 'Near <Area>'. Never invent a landmark not in the input or the facts. " +
   "(5) Remove ACCIDENTAL repetition (same landmark/locality written twice), but keep two genuinely different components. " +
   "(6) Standardize city/state to the verified PIN facts when they clearly differ; if the customer's 'city' is really a locality, keep it as the locality line and use the PIN's district as the city/district. " +
-  "(7) VERDICT: 'SHIP' when the address is complete and consistent and a courier can reasonably reach it. 'CONFIRM' when it is usable but a MATERIAL uncertainty remains — the PIN clashes with the locality, the exact delivery point is ambiguous (e.g. only a common hospital/landmark name with no house/street, or two places could share that name), or a needed detail is missing. Don't over-flag: a real landmark/locality with a valid PIN is usually SHIP. In 'reason', say in one short Hinglish line what was fixed or what to confirm. " +
+  "(7) VERDICT: 'SHIP' when the address is complete and consistent and a courier can reasonably reach it. 'CONFIRM' when it is usable but a MATERIAL uncertainty remains — the PIN clashes with the locality, the exact delivery point is ambiguous (e.g. only a common hospital/landmark name with no house/street, or two places could share that name), a needed detail is missing, OR part of the input is garbled/unintelligible (not a real place/street/landmark) so you cannot confidently place the delivery point. KEEP any garbled text in the address (never drop it) and set CONFIRM. Don't over-flag: a real village/locality/landmark with a valid PIN is usually SHIP even without a house number. In 'reason', say in one short Hinglish line what was fixed or what to confirm. " +
   "Respond with ONLY a compact JSON object, no markdown, no code fence: " +
   '{"formatted":["line1","line2",...],"verdict":"SHIP|CONFIRM","locality":"","landmark":"","limitation":"","reason":"one short Hinglish sentence"}';
 
@@ -203,7 +203,7 @@ export async function formatAddress({ orderId, name, phone, address, force } = {
     //    fall back to the default model (whatever autoReply uses) so a wrong
     //    model id can never silently disable the formatter.
     const prompt = buildPrompt({ name, phone, address: a, pinInfo });
-    const opts = { systemPrompt: SYSTEM_PROMPT, temperature: 0.2, maxOutputTokens: 350 };
+    const opts = { systemPrompt: SYSTEM_PROMPT, temperature: 0, maxOutputTokens: 350 };
     // Prefer Vertex AI (service-account on a GCP project with working billing)
     // when it's configured; otherwise the AI Studio API key. Each tries the cheap
     // flash-lite first, then the default model.

@@ -161,7 +161,7 @@ export async function reviewOrderAddress(order, { force = false } = {}) {
     rtoPct,
     problems,
     restoredLine2,
-    improved: fmt.source === "ai" || !!restoredLine2,
+    improved: fmt.source === "ai" || fmt.source === "cache" || !!restoredLine2,
   };
 }
 
