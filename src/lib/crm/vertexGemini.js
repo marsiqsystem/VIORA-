@@ -104,6 +104,16 @@ async function generateVertex(userMessage, opts = {}) {
   };
   if (opts.systemPrompt) body.systemInstruction = { parts: [{ text: opts.systemPrompt }] };
 
+  // Gemini 2.5 flash models "think" by default, which spends the output-token
+  // budget on hidden reasoning and truncates the real answer (finishReason
+  // MAX_TOKENS → unparseable JSON). These are short, structured replies, so turn
+  // thinking OFF for flash (budget 0) — big latency/cost win and the whole JSON
+  // fits. GEMINI_THINKING_BUDGET overrides if a little reasoning is ever wanted.
+  if (/flash/i.test(model)) {
+    const budget = Number(process.env.GEMINI_THINKING_BUDGET);
+    body.generationConfig.thinkingConfig = { thinkingBudget: Number.isFinite(budget) ? budget : 0 };
+  }
+
   try {
     const token = await getAccessToken(c.sa);
     const res = await fetch(url, {
