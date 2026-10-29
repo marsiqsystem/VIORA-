@@ -8,7 +8,7 @@
 // remittance + Inventory tabs, which need courier/stock data, come next.)
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { recommend as recoFor, national as engineNational, fakeNonServiceable as engineFake, generatedAt as engineGeneratedAt, type Reco } from "@/lib/crm/carrierEngine";
+import { recommend as recoFor, national as engineNational, fakeNonServiceable as engineFake, generatedAt as engineGeneratedAt, AVOID_CARRIERS, type Reco } from "@/lib/crm/carrierEngine";
 
 const KEY_STORE = "viora_inbox_key";
 
@@ -835,13 +835,23 @@ function pickCarrierRate(velRates: any[], best: { carrier: string }[]): { carrie
     for (const b of ["dtdc", "delhivery", "ekart", "xpressbees", "shadowfax", "bluedart", "amazon"]) if (n.includes(b)) return b;
     return n;
   };
-  for (const b of best) {
-    const want = b.carrier.toLowerCase();
-    const hit = velRates.find((r) => brandOf(r.courier) === want);
-    if (hit) return { carrier: hit.courier, rate: Number(hit.rate) || 0 };
-  }
-  const cheapest = velRates.reduce((a, b) => (b.rate < a.rate ? b : a));
-  return { carrier: cheapest.courier, rate: Number(cheapest.rate) || 0 };
+  const avoid = (brand: string) => Array.from(AVOID_CARRIERS).some((a) => a.toLowerCase() === String(brand).toLowerCase());
+  // Pick the best-ranked serviceable carrier; cheapest serviceable as fallback.
+  // allowAvoid=false first so a bogus-RTO carrier (Ekart) is skipped — we only
+  // fall back to it when it's the ONLY carrier that serves this pin.
+  const pickFrom = (allowAvoid: boolean): { carrier: string; rate: number } | null => {
+    for (const b of best) {
+      const want = b.carrier.toLowerCase();
+      if (!allowAvoid && avoid(want)) continue;
+      const hit = velRates.find((r) => brandOf(r.courier) === want);
+      if (hit) return { carrier: hit.courier, rate: Number(hit.rate) || 0 };
+    }
+    const pool = velRates.filter((r) => allowAvoid || !avoid(brandOf(r.courier)));
+    if (!pool.length) return null;
+    const cheapest = pool.reduce((a, b) => (b.rate < a.rate ? b : a));
+    return { carrier: cheapest.courier, rate: Number(cheapest.rate) || 0 };
+  };
+  return pickFrom(false) || pickFrom(true);
 }
 
 type ShipModal = { o: Order; r: Reco; loading: boolean; carrier?: string; cost?: number; gst?: number; total?: number; err?: string } | null;
@@ -865,6 +875,9 @@ function ToShipTab({ orders, loading, apiKey, onChanged }: { orders: Order[]; lo
   );
   // Amazon is excluded from our courier choices per policy, so drop it from the pick.
   const pick = (r: Reco) => r.best.filter((b) => !/amazon/i.test(b.carrier)).slice(0, 3);
+  // Mark bogus-RTO carriers (Ekart) — use only if nothing else serves the pin.
+  const avoidMark = (carrier: string) =>
+    Array.from(AVOID_CARRIERS).some((a) => a.toLowerCase() === carrier.toLowerCase()) ? " ⚠️" : "";
 
   // Operator shipped this one from the Velocity panel -> mark it done so it leaves this list.
   const clearOne = async (orderId: string) => {
@@ -913,9 +926,12 @@ function ToShipTab({ orders, loading, apiKey, onChanged }: { orders: Order[]; lo
                   <td style={{ padding: "8px 10px", fontWeight: 700, color: rtoColor(r.rtoPct) }}>{r.rtoPct == null ? "?" : r.rtoPct + "%"}<div style={{ color: C.sub, fontSize: 10, fontWeight: 400 }}>n={r.sample}</div></td>
                   <td style={{ padding: "8px 10px" }}>
                     {best.length ? (
-                      <span><b style={{ color: C.plumDark }}>🥇 {best[0].carrier}</b>{best.length > 1 && <span style={{ color: C.sub }}> → {best.slice(1).map((b) => b.carrier).join(" → ")}</span>}</span>
+                      <span>
+                        <b style={{ color: C.plumDark }}>🥇 {best[0].carrier}{avoidMark(best[0].carrier)}</b>
+                        {best.length > 1 && <span style={{ color: C.sub }}> → {best.slice(1).map((b) => b.carrier + avoidMark(b.carrier)).join(" → ")}</span>}
+                      </span>
                     ) : (
-                      <span style={{ color: C.sub }}>no data — use Delhivery / DTDC</span>
+                      <span style={{ color: C.sub }}>no data — use XpressBees / Shadowfax</span>
                     )}
                   </td>
                   <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>

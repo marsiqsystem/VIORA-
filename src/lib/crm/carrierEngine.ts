@@ -7,7 +7,7 @@
 
 import DATA from "./carrier-engine-data.json";
 
-type Best = { carrier: string; adj: number; del: number; res: number };
+type Best = { carrier: string; adj: number; del: number; res: number; fake?: number };
 const engine = DATA as {
   generated: string;
   national: Record<string, { delPct: number; del: number; res: number; carrierFaultPct: number }>;
@@ -15,6 +15,18 @@ const engine = DATA as {
   bestByState: Record<string, Best[]>;
   fakeNonServiceable: Record<string, number>;
 };
+
+// Carriers that bogus-RTO shipments (no-attempt / "non-serviceable" / "permanent
+// COD off" / "address incomplete") instead of delivering — confirmed from our
+// Velocity reports + the 26-AWB complaint. We ship from Velocity only now, so the
+// recommendation ranks on OUR Velocity delivery history and AVOIDS these: Ekart is
+// the worst (15% all-time / 21% recent fake-RTO) and is only ever used when it is
+// the sole serviceable carrier for a pin. (DTDC also fakes ~13% but still carries
+// the most volume, so it stays in rotation, just penalised in the per-state order.)
+export const AVOID_CARRIERS = new Set(["Ekart"]);
+export const isAvoided = (c?: string) => AVOID_CARRIERS.has(String(c || ""));
+// How often each carrier bogus-RTO'd (fake / resolved), for display + tie-breaks.
+export const fakeRatePct = (c?: string): number => engine.national[String(c || "")]?.carrierFaultPct ?? 0;
 
 // Wix/KV stores state as "IN-UP", a 2-letter code, or a full name — normalise all
 // three to the UPPER-CASE full name the engine keys on.
@@ -42,8 +54,13 @@ export function fullState(raw?: string): string {
 export function stateRTO(raw?: string): { rtoPct: number; res: number } | null {
   return engine.stateRTO[fullState(raw)] || null;
 }
+// Stable re-order so AVOID carriers (Ekart) sit last — a belt-and-suspenders on
+// top of the data, which is already built with them demoted. Non-avoid order kept.
+function demoteAvoided(best: Best[]): Best[] {
+  return [...best].sort((a, b) => (isAvoided(a.carrier) ? 1 : 0) - (isAvoided(b.carrier) ? 1 : 0));
+}
 export function best3(raw?: string): Best[] {
-  return engine.bestByState[fullState(raw)] || [];
+  return demoteAvoided(engine.bestByState[fullState(raw)] || []);
 }
 export const national = engine.national;
 export const fakeNonServiceable = engine.fakeNonServiceable;
@@ -105,5 +122,5 @@ export function recommend(o: { paymentMode?: string; address?: Addr }): Reco {
   if (payment === "PREPAID") bucket = "SHIP";
   else if (r != null && r.rtoPct >= 80) bucket = "CALL";
   else bucket = "SHIP";
-  return { state: st, rtoPct: r?.rtoPct ?? null, sample: r?.res ?? 0, best: engine.bestByState[st] || [], payment, bucket, flags, cleanAddr: cleanAddress(o.address || null) };
+  return { state: st, rtoPct: r?.rtoPct ?? null, sample: r?.res ?? 0, best: demoteAvoided(engine.bestByState[st] || []), payment, bucket, flags, cleanAddr: cleanAddress(o.address || null) };
 }
