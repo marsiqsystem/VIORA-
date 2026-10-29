@@ -1,15 +1,21 @@
-// TEMP admin route — creates the "review_request_photo_v1" MARKETING template on
-// the WABA and submits it to Meta for review. Hit it ONCE, then delete this file.
+// TEMP admin route — creates OR edits the "review_request_photo_v1" MARKETING
+// template on the WABA and submits it to Meta for review. Delete after use.
 //
 //   GET /api/admin/create-review-photo-template?key=<INBOX_SECRET>
 //     &imageUrl=<optional sample header image>   (default: the review-instructions PNG)
 //     &dryRun=1                                   (build the payload, don't call Meta)
+//     &check=1                                    (read back the Meta review status)
+//     &edit=1                                     (EDIT the existing approved template
+//                                                  in place — same name/language, goes
+//                                                  back to PENDING re-review)
 //
 // WHY: the current review template (review_request_util_v1) is header-less and
 // has no reward. This MARKETING template drives the new WhatsApp-native review
 // loop: the IMAGE header carries the "how to review" instructions, the body asks
-// for a reply with stars + a photo and promises ₹75 OFF the next order, and the
-// URL button (suffix = product slug) is the website path for non-logged-in users.
+// for a reply with stars + a photo and promises 75 Viora Coins (= ₹75 off the
+// next order, used at checkout — coins STACK with the spend-ladder coupon, unlike
+// a one-off voucher), and the URL button (suffix = product slug) is the website
+// path for non-logged-in users.
 //
 // Variables line up with notify.sendReviewRequest with NO param changes:
 //   body {{1}} = customer name, {{2}} = order id ; button url {{1}} = product slug.
@@ -43,17 +49,17 @@ const LANGUAGE = "en"; // MUST match templates.js LANG (see notify.sendReviewReq
 // WhatsApp-native review instructions; the website button handles non-logged-in.
 const BODY_TEXT =
   "Hi {{1}}, we hope you're loving your Viora jewellery from order #{{2}}! ✨\n\n" +
-  "*Leave a review and get FLAT ₹75 OFF your next order* 🎁\n\n" +
+  "*Leave a photo review and earn 75 Viora Coins* 🪙 (₹75 off your next order)\n\n" +
   "It's quick — just *reply to this message* with:\n" +
   "⭐ A rating out of 5\n" +
   "📸 A photo of your piece\n" +
   "✍️ A few words about it\n\n" +
-  "Your ₹75 voucher then applies automatically on your next order. " +
+  "Your 75 Viora Coins land in your account — use them at checkout on your next order. " +
   "Prefer our website? Tap the button below to review there instead.\n\n" +
   "Thank you for choosing Viora 💛";
 
 // Meta rejects footers containing newlines OR emojis (error 2388073), so plain.
-const FOOTER_TEXT = "Viora Jewels • reply with a photo review for ₹75 off";
+const FOOTER_TEXT = "Viora Jewels • photo review = 75 Viora Coins (₹75 off)";
 
 const BUTTONS = [
   {
@@ -139,26 +145,45 @@ export async function GET(req: NextRequest) {
 
   const imageUrl = req.nextUrl.searchParams.get("imageUrl") || DEFAULT_IMAGE;
   const dryRun = req.nextUrl.searchParams.get("dryRun") === "1";
+  const edit = req.nextUrl.searchParams.get("edit") === "1";
 
-  // Build the create payload (header_handle filled in after upload, unless dry run).
-  const makePayload = (headerHandle: string | null) => ({
-    name: TEMPLATE_NAME,
-    language: LANGUAGE,
-    category: "MARKETING",
-    components: [
-      {
-        type: "HEADER",
-        format: "IMAGE",
-        example: { header_handle: [headerHandle || "<uploaded-at-submit-time>"] },
-      },
-      { type: "BODY", text: BODY_TEXT, example: { body_text: [["Priya", "10231"]] } },
-      { type: "FOOTER", text: FOOTER_TEXT },
-      { type: "BUTTONS", buttons: BUTTONS },
-    ],
-  });
+  // The components shared by create and edit. On EDIT, Meta forbids name/language
+  // (immutable) in the body, so we only send { category, components }.
+  const components = (headerHandle: string | null) => [
+    {
+      type: "HEADER",
+      format: "IMAGE",
+      example: { header_handle: [headerHandle || "<uploaded-at-submit-time>"] },
+    },
+    { type: "BODY", text: BODY_TEXT, example: { body_text: [["Priya", "10231"]] } },
+    { type: "FOOTER", text: FOOTER_TEXT },
+    { type: "BUTTONS", buttons: BUTTONS },
+  ];
+  const makePayload = (headerHandle: string | null) =>
+    edit
+      ? { category: "MARKETING", components: components(headerHandle) }
+      : { name: TEMPLATE_NAME, language: LANGUAGE, category: "MARKETING", components: components(headerHandle) };
 
   if (dryRun) {
-    return NextResponse.json({ ok: true, dryRun: true, appId: APP_ID, imageUrl, payload: makePayload(null) });
+    return NextResponse.json({ ok: true, dryRun: true, edit, appId: APP_ID, imageUrl, payload: makePayload(null) });
+  }
+
+  // On EDIT, resolve the existing template's id first (Meta edits by id, not name).
+  let templateId = "";
+  if (edit) {
+    const lurl =
+      `${GRAPH}/${version}/${businessId}/message_templates` +
+      `?name=${TEMPLATE_NAME}&access_token=${encodeURIComponent(token)}`;
+    const lres = await fetch(lurl);
+    const ldata = await lres.json().catch(() => ({}));
+    const match = (ldata?.data || []).find((t: any) => t.name === TEMPLATE_NAME && t.language === LANGUAGE);
+    if (!lres.ok || !match?.id) {
+      return NextResponse.json(
+        { ok: false, stage: "lookup-template", status: lres.status, error: ldata?.error || "template not found", found: ldata?.data || [] },
+        { status: 502 }
+      );
+    }
+    templateId = String(match.id);
   }
 
   // 1) upload the sample header image -> handle.
@@ -170,9 +195,12 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // 2) create the template.
+  // 2) create a new template, or edit the existing one in place.
   const payload = makePayload(uploaded.handle);
-  const res = await fetch(`${GRAPH}/${version}/${businessId}/message_templates`, {
+  const endpoint = edit
+    ? `${GRAPH}/${version}/${templateId}`
+    : `${GRAPH}/${version}/${businessId}/message_templates`;
+  const res = await fetch(endpoint, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -180,15 +208,18 @@ export async function GET(req: NextRequest) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     return NextResponse.json(
-      { ok: false, stage: "create-template", status: res.status, error: data?.error || data, sentPayload: payload },
+      { ok: false, stage: edit ? "edit-template" : "create-template", status: res.status, error: data?.error || data, sentPayload: payload },
       { status: 502 }
     );
   }
 
   return NextResponse.json({
     ok: true,
-    message: "Submitted to Meta for review. Check WhatsApp Manager → Message templates.",
-    template: { name: TEMPLATE_NAME, language: LANGUAGE, status: data?.status, id: data?.id, category: data?.category },
+    message: edit
+      ? "Edit submitted to Meta for re-review. The template is now PENDING until approved."
+      : "Submitted to Meta for review. Check WhatsApp Manager → Message templates.",
+    action: edit ? "edit" : "create",
+    template: { name: TEMPLATE_NAME, language: LANGUAGE, id: edit ? templateId : data?.id, status: data?.status, category: data?.category },
     sampleImage: { url: imageUrl, size: uploaded.size },
     raw: data,
   });
