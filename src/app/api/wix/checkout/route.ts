@@ -4,9 +4,10 @@ import { sendOrderConfirmationEmail } from "@/lib/orderEmail";
 import { sendServerCapi } from "@/lib/metaCapiServer";
 import { readCookieRaw } from "@/lib/metaFbc";
 import { slugFromUrl } from "@/lib/metaCatalogId";
-import { COD_CHARGE, PREPAID_DISCOUNT, REVIEW_REWARD, VIORA_COINS } from "@/lib/checkoutPricing";
+import { COD_CHARGE, PREPAID_DISCOUNT, REVIEW_REWARD, VIORA_COINS, computeCoinsOrder, bestTierFor } from "@/lib/checkoutPricing";
 import { consumeReviewReward } from "@/lib/crm/reviewReward";
-import { earn as earnCoins } from "@/lib/crm/vioraCoins";
+import { earn as earnCoins, spend as spendCoins, getBalance as getCoinsBalance, coinsEnabled } from "@/lib/crm/vioraCoins";
+import { wixClientServer } from "@/lib/wixClientServer";
 import { makePaymentSeal } from "@/lib/crm/paymentSeal";
 import { fetchRazorpayPayment } from "@/lib/razorpayVerify";
 import { claimOnce, release } from "@/lib/crm/idempotency";
@@ -39,6 +40,10 @@ type CheckoutAddressPayload = {
   // courier collects are worked out here, never taken from the browser.
   codCharge?: string | number;
   codAmount?: string;
+  // Viora Coins the buyer chose to spend. Both are a REQUEST only — the server
+  // resolves the member's real balance and recomputes the total before trusting them.
+  useCoins?: boolean;
+  coins?: number;
 };
 
 // Room for the "payment already became an order" wait below (up to ~20 s).
@@ -213,6 +218,9 @@ export async function POST(req: Request) {
     // from the browser, as did the cash amount to collect, so a tampered request
     // could set "collect ₹1" on a ₹599 order.)
     const codCharge = paymentMethod === "COD" ? COD_CHARGE : 0;
+    // Viora Coins spend request (client's ask; re-verified server-side below).
+    const coinsRequested = details?.useCoins === true;
+    const coinsAskedRaw = Math.max(0, Math.round(Number(details?.coins) || 0));
 
     if (!email || !fullName || !phone || !addressLine1 || !city || !state || !postalCode) {
       return NextResponse.json(
@@ -282,6 +290,32 @@ export async function POST(req: Request) {
 
     const wixClient = wixAdminClientServer();
     const contactDetails = splitName(fullName);
+
+    // Viora Coins spend: resolve the wallet owner from THEIR OWN session (never
+    // the client's word), read the authoritative balance, and cap the spend to it.
+    // The order total is then recomputed server-side (Style A) and forced onto the
+    // Wix order after it's created. No-op unless COINS_ENABLED + a logged-in member
+    // who actually has coins — so a normal order is completely unaffected.
+    let coinsSpend: { contactId: string; allowed: number } | null = null;
+    if (coinsRequested && coinsEnabled() && coinsAskedRaw > 0) {
+      try {
+        const memberClient = await wixClientServer();
+        const member = memberClient.auth.loggedIn()
+          ? await (memberClient.members as any).getCurrentMember({ fieldsets: ["FULL"] })
+          : null;
+        const contactId = member?.member?.contactId || member?.member?._id || "";
+        if (contactId) {
+          const balance = await getCoinsBalance(contactId);
+          const allowed = Math.min(coinsAskedRaw, balance);
+          if (allowed > 0) coinsSpend = { contactId, allowed };
+          else console.warn(`[viora-coins] spend skipped — asked ${coinsAskedRaw}, balance ${balance}.`);
+        } else {
+          console.warn("[viora-coins] spend requested but no logged-in member resolved.");
+        }
+      } catch (e) {
+        console.warn("[viora-coins] could not resolve member for spend:", (e as any)?.message || e);
+      }
+    }
 
     const address = {
       country: "IN",
@@ -362,28 +396,55 @@ export async function POST(req: Request) {
     // becomes an order — the customer did pay something — but it is flagged, gets
     // no silent discount, and is not marked fully paid.
     const checkoutTotal = Number((updatedCheckout as any)?.priceSummary?.total?.amount);
+    // Viora Coins order: recompute the WHOLE total with the single shared Style-A
+    // formula from the Wix PRODUCT subtotal (coins come off first, then the ladder
+    // % on the remainder, then the ₹25 prepaid discount, with the ₹49 baked into
+    // the base). This is authoritative and is forced onto the Wix order below; the
+    // normal COD-fee / prepaid-reconcile edits are skipped when it's set.
+    const checkoutSubtotal = Number((updatedCheckout as any)?.priceSummary?.subtotal?.amount);
+    const coinsBreakdown =
+      coinsSpend && Number.isFinite(checkoutSubtotal)
+        ? computeCoinsOrder({
+            productSubtotal: checkoutSubtotal,
+            paymentMethod,
+            coins: coinsSpend.allowed,
+            ladderPercent: bestTierFor(checkoutSubtotal)?.percent || 0,
+          })
+        : null;
+
+    // The payment must cover the expected total. For a coins order that's the
+    // recomputed Style-A finalTotal (what the browser charged via Razorpay); for a
+    // normal order it's the Wix total minus the pay-online discount. A shortfall (a
+    // tampered amount, a price that changed, or coins that no longer exist) still
+    // becomes an order — the customer did pay something — but it's flagged, gets no
+    // silent discount, and isn't marked fully paid.
+    const expectedPaid = coinsBreakdown ? coinsBreakdown.finalTotal : checkoutTotal - PREPAID_DISCOUNT;
     const paymentShortfall =
       verifiedPaid != null &&
-      Number.isFinite(checkoutTotal) &&
-      verifiedPaid < checkoutTotal - PREPAID_DISCOUNT - 1;
+      Number.isFinite(coinsBreakdown ? coinsBreakdown.finalTotal : checkoutTotal) &&
+      verifiedPaid < expectedPaid - 1;
     if (paymentShortfall) {
       console.error(
-        `[checkout] PAYMENT SHORTFALL on checkout ${checkoutId}: paid ₹${verifiedPaid}, expected ₹${(
-          checkoutTotal - PREPAID_DISCOUNT
-        ).toFixed(2)} (payment ${razorpayPaymentId}).`
+        `[checkout] PAYMENT SHORTFALL on checkout ${checkoutId}: paid ₹${verifiedPaid}, expected ₹${expectedPaid.toFixed(2)}${
+          coinsBreakdown ? " (coins order)" : ""
+        } (payment ${razorpayPaymentId}).`
       );
       customFields.push({
         title: "Payment Check",
-        value: `SHORTFALL — paid ₹${verifiedPaid!.toFixed(2)}, expected ₹${(checkoutTotal - PREPAID_DISCOUNT).toFixed(2)}. Do not ship before checking.`,
+        value: `SHORTFALL — paid ₹${verifiedPaid!.toFixed(2)}, expected ₹${expectedPaid.toFixed(2)}. Do not ship before checking.`,
       });
     }
 
-    // COD: the cash to collect (Wix total after coupons + the COD charge), stamped
-    // now so the CRM/courier read the ₹49-inclusive figure race-proof — before the
-    // fee's draft edit below commits.
+    // COD: the cash to collect, stamped now so the CRM/courier read it race-proof —
+    // before the fee/discount draft edit below commits. For a coins order it's the
+    // Style-A finalTotal (₹49 already baked in); otherwise Wix total + the ₹49 fee.
     const codAmount =
-      paymentMethod === "COD" && Number.isFinite(checkoutTotal) && checkoutTotal > 0
-        ? (checkoutTotal + codCharge).toFixed(2)
+      paymentMethod === "COD"
+        ? coinsBreakdown
+          ? coinsBreakdown.finalTotal.toFixed(2)
+          : Number.isFinite(checkoutTotal) && checkoutTotal > 0
+            ? (checkoutTotal + codCharge).toFixed(2)
+            : ""
         : "";
     if (codAmount) customFields.push({ title: "COD Amount to Collect", value: `₹${codAmount}` });
 
@@ -517,7 +578,7 @@ export async function POST(req: Request) {
     // Best-effort: if the edit fails the underlying order is untouched. We still
     // record the intended total so the email/tracking match what the customer
     // agreed to, and log loudly so the Wix order can be corrected manually.
-    if (paymentMethod === "COD" && codCharge > 0 && Number.isFinite(wixOrderTotal)) {
+    if (paymentMethod === "COD" && codCharge > 0 && Number.isFinite(wixOrderTotal) && !coinsBreakdown) {
       try {
         const draftRes = await (wixClient.draftOrders as any).createDraftOrder({
           sourceOrderId: orderId,
@@ -567,7 +628,7 @@ export async function POST(req: Request) {
 
     // Only a verified, complete payment earns the pay-online discount — at most
     // the gap between the Wix total and what Razorpay says was paid.
-    if (paymentMethod === "PREPAID" && verifiedPaid != null && !paymentShortfall) {
+    if (paymentMethod === "PREPAID" && verifiedPaid != null && !paymentShortfall && !coinsBreakdown) {
       const amountPaid = verifiedPaid;
       if (
         Number.isFinite(wixOrderTotal) &&
@@ -616,6 +677,68 @@ export async function POST(req: Request) {
           console.error("Prepaid discount (draft edit) failed:", discErr);
           finalTotal = amountPaid;
         }
+      }
+    }
+
+    // Viora Coins: the Style-A finalTotal (coins off first, then the ladder % on
+    // the remainder, then the ₹25 prepaid discount, with the ₹49 baked into the
+    // base) is authoritative. Force the Wix order TOTAL onto it with ONE draft edit
+    // — a discount when the total should drop below the Wix figure, a fee when the
+    // baked-in ₹49 makes it higher (small-coin COD orders) — then burn the coins.
+    // This REPLACES the COD-fee / prepaid-reconcile edits above (both skipped when
+    // coinsBreakdown is set). Best-effort: the cash-to-collect / amount-paid are
+    // already stamped from finalTotal, so a failed edit only mis-shows the Wix total.
+    if (coinsBreakdown && coinsSpend) {
+      finalTotal = coinsBreakdown.finalTotal;
+      const delta = Number((finalTotal - wixOrderTotal).toFixed(2)); // <0 discount, >0 fee
+      if (Number.isFinite(wixOrderTotal) && Math.abs(delta) >= 0.01) {
+        try {
+          const draftRes = await (wixClient.draftOrders as any).createDraftOrder({ sourceOrderId: orderId });
+          const draftId = draftRes?.calculatedDraftOrder?.draftOrder?._id || draftRes?.draftOrder?._id;
+          if (!draftId) throw new Error("Draft order id missing from response.");
+          if (delta < 0) {
+            await (wixClient.draftOrders as any).createCustomDiscounts(draftId, {
+              discounts: [
+                {
+                  priceAmount: { amount: Math.abs(delta).toFixed(2) },
+                  discountType: "GLOBAL",
+                  applyToDraftOrder: true,
+                  description: `Viora Coins (${coinsSpend.allowed}) + offers`,
+                },
+              ],
+            });
+          } else {
+            await (wixClient.draftOrders as any).createCustomAdditionalFees(draftId, {
+              customAdditionalFees: [
+                { name: "Delivery + COD Charges", price: { amount: delta.toFixed(2) }, applyToDraftOrder: true },
+              ],
+            });
+          }
+          const commitRes = await (wixClient.draftOrders as any).commitDraftOrder(draftId, {
+            commitSettings: { sendNotificationsToBuyer: false, sendNotificationsToBusiness: false },
+            reason: "Viora Coins redemption",
+          });
+          committedOrder = commitRes?.orderAfterCommit || committedOrder;
+          const committedTotal = committedOrder?.priceSummary?.total?.amount;
+          finalTotal = committedTotal != null ? Number(committedTotal) : coinsBreakdown.finalTotal;
+          discountApplied = true;
+        } catch (coinsEditErr) {
+          console.error(
+            `Viora Coins total override FAILED for order ${orderId} — Wix order may show the wrong total and must be corrected manually:`,
+            coinsEditErr
+          );
+          finalTotal = coinsBreakdown.finalTotal;
+        }
+      }
+      // Burn the coins (claim-once per orderId; idempotent on retry). The order
+      // exists and the customer already got the benefit — prepaid was charged the
+      // reduced amount, COD collects the reduced cash — so this spend is owed.
+      try {
+        const res = await spendCoins({ contactId: coinsSpend.contactId, amount: coinsSpend.allowed, orderId });
+        if (!res.spent) console.warn(`[viora-coins] spend recorded 0 for order ${orderId} (already claimed or KV blip).`);
+        else console.log(`[viora-coins] spent ${res.spent} coins on order ${orderId}.`);
+      } catch (spendErr) {
+        console.error("[viora-coins] spend failed (non-blocking):", spendErr);
       }
     }
 
