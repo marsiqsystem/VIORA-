@@ -128,6 +128,12 @@ const OrderStatusView = ({ status, showFullAddress, backHref, backLabel }: Props
                   <span>₹{COD_CHARGE}</span>
                 </p>
               )}
+              {status.coinsSpent > 0 && (
+                <p className="flex justify-between border-t border-silver-light py-2 text-sm font-semibold text-[#A9844C]">
+                  <span>🪙 Viora Coins</span>
+                  <span>− {inr(status.coinsSpent)}</span>
+                </p>
+              )}
               <p className="mt-2 flex items-center justify-between border-t border-silver-light pt-3">
                 <span className="text-sm text-gray-600">{toPay ? "To pay on delivery" : "Paid"}</span>
                 <span className="font-playfair text-xl font-bold">{inr(status.amount)}</span>

@@ -28,6 +28,8 @@ export type OrderStatus = {
   firstName: string;
   address: { line1: string; city: string; state: string; postalCode: string };
   giftWrap: boolean;
+  /** Viora Coins spent on this order (0 if none) — shown on the receipt. */
+  coinsSpent: number;
 };
 
 async function getTracking(orderGuid: string) {
@@ -132,11 +134,15 @@ export async function findOrderByNumberAndPhone(orderNumber: string, phone: stri
 
 export async function buildOrderStatus(order: any): Promise<OrderStatus> {
   const guid = String(order._id);
-  const [tracking, storeRec] = await Promise.all([
+  const [tracking, storeRec, coinsSpent] = await Promise.all([
     getTracking(guid),
     // The dashboard store knows WHICH courier shipped the order (the operator
     // assigns it there); keyed by the human order number.
     (ordersStore as any).getOrder(String(order.number)).catch(() => null) as Promise<any>,
+    // Viora Coins spent on this order (keyed by the Wix GUID) for the receipt.
+    import("@/lib/crm/vioraCoins")
+      .then((m) => m.getSpent(guid))
+      .catch(() => 0) as Promise<number>,
   ]);
 
   const courier =
@@ -203,5 +209,6 @@ export async function buildOrderStatus(order: any): Promise<OrderStatus> {
       postalCode: info.address?.postalCode || "",
     },
     giftWrap: !!customFieldValue(order, "gift wrap"),
+    coinsSpent: Number(coinsSpent) || 0,
   };
 }
