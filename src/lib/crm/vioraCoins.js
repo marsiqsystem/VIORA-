@@ -148,10 +148,45 @@ export async function refund({ contactId, orderId } = {}) {
     if (!raw) return;
     const rec = typeof raw === "object" ? raw : JSON.parse(raw);
     const amt = toInt(rec.amt);
-    if (amt > 0) await command(["INCRBY", BAL(id), String(amt)]);
+    // Always credit the member who actually spent (stored on the claim), not
+    // whoever triggered the refund — robust if the two ids ever differ.
+    const spender = clean(rec.id) || id;
+    if (amt > 0) await command(["INCRBY", BAL(spender), String(amt)]);
     await command(["DEL", SPEND(oid)]);
   } catch (e) {
     console.warn("[vioraCoins] refund failed:", e?.message || e);
+  }
+}
+
+/**
+ * Claw back an EARN that should not have been kept — e.g. a prepaid order that
+ * granted +30 coins and was then cancelled/refunded. Reverses ONCE per reasonKey
+ * and only if that earn actually happened, so it can't go negative or double-
+ * reverse, and a normal (uncancelled) order is never touched. Never throws.
+ * @returns {Promise<{reversed:boolean, amount:number, balance:number}>}
+ */
+export async function reverseEarn({ contactId, reasonKey, amount } = {}) {
+  const id = clean(contactId);
+  const amt = Math.round(Number(amount) || 0);
+  if (!coinsEnabled() || !isConfigured() || !id || !reasonKey || amt <= 0) {
+    return { reversed: false, amount: 0, balance: await getBalance(id) };
+  }
+  try {
+    // Only reverse an earn that was actually credited.
+    const earned = await command(["GET", EARN(reasonKey)]);
+    if (!earned) return { reversed: false, amount: 0, balance: await getBalance(id) };
+    // ...and only once — claim a reversal marker.
+    const claimed = await command(["SET", `${PREFIX}earnrev:${reasonKey}`, String(Date.now()), "NX"]);
+    if (claimed !== "OK") return { reversed: false, amount: 0, balance: await getBalance(id) };
+    let balance = toInt(await command(["DECRBY", BAL(id), String(amt)]));
+    if (balance < 0) {
+      await command(["SET", BAL(id), "0"]);
+      balance = 0;
+    }
+    return { reversed: true, amount: amt, balance };
+  } catch (e) {
+    console.warn("[vioraCoins] reverseEarn failed:", e?.message || e);
+    return { reversed: false, amount: 0, balance: await getBalance(id) };
   }
 }
 

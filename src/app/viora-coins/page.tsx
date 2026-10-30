@@ -15,24 +15,28 @@ const ways = [
     coins: VIORA_COINS.review,
     en: "Leave a photo review of your Viora jewellery on our website (once per account).",
     hi: "(Hamari website pe apni Viora jewellery ka photo review daalo — ek account pe ek baar.)",
+    cta: { label: "Write a review", href: "/account/orders" },
   },
   {
     icon: "🔐",
     coins: VIORA_COINS.signup,
     en: "Sign in to your Viora account for the first time.",
     hi: "(Viora account me pehli baar log in karo.)",
+    cta: { label: "Sign in", href: "/login" },
   },
   {
     icon: "💳",
     coins: VIORA_COINS.prepaid,
     en: "Place a prepaid (pay-online) order — credited when the order is successful.",
     hi: "(Prepaid / online-payment order karo — order success hote hi coins mil jaate hain.)",
+    cta: { label: "Shop & pay online", href: "/products" },
   },
   {
     icon: "📦",
     coins: VIORA_COINS.codDelivered,
     en: "Get a COD order delivered to you — credited when it's delivered.",
     hi: "(COD order deliver hone pe — jaise hi parcel deliver hoga, coins mil jaate hain.)",
+    cta: { label: "Shop now", href: "/products" },
   },
 ];
 
@@ -93,6 +97,26 @@ export default function VioraCoinsPage() {
               <p style={{ margin: "0 0 3px", fontSize: 14.5, color: "#2A251E", fontWeight: 500 }}>{w.en}</p>
               <p style={{ margin: 0, fontSize: 12.5, color: "#9A8E7D" }}>{w.hi}</p>
             </div>
+            <Link
+              href={w.cta.href}
+              style={{
+                flexShrink: 0,
+                alignSelf: "center",
+                display: "inline-block",
+                padding: "9px 16px",
+                background: "linear-gradient(180deg,#E8D5A6,#C9A66B)",
+                color: "#1A1410",
+                border: "1px solid #B8945A",
+                borderRadius: 999,
+                fontSize: 13,
+                fontWeight: 700,
+                textDecoration: "none",
+                whiteSpace: "nowrap",
+                boxShadow: "0 2px 8px rgba(201,166,107,0.35)",
+              }}
+            >
+              {w.cta.label} →
+            </Link>
           </div>
         ))}
       </div>

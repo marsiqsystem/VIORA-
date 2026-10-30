@@ -422,11 +422,29 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
       })
     : null;
   const total = coinsBreakdown ? coinsBreakdown.finalTotal : isPrepaid ? prepaidTotal : codTotal;
-  // Difference between COD and prepaid (₹49 charge avoided + ₹25 off gained).
-  const prepaidSaving = COD_CHARGE + PREPAID_DISCOUNT;
-  // Only real savings: MRP discount, coupon, automatic discounts, prepaid discount.
+  // Per-method totals the customer actually pays. When coins are applied the
+  // whole order is recomputed by the shared Style-A formula for EACH method, so
+  // the payment selector shows the real coins-adjusted price (not the pre-coins
+  // ₹494 / ₹568). Without coins these are just the normal prepaid / COD totals.
+  const prepaidTotalWithCoins = coinsActive
+    ? computeCoinsOrder({ productSubtotal: subtotal, paymentMethod: "PREPAID", coins: coinBalance, ladderPercent })
+        .finalTotal
+    : prepaidTotal;
+  const codTotalWithCoins = coinsActive
+    ? computeCoinsOrder({ productSubtotal: subtotal, paymentMethod: "COD", coins: coinBalance, ladderPercent })
+        .finalTotal
+    : codTotal;
+  // What the customer saves by paying online instead of COD (the gap between the
+  // two method totals) — correct whether or not coins are applied.
+  const prepaidSaving = Math.max(0, Math.round(codTotalWithCoins - prepaidTotalWithCoins));
+  // Only real savings: MRP discount, coupon, automatic discounts, prepaid discount
+  // and — when applied — the Viora Coins spent (so the headline reflects them).
   const totalSavings =
-    mrpSavings + wixCouponDiscount + automaticDiscount + (isPrepaid ? PREPAID_DISCOUNT : 0);
+    mrpSavings +
+    wixCouponDiscount +
+    automaticDiscount +
+    (isPrepaid ? PREPAID_DISCOUNT : 0) +
+    (coinsBreakdown ? coinsBreakdown.usedCoins : 0);
   // What the same bag costs at full price — the anchor next to the real total.
   const mrpTotal = lineItems.reduce((sum, li) => {
     const full = Number(li.fullPrice?.amount) || Number(li.price?.amount) || 0;
@@ -928,14 +946,14 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
     {
       id: "PREPAID",
       label: "Pay online",
-      amount: prepaidTotal,
+      amount: prepaidTotalWithCoins,
       sub: `GPay, PhonePe, Paytm, cards · FREE delivery + ₹${PREPAID_DISCOUNT} off`,
       badge: `Save ₹${prepaidSaving}`,
     },
     {
       id: "COD",
       label: "Cash on delivery",
-      amount: codTotal,
+      amount: codTotalWithCoins,
       sub: `Includes ₹${COD_CHARGE} delivery & COD charge`,
       badge: `₹${prepaidSaving} more`,
     },
@@ -1371,7 +1389,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                 >
                   <span className="text-lg leading-none">💡</span>
                   <span className="text-xs font-medium leading-snug text-amber-800">
-                    Cash on delivery costs ₹{prepaidSaving} more. Pay online for ₹{rupees(prepaidTotal)} with FREE
+                    Cash on delivery costs ₹{prepaidSaving} more. Pay online for ₹{rupees(prepaidTotalWithCoins)} with FREE
                     delivery. <span className="underline">Switch</span>
                   </span>
                 </button>
@@ -1393,7 +1411,7 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                     className="mt-0.5 h-4 w-4 accent-[#9B1B30]"
                   />
                   <span className="text-primary">
-                    I&apos;ll be available to receive this order and pay <b>₹{rupees(codTotal)}</b> in cash
+                    I&apos;ll be available to receive this order and pay <b>₹{rupees(codTotalWithCoins)}</b> in cash
                     on delivery.
                   </span>
                 </label>

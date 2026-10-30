@@ -184,13 +184,55 @@ async function updateOrder(orderId, patch) {
   try {
     const base = (await getOrder(orderId)) || { ...blankRecord(), orderId: String(orderId), createdAt: Date.now() };
     const rec = { ...base, ...patch, orderId: String(orderId), updatedAt: Date.now() };
+    // Did this patch move the order INTO a bad-terminal state (cancelled / rto)
+    // for the first time? If so, the coins side needs to be unwound (below).
+    const becameDead =
+      (patch?.status === "cancelled" || patch?.status === "rto") &&
+      base.status !== "cancelled" &&
+      base.status !== "rto";
     await command(["SET", key(rec.orderId), JSON.stringify(rec)]);
     // Ensure it's in the index even if this update arrived before recordOrder.
     await command(["SADD", INDEX_KEY, rec.orderId]);
+    // Viora Coins integrity: one chokepoint for EVERY cancel path (dashboard
+    // cancel calls updateOrder directly; courier webhooks via applyCourierStatus).
+    // Idempotent + best-effort, so it never blocks or breaks the status write.
+    if (becameDead && process.env.COINS_ENABLED === "1") {
+      await clawbackCoinsOnCancel(rec.orderId, rec);
+    }
     return { ok: true };
   } catch (e) {
     console.warn("[orders-store] updateOrder failed:", e?.message || e);
     return { ok: false };
+  }
+}
+
+/**
+ * Viora Coins integrity — when an order is cancelled or RTO'd, (1) give back any
+ * coins the customer SPENT on it, and (2) claw back the prepaid "+30 earn" so a
+ * place-then-cancel loop can't farm coins. COD orders earn only ON DELIVERY, so a
+ * cancelled COD never earned anything to reverse. All ids resolve from the Wix
+ * order (buyerInfo.contactId) — the same source the earn hooks use. Idempotent
+ * (refund + reverseEarn are both claim-once) and never throws.
+ */
+async function clawbackCoinsOnCancel(orderId, order) {
+  if (process.env.COINS_ENABLED !== "1" || !order?.orderGuid) return;
+  try {
+    const { wixAdminClientServer } = await import("@/lib/wixAdminClientServer");
+    const wo = await wixAdminClientServer().orders.getOrder(order.orderGuid);
+    const contactId = wo?.buyerInfo?.contactId || "";
+    if (!contactId) return;
+    const [{ refund, reverseEarn }, { VIORA_COINS }] = await Promise.all([
+      import("./vioraCoins"),
+      import("@/lib/checkoutPricing"),
+    ]);
+    // (1) Return coins the customer spent on this order (no-op if none).
+    await refund({ contactId, orderId });
+    // (2) Reverse the prepaid earn (COD never earned pre-delivery).
+    if (String(order?.paymentMode || "").toUpperCase() !== "COD") {
+      await reverseEarn({ contactId, reasonKey: `prepaid:${orderId}`, amount: VIORA_COINS.prepaid });
+    }
+  } catch (e) {
+    console.warn("[viora-coins] cancel clawback failed (non-blocking):", e?.message || e);
   }
 }
 

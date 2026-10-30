@@ -83,6 +83,11 @@ const ConsentManager = () => {
     updateGoogleConsent(next);
     setShowBanner(false);
     setShowSettings(false);
+    // Let the Viora Coins intro popup know the consent choice is made, so it can
+    // appear now without clashing with the consent banner.
+    try {
+      window.dispatchEvent(new CustomEvent("viora:consent-set"));
+    } catch {}
   };
 
   const acceptAll = () => persist({ analytics: true, marketing: true });
