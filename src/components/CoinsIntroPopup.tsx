@@ -2,15 +2,15 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useWixClient } from "@/hooks/useWixClient";
 
-// "Introducing Viora Coins" — a one-time welcome popup for NEW, logged-out
-// visitors. Shows only AFTER the cookie-consent choice is made (so it never
-// clashes with the consent banner), only when the coins program is live, and
-// never again once dismissed. Logged-in members never see it.
+// "Introducing Viora Coins" — a welcome popup shown to EVERY visitor (logged in
+// or not), once per browser session, as soon as they land. Shows only AFTER the
+// cookie-consent choice is made (so it never clashes with the consent banner)
+// and only when the coins program is live. Once-per-session (sessionStorage), so
+// it reappears on a fresh visit but never nags on every page click.
 const COINS_UI = process.env.NEXT_PUBLIC_COINS_ENABLED === "1";
 const CONSENT_KEY = "viora_consent_v1";
-const SEEN_KEY = "viora_coins_intro_v1";
+const SEEN_KEY = "viora_coins_intro_seen"; // sessionStorage → once per visit
 
 const EARN = [
   { icon: "📸", coins: 75, text: "Photo review of your jewellery" },
@@ -20,15 +20,12 @@ const EARN = [
 ];
 
 export default function CoinsIntroPopup() {
-  const wixClient = useWixClient();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     if (!COINS_UI) return;
-    // Never to logged-in members, never twice.
     try {
-      if (wixClient.auth.loggedIn()) return;
-      if (localStorage.getItem(SEEN_KEY)) return;
+      if (sessionStorage.getItem(SEEN_KEY)) return; // already shown this visit
     } catch {
       return;
     }
@@ -37,10 +34,10 @@ export default function CoinsIntroPopup() {
     const tryShow = () => {
       if (shown) return;
       try {
-        // Only once the visitor has made a cookie-consent choice.
+        // Only once the visitor has made a cookie-consent choice (so the two
+        // popups never overlap). Returning visitors already have it set.
         if (!localStorage.getItem(CONSENT_KEY)) return;
-        if (localStorage.getItem(SEEN_KEY)) return;
-        if (wixClient.auth.loggedIn()) return;
+        if (sessionStorage.getItem(SEEN_KEY)) return;
       } catch {
         return;
       }
@@ -52,11 +49,11 @@ export default function CoinsIntroPopup() {
     tryShow();
     window.addEventListener("viora:consent-set", tryShow);
     return () => window.removeEventListener("viora:consent-set", tryShow);
-  }, [wixClient]);
+  }, []);
 
   const dismiss = () => {
     try {
-      localStorage.setItem(SEEN_KEY, "1");
+      sessionStorage.setItem(SEEN_KEY, "1");
     } catch {
       /* ignore */
     }
