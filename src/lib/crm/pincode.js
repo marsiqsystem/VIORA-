@@ -121,15 +121,24 @@ function buildStructuredAddress(text, { pincode = "", city = "", state = "", cou
 // --- Fuller pincode data (district + state + the post-office AREA names) -------
 // Same India Post source as lookupPincode, but also returns every PostOffice
 // Name for the pincode (the real localities). Cached separately. Never throws.
-const PIN_AREAS_PREFIX = "pincode:areas:v1:";
+// v2: also carries Block + Division from India Post (real administrative units,
+// so we can structure "Block X, District Y" without the model inventing them).
+const PIN_AREAS_PREFIX = "pincode:areas:v2:";
 async function lookupPincodeAreas(pin) {
   const p = String(pin || "").replace(/\D/g, "");
-  if (p.length !== 6) return { city: "", state: "", areas: [] };
+  if (p.length !== 6) return { city: "", state: "", areas: [], blocks: [], division: "" };
   const cached = await kv(["GET", `${PIN_AREAS_PREFIX}${p}`]);
   if (cached) {
     try {
       const v = typeof cached === "string" ? JSON.parse(cached) : cached;
-      if (v && v.state) return { city: v.city || "", state: v.state || "", areas: Array.isArray(v.areas) ? v.areas : [] };
+      if (v && v.state)
+        return {
+          city: v.city || "",
+          state: v.state || "",
+          areas: Array.isArray(v.areas) ? v.areas : [],
+          blocks: Array.isArray(v.blocks) ? v.blocks : [],
+          division: v.division || "",
+        };
     } catch { /* fall through */ }
   }
   try {
@@ -140,12 +149,27 @@ async function lookupPincodeAreas(pin) {
     if (first?.Status === "Success" && pos.length) {
       const po0 = pos[0];
       const areas = [...new Set(pos.map((x) => String(x?.Name || "").trim()).filter(Boolean))];
-      const out = { city: po0.District || po0.Division || po0.Region || "", state: po0.State || "", areas };
+      // Block names for this PIN (real administrative blocks; often one, sometimes
+      // a few). India Post sometimes writes "NA"/the district name — drop those.
+      const blocks = [
+        ...new Set(
+          pos
+            .map((x) => String(x?.Block || "").trim())
+            .filter((b) => b && !/^na$/i.test(b) && b.toLowerCase() !== String(po0.District || "").toLowerCase())
+        ),
+      ];
+      const out = {
+        city: po0.District || po0.Division || po0.Region || "",
+        state: po0.State || "",
+        areas,
+        blocks,
+        division: String(po0.Division || "").trim(),
+      };
       await kv(["SET", `${PIN_AREAS_PREFIX}${p}`, JSON.stringify(out), "EX", String(PIN_CACHE_TTL_S)]);
       return out;
     }
   } catch { /* network blip */ }
-  return { city: "", state: "", areas: [] };
+  return { city: "", state: "", areas: [], blocks: [], division: "" };
 }
 
 // --- Shipping address enricher ------------------------------------------------

@@ -23,7 +23,7 @@ import { generateVertex, isConfigured as vertexConfigured } from "./vertexGemini
 // Flash-Lite: $0.10 / $0.40 per 1M in/out tokens. ~750 tokens per address ⇒
 // ~₹0.01 each. Overridable, but keep it to a cheap model.
 const MODEL = process.env.GEMINI_ADDRESS_MODEL || "gemini-2.5-flash-lite";
-const CACHE_PREFIX = "addrfmt:v6:"; // v6: temp 0 (deterministic) + garbled/no-place -> CONFIRM
+const CACHE_PREFIX = "addrfmt:v7:"; // v7: administrative enrichment (Block/District/India from verified India Post facts)
 const CACHE_TTL_S = 90 * 24 * 60 * 60; // 90 days
 
 function kvCfg() {
@@ -100,8 +100,10 @@ function buildPrompt({ name, phone, address, pinInfo }) {
   const a = address || {};
   const raw = [a.line1, a.line2, a.line3].map(clean).filter(Boolean).join("\n");
   const facts = pinInfo?.state
-    ? `PIN ${a.postalCode}: district "${pinInfo.city}", state "${pinInfo.state}". ` +
-      `Post-office areas on this PIN (the ONLY landmarks you may reference): ${(pinInfo.areas || []).join(", ") || "(none)"}.`
+    ? `PIN ${a.postalCode}: district "${pinInfo.city}", state "${pinInfo.state}"` +
+      (pinInfo.blocks && pinInfo.blocks.length ? `, administrative block "${pinInfo.blocks.join('" or "')}"` : "") +
+      (pinInfo.division ? `, postal division "${pinInfo.division}"` : "") +
+      `. Post-office localities on this PIN (real places you may reference): ${(pinInfo.areas || []).join(", ") || "(none)"}.`
     : `PIN ${a.postalCode || "(missing)"} did not resolve to India Post data.`;
   return (
     `Customer: ${clean(name) || "(no name)"}  Phone: ${clean(phone) || "(none)"}\n` +
@@ -113,8 +115,9 @@ function buildPrompt({ name, phone, address, pinInfo }) {
 
 const SYSTEM_PROMPT =
   "You are an expert Indian courier shipping-address specialist. You get a customer's raw address plus VERIFIED India Post facts for its PIN (you have NO web search — use only the given facts and the input; never claim to have searched online). Turn it into a clean, properly ARRANGED, courier-ready address that minimises failed delivery/RTO. " +
-  "ALWAYS REARRANGE into this delivery sequence (drop lines that don't apply — never pad): " +
-  "house/flat/building no. + building name; floor/block/street; locality/colony; 'Near|Opposite|Behind <landmark>'; village/town; then ONE final place line combining 'City/District, State - PIN' (KEEP the district/tehsil the customer wrote, e.g. 'Rewari', on THIS line) — the PIN appears only ONCE here, NEVER repeat the PIN on another line; 'Mobile: <number>'. " +
+  "Enhance it the way a careful human would when cleaning an address for a courier: fix and arrange everything, and ADD the real administrative structure (village/block/district/state) you can derive from the VERIFIED India Post facts — so a sparse one-line address becomes a clear, well-structured multi-line one. " +
+  "ALWAYS REARRANGE into this multi-line delivery sequence, each component on ITS OWN line (drop lines that don't apply — never pad): " +
+  "recipient name; house/flat/building no. + building name; floor/building-block/street; locality/colony; 'Near|Opposite|Behind <landmark>'; village/town; 'Block <block>, District <district>' (add this line using the VERIFIED block + district from the facts when available — these are REAL India Post administrative units, NOT inventions; if the customer wrote their own nearby town/tehsil keep that too); 'State – PIN' on its own line; 'India'; 'Mobile: <number>'. The PIN appears ONCE only (on the State–PIN line), NEVER repeat it. " +
   "RULES: " +
   "(1) FIX spelling, capitalization, punctuation and obvious typos; expand clear abbreviations ('Bas stand'->'Bus Stand', 'ke pass/pas/pass'->'Near', 'oppo'->'Opposite', 'St'->'Street', 'rd'->'Road', 'nr'->'Near'). Do NOT change unfamiliar local names you can't confidently correct. " +
   "(2) LANDMARK PLACEMENT: keep the customer's own relation word EXACTLY — never turn 'Opposite'/'Behind' into 'Near'. If they wrote a bare landmark that is clearly the delivery reference (e.g. 'Bus Stand', 'XYZ Hospital') you MAY prefix 'Near' to arrange it. " +
@@ -122,7 +125,8 @@ const SYSTEM_PROMPT =
   "(4) KEEP any landmark the customer gave (temple/mandir, masjid, church, school, shop, hospital, chowk, bus stand, etc.) — never delete it or swap it for a post-office name. ONLY when the customer gave NO usable landmark AND the street is thin, you MAY add ONE nearest VERIFIED post-office area from the given facts as 'Near <Area>'. Never invent a landmark not in the input or the facts. " +
   "(5) Remove ACCIDENTAL repetition (same landmark/locality written twice), but keep two genuinely different components. " +
   "(6) Standardize city/state to the verified PIN facts when they clearly differ; if the customer's 'city' is really a locality, keep it as the locality line and use the PIN's district as the city/district. " +
-  "(7) VERDICT: 'SHIP' when the address is complete and consistent and a courier can reasonably reach it. 'CONFIRM' when it is usable but a MATERIAL uncertainty remains — the PIN clashes with the locality, the exact delivery point is ambiguous (e.g. only a common hospital/landmark name with no house/street, or two places could share that name), a needed detail is missing, OR part of the input is garbled/unintelligible (not a real place/street/landmark) so you cannot confidently place the delivery point. KEEP any garbled text in the address (never drop it) and set CONFIRM. Don't over-flag: a real village/locality/landmark with a valid PIN is usually SHIP even without a house number. In 'reason', say in one short Hinglish line what was fixed or what to confirm. " +
+  "(6b) ADMINISTRATIVE ENRICHMENT (this is what makes the output good, like a hand-cleaned address): you MAY and SHOULD add, taken ONLY from the verified facts, the administrative Block ('Block <X>'), the District, and the country line 'India'. These are real units from India Post, so adding them is NOT inventing. If the facts give no block, simply omit the Block line — never guess one. Do the same spelling/arrangement care on village/town names. " +
+  "(7) VERDICT: 'SHIP' when the address is complete and consistent and a courier can reasonably reach it.'CONFIRM' when it is usable but a MATERIAL uncertainty remains — the PIN clashes with the locality, the exact delivery point is ambiguous (e.g. only a common hospital/landmark name with no house/street, or two places could share that name), a needed detail is missing, OR part of the input is garbled/unintelligible (not a real place/street/landmark) so you cannot confidently place the delivery point. KEEP any garbled text in the address (never drop it) and set CONFIRM. Don't over-flag: a real village/locality/landmark with a valid PIN is usually SHIP even without a house number. In 'reason', say in one short Hinglish line what was fixed or what to confirm. " +
   "Respond with ONLY a compact JSON object, no markdown, no code fence: " +
   '{"formatted":["line1","line2",...],"verdict":"SHIP|CONFIRM","locality":"","landmark":"","limitation":"","reason":"one short Hinglish sentence"}';
 
@@ -203,7 +207,7 @@ export async function formatAddress({ orderId, name, phone, address, force } = {
     //    fall back to the default model (whatever autoReply uses) so a wrong
     //    model id can never silently disable the formatter.
     const prompt = buildPrompt({ name, phone, address: a, pinInfo });
-    const opts = { systemPrompt: SYSTEM_PROMPT, temperature: 0, maxOutputTokens: 350 };
+    const opts = { systemPrompt: SYSTEM_PROMPT, temperature: 0, maxOutputTokens: 512 };
     // Prefer Vertex AI (service-account on a GCP project with working billing)
     // when it's configured; otherwise the AI Studio API key. Each tries the cheap
     // flash-lite first, then the default model.
