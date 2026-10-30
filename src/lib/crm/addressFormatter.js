@@ -127,23 +127,75 @@ const SYSTEM_PROMPT =
   "(6) Standardize city/state to the verified PIN facts when they clearly differ; if the customer's 'city' is really a locality, keep it as the locality line and use the PIN's district as the city/district. " +
   "(6b) ADMINISTRATIVE ENRICHMENT (this is what makes the output good, like a hand-cleaned address): you MAY and SHOULD add, taken ONLY from the verified facts, the administrative Block ('Block <X>'), the District, and the country line 'India'. These are real units from India Post, so adding them is NOT inventing. If the facts give no block, simply omit the Block line — never guess one. Do the same spelling/arrangement care on village/town names. " +
   "(7) VERDICT: 'SHIP' when the address is complete and consistent and a courier can reasonably reach it.'CONFIRM' when it is usable but a MATERIAL uncertainty remains — the PIN clashes with the locality, the exact delivery point is ambiguous (e.g. only a common hospital/landmark name with no house/street, or two places could share that name), a needed detail is missing, OR part of the input is garbled/unintelligible (not a real place/street/landmark) so you cannot confidently place the delivery point. KEEP any garbled text in the address (never drop it) and set CONFIRM. Don't over-flag: a real village/locality/landmark with a valid PIN is usually SHIP even without a house number. In 'reason', say in one short Hinglish line what was fixed or what to confirm. " +
-  "Respond with ONLY a compact JSON object, no markdown, no code fence: " +
-  '{"formatted":["line1","line2",...],"verdict":"SHIP|CONFIRM","locality":"","landmark":"","limitation":"","reason":"one short Hinglish sentence"}';
+  "OUTPUT FORMAT — return ONLY the formatted address, ONE component per line, then two marker lines. NO JSON, NO code fence, NO extra words:\n" +
+  "<address line 1>\n<address line 2>\n…(as many lines as needed)…\n" +
+  "@@VERDICT: SHIP   (or CONFIRM)\n" +
+  "@@REASON: <one short Hinglish sentence of what you fixed / what to confirm>";
 
-function parseModelJson(text) {
-  if (!text) return null;
-  let t = String(text).trim();
-  // Strip an accidental ```json fence.
-  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fence) t = fence[1].trim();
+// Legacy JSON parse — kept as a fallback in case the model emits JSON anyway.
+function parseJsonShape(t) {
   const start = t.indexOf("{");
   const end = t.lastIndexOf("}");
   if (start === -1 || end === -1) return null;
   try {
-    return JSON.parse(t.slice(start, end + 1));
+    const j = JSON.parse(t.slice(start, end + 1));
+    if (j && Array.isArray(j.formatted)) return j;
   } catch {
-    return null;
+    /* fall through to line parser */
   }
+  return null;
+}
+
+// Parse the model's reply. Primary format is plain lines + '@@VERDICT:' /
+// '@@REASON:' markers (robust — no brittle JSON array that a single stray quote
+// can break, which was silently forcing the deterministic fallback). Still
+// accepts a JSON object if the model emits one.
+function parseModelJson(text) {
+  if (!text) return null;
+  let t = String(text).trim();
+  // Strip an accidental ``` fence.
+  const fence = t.match(/```(?:\w+)?\s*([\s\S]*?)```/);
+  if (fence) t = fence[1].trim();
+
+  // JSON first, if it looks like JSON and actually parses.
+  if (t.startsWith("{")) {
+    const j = parseJsonShape(t);
+    if (j) {
+      return {
+        formatted: j.formatted,
+        verdict: j.verdict,
+        locality: j.locality,
+        landmark: j.landmark,
+        limitation: j.limitation,
+        reason: j.reason,
+      };
+    }
+  }
+
+  // Line format.
+  const formatted = [];
+  let verdict = "SHIP";
+  let reason = "";
+  let seenMarker = false;
+  for (const rawLn of t.split(/\r?\n/)) {
+    const ln = rawLn.trim();
+    const mv = ln.match(/^@@?\s*VERDICT\s*[:\-]\s*(SHIP|CONFIRM)\b/i);
+    if (mv) {
+      verdict = mv[1].toUpperCase();
+      seenMarker = true;
+      continue;
+    }
+    const mr = ln.match(/^@@?\s*REASON\s*[:\-]\s*(.*)$/i);
+    if (mr) {
+      reason = mr[1].trim();
+      seenMarker = true;
+      continue;
+    }
+    if (seenMarker || !ln) continue; // address lines are only before the markers
+    formatted.push(ln.replace(/^[-*•]\s*/, "")); // drop an accidental bullet
+  }
+  if (!formatted.length) return null;
+  return { formatted, verdict, reason, locality: "", landmark: "", limitation: "" };
 }
 
 /**
@@ -240,7 +292,7 @@ export async function formatAddress({ orderId, name, phone, address, force, debu
         formatted,
         text: formatted.join("\n"),
         verdict: parsed.verdict === "CONFIRM" ? "CONFIRM" : "SHIP",
-        locality: clean(parsed.locality),
+        locality: clean(parsed.locality) || clean(pinInfo.city) || clean(a.city),
         landmark: clean(parsed.landmark),
         limitation: clean(parsed.limitation),
         reason: clean(parsed.reason),
