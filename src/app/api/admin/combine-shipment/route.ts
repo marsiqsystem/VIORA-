@@ -92,6 +92,11 @@ export async function POST(req: NextRequest) {
   // bothCod: the "prepaid" order is actually a SECOND COD order (same customer,
   // two COD orders). Collect the SUM on delivery; ship every item at real price.
   const bothCod = body?.bothCod === true;
+  // Optional COD-to-collect override (e.g. a combined 10% discount): sets the
+  // cash collected AND scales the item prices proportionally so the manifest
+  // sub-total matches what's collected. Null = use the computed sum.
+  const codCollectOverride =
+    body?.codCollect != null && Number(body.codCollect) > 0 ? Number(body.codCollect) : null;
   // Optional ship-to address override (applied to the key/COD order).
   const addressOverride =
     body?.address && typeof body.address === "object" ? body.address : null;
@@ -108,7 +113,7 @@ export async function POST(req: NextRequest) {
 
   // COD collect. Default: just the COD order's amount (the prepaid item is already
   // paid). bothCod: the SUM of both orders (both are cash-on-delivery).
-  const codAmount = bothCod
+  let codAmount = bothCod
     ? (Number(cod.amount) || 0) + (Number(prepaid.amount) || 0)
     : Number(cod.amount) || 0;
 
@@ -142,6 +147,15 @@ export async function POST(req: NextRequest) {
 
   const items = [...prepaidItems, ...codItems];
   const totalUnits = items.reduce((s, it) => s + (Number(it.quantity) || 1), 0) || 1;
+
+  // Apply a COD-collect override (e.g. combined 10% discount): scale every item
+  // price so the manifest sub-total equals the amount actually collected, then
+  // set codAmount. Keeps cod_collectible == sub_total == Σ(item prices).
+  if (codCollectOverride != null && codAmount > 0) {
+    const scale = codCollectOverride / codAmount;
+    for (const it of items) it.price = Math.round((Number(it.price) || 0) * scale * 100) / 100;
+    codAmount = Math.round(codCollectOverride * 100) / 100;
+  }
 
   // Optional suffix for the Velocity external_id (e.g. "-C"), so a combined parcel
   // gets a DISTINCT id that doesn't collide with an already-created VJ-#<num> (and
