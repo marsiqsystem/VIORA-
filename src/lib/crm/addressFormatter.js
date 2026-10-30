@@ -117,7 +117,7 @@ const SYSTEM_PROMPT =
   "You are an expert Indian courier shipping-address specialist. You get a customer's raw address plus VERIFIED India Post facts for its PIN (you have NO web search — use only the given facts and the input; never claim to have searched online). Turn it into a clean, properly ARRANGED, courier-ready address that minimises failed delivery/RTO. " +
   "Enhance it the way a careful human would when cleaning an address for a courier: fix and arrange everything, and ADD the real administrative structure (village/block/district/state) you can derive from the VERIFIED India Post facts — so a sparse one-line address becomes a clear, well-structured multi-line one. " +
   "ALWAYS REARRANGE into this multi-line delivery sequence, each component on ITS OWN line (drop lines that don't apply — never pad): " +
-  "recipient name; house/flat/building no. + building name; floor/building-block/street; locality/colony; 'Near|Opposite|Behind <landmark>'; village/town; 'Block <block>, District <district>' (add this line using the VERIFIED block + district from the facts when available — these are REAL India Post administrative units, NOT inventions; if the customer wrote their own nearby town/tehsil keep that too); 'State – PIN' on its own line; 'India'; 'Mobile: <number>'. The PIN appears ONCE only (on the State–PIN line), NEVER repeat it. " +
+  "recipient name; house/flat/building no. + building name; floor/building-block/street; locality/colony; 'Near|Opposite|Behind <landmark>'; village/town; 'Block <block>, District <district>' (add this line using the VERIFIED block + district from the facts when available — these are REAL India Post administrative units, NOT inventions; if the customer wrote their own nearby town/tehsil keep that too); the state and PIN together on their own line written as '<State Name> – <6-digit PIN>' (e.g. 'Bihar – 853202'; use the REAL state name, NEVER the literal word 'State', and an en-dash before the PIN); 'India'; 'Mobile: <10-digit number>' (strip any leading +91 or 91 country code). The PIN appears ONCE only (on the State line), NEVER repeat it. " +
   "RULES: " +
   "(1) FIX spelling, capitalization, punctuation and obvious typos; expand clear abbreviations ('Bas stand'->'Bus Stand', 'ke pass/pas/pass'->'Near', 'oppo'->'Opposite', 'St'->'Street', 'rd'->'Road', 'nr'->'Near'). Do NOT change unfamiliar local names you can't confidently correct. " +
   "(2) LANDMARK PLACEMENT: keep the customer's own relation word EXACTLY — never turn 'Opposite'/'Behind' into 'Near'. If they wrote a bare landmark that is clearly the delivery reference (e.g. 'Bus Stand', 'XYZ Hospital') you MAY prefix 'Near' to arrange it. " +
@@ -200,13 +200,12 @@ function parseModelJson(text) {
 
 /**
  * Format one order's address. Cached per order+fingerprint.
- * @param {{orderId?:string, name?:string, phone?:string, address:object, force?:boolean, debug?:boolean}} input
+ * @param {{orderId?:string, name?:string, phone?:string, address:object, force?:boolean}} input
  * @returns {Promise<{formatted:string[], text:string, verdict:"SHIP"|"CONFIRM"|"UNKNOWN",
  *   locality?:string, landmark?:string, limitation?:string, reason?:string,
  *   source:"cache"|"ai"|"deterministic", pin:string, cost:number}>}
  */
-export async function formatAddress({ orderId, name, phone, address, force, debug } = {}) {
-  let _dbg = null;
+export async function formatAddress({ orderId, name, phone, address, force } = {}) {
   const a = address || {};
   const pin = clean(a.postalCode).replace(/\D/g, "");
   const fp = fingerprint(a, name, phone);
@@ -266,22 +265,8 @@ export async function formatAddress({ orderId, name, phone, address, force, debu
     // flash-lite first, then the default model.
     const gen = vertexConfigured() ? generateVertex : generateReply;
     let ai = await gen(prompt, { ...opts, model: MODEL });
-    let modelUsed = MODEL;
-    if (!ai.ok) {
-      ai = await gen(prompt, opts); // default model fallback
-      modelUsed = "(default)";
-    }
+    if (!ai.ok) ai = await gen(prompt, opts); // default model fallback
     const parsed = ai.ok ? parseModelJson(ai.text) : null;
-    if (debug) {
-      _dbg = {
-        vertexConfigured: vertexConfigured(),
-        modelUsed,
-        aiOk: ai.ok,
-        aiError: ai.error ? String(JSON.stringify(ai.error)).slice(0, 400) : "",
-        rawText: String(ai.text || "").slice(0, 1200),
-        parsedOk: !!parsed,
-      };
-    }
     if (!parsed) {
       console.warn("[addressFormatter] AI unusable:", JSON.stringify(ai.error || ai.text || "").slice(0, 200));
     }
@@ -320,10 +305,9 @@ export async function formatAddress({ orderId, name, phone, address, force, debu
 
   // 5) Cache (best-effort), minus the per-call fields.
   if (cacheKey) {
-    const { source, cost, _debug, ...toCache } = result;
+    const { source, cost, ...toCache } = result;
     await kv(["SET", cacheKey, JSON.stringify(toCache), "EX", String(CACHE_TTL_S)]);
   }
-  if (debug && _dbg) result._debug = _dbg;
   return result;
 }
 
