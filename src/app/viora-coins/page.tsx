@@ -68,52 +68,21 @@ export default function VioraCoinsPage() {
         {ways.map((w, i) => (
           <div
             key={i}
-            style={{
-              display: "flex",
-              gap: 14,
-              alignItems: "flex-start",
-              background: "#FFFDF9",
-              border: "1px solid #E7DFD2",
-              borderRadius: 14,
-              padding: "16px 18px",
-            }}
+            className="flex flex-col gap-3 rounded-[14px] border border-[#E7DFD2] bg-[#FFFDF9] p-4 sm:flex-row sm:items-center sm:gap-4"
           >
-            <div style={{ fontSize: 28, lineHeight: 1 }}>{w.icon}</div>
-            <div style={{ flex: 1 }}>
-              <div
-                style={{
-                  display: "inline-block",
-                  background: "#1E1B16",
-                  color: "#F6D58A",
-                  fontWeight: 700,
-                  fontSize: 13,
-                  padding: "3px 10px",
-                  borderRadius: 999,
-                  marginBottom: 7,
-                }}
-              >
-                + {w.coins} coins
+            <div className="flex flex-1 items-start gap-3">
+              <div className="text-[28px] leading-none">{w.icon}</div>
+              <div className="flex-1">
+                <span className="mb-1.5 inline-block rounded-full bg-[#1E1B16] px-2.5 py-0.5 text-[13px] font-bold text-[#F6D58A]">
+                  + {w.coins} coins
+                </span>
+                <p className="mb-0.5 text-[14.5px] font-medium text-[#2A251E]">{w.en}</p>
+                <p className="text-[12.5px] text-[#9A8E7D]">{w.hi}</p>
               </div>
-              <p style={{ margin: "0 0 3px", fontSize: 14.5, color: "#2A251E", fontWeight: 500 }}>{w.en}</p>
-              <p style={{ margin: 0, fontSize: 12.5, color: "#9A8E7D" }}>{w.hi}</p>
             </div>
             <Link
               href={w.cta.href}
-              style={{
-                flexShrink: 0,
-                alignSelf: "center",
-                display: "inline-block",
-                padding: "9px 16px",
-                background: "linear-gradient(180deg,#E8D5A6,#C9A66B)",
-                color: "#1A1410",
-                border: "1px solid #B8945A",
-                borderRadius: 999,
-                fontSize: 13,
-                fontWeight: 700,
-                textDecoration: "none",
-                whiteSpace: "nowrap",
-                boxShadow: "0 2px 8px rgba(201,166,107,0.35)",
-              }}
+              className="shrink-0 self-stretch whitespace-nowrap rounded-full border border-[#B8945A] bg-gradient-to-b from-[#E8D5A6] to-[#C9A66B] px-4 py-2.5 text-center text-[13px] font-bold text-[#1A1410] shadow-[0_2px_8px_rgba(201,166,107,0.35)] sm:self-center"
             >
               {w.cta.label} →
             </Link>

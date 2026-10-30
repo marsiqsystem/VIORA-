@@ -3,7 +3,7 @@
 import { wixClientServer } from "@/lib/wixClientServer";
 import { wixAdminClientServer } from "@/lib/wixAdminClientServer";
 import { REVIEW_REWARD, VIORA_COINS } from "@/lib/checkoutPricing";
-import { earn as earnCoins } from "@/lib/crm/vioraCoins";
+import { earn as earnCoins, coinsEnabled } from "@/lib/crm/vioraCoins";
 import type { PublicReview, CreateReviewResult } from "@/lib/reviewsTypes";
 
 const NAMESPACE = "stores";
@@ -162,7 +162,6 @@ export async function createProductReview(input: {
     // "review:<contactId>"), so re-reviewing never grants twice. No-op unless
     // COINS_ENABLED=1.
     const earnsReward = !!input.mediaUrl && (await hasOrderedBefore(member));
-    const reward = earnsReward ? { ...REVIEW_REWARD } : undefined;
     let coinsEarned = 0;
     if (earnsReward) {
       try {
@@ -177,6 +176,9 @@ export async function createProductReview(input: {
         console.error("[reviews] coin grant failed (non-blocking):", e);
       }
     }
+    // Coins REPLACE the old PHOTO75 voucher — never hand out both (that was a
+    // double reward). Only fall back to the legacy voucher when coins are OFF.
+    const reward = earnsReward && !coinsEnabled() ? { ...REVIEW_REWARD } : undefined;
 
     return {
       ok: true,

@@ -5,6 +5,7 @@ import Image from "next/image";
 import dynamic from "next/dynamic";
 import { useWixClient } from "@/hooks/useWixClient";
 import { createProductReview, getReviewUploadUrl } from "@/lib/reviewsActions";
+import { takeCoinPopup } from "@/lib/coinsActions";
 import {
   savePendingReview,
   removePendingReviewForProduct,
@@ -42,6 +43,7 @@ const ReviewModal = ({
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [reward, setReward] = useState<ReviewReward | null>(null);
+  const [coinsEarned, setCoinsEarned] = useState(0);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -62,6 +64,7 @@ const ReviewModal = ({
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(null);
     setReward(null);
+    setCoinsEarned(0);
     setCopied(false);
   };
 
@@ -166,6 +169,11 @@ const ReviewModal = ({
       if (result.reward) {
         // Keep the modal open so the customer can copy their code.
         setReward(result.reward);
+      } else if ((result as { coinsEarned?: number }).coinsEarned) {
+        // Coins program: celebrate the coins right here. Drain the sitewide
+        // "unseen coins" queue so the global popup doesn't double up later.
+        setCoinsEarned((result as { coinsEarned?: number }).coinsEarned || 0);
+        takeCoinPopup().catch(() => {});
       } else {
         setTimeout(() => {
           close();
@@ -247,6 +255,28 @@ const ReviewModal = ({
               <p className="text-sm text-gray-500 mt-1">
                 It may take a moment to appear after moderation.
               </p>
+
+              {coinsEarned > 0 && (
+                <div
+                  className="mx-auto mt-6 max-w-sm rounded-2xl border border-[#E6CF9E] bg-gradient-to-br from-[#FBF4E4] to-[#F3E3BE] p-5"
+                  style={{ boxShadow: "0 10px 30px rgba(201,166,107,0.35)" }}
+                >
+                  <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-b from-[#E8D5A6] to-[#C9A66B] text-2xl shadow">
+                    🪙
+                  </div>
+                  <p className="text-lg font-extrabold text-[#1A1410]">You earned {coinsEarned} Viora Coins! 🎉</p>
+                  <p className="mt-1 text-sm font-medium text-[#8A5A00]">
+                    That&apos;s ₹{coinsEarned} off your next order — use them at checkout.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={close}
+                    className="mt-4 w-full rounded-full border border-[#B8945A] bg-gradient-to-b from-[#D9BE86] to-[#C9A66B] px-4 py-2.5 text-sm font-bold text-[#1A1410]"
+                  >
+                    Awesome!
+                  </button>
+                </div>
+              )}
 
               {reward && (
                 <div className="mx-auto mt-6 max-w-sm border-2 border-dashed border-accent/50 bg-accent/5 p-4">
@@ -348,8 +378,11 @@ const ReviewModal = ({
                   Add a Photo (optional)
                 </label>
                 <p className="mb-2 text-xs text-accent">
-                  📸 Ordered from Viora before? Add a photo and get ₹{REVIEW_REWARD.amount} off your next
-                  order — whatever your rating.
+                  📸 Ordered from Viora before? Add a photo and{" "}
+                  {process.env.NEXT_PUBLIC_COINS_ENABLED === "1"
+                    ? `earn ${REVIEW_REWARD.amount} Viora Coins (₹${REVIEW_REWARD.amount} off your next order)`
+                    : `get ₹${REVIEW_REWARD.amount} off your next order`}{" "}
+                  — whatever your rating.
                 </p>
                 <input
                   type="file"
