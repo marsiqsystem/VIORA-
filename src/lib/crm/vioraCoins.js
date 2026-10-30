@@ -158,6 +158,20 @@ export async function refund({ contactId, orderId } = {}) {
   }
 }
 
+/** Coins spent on an order (0 if none / disabled) — for the receipt line. */
+export async function getSpent(orderId) {
+  const oid = clean(orderId);
+  if (!coinsEnabled() || !isConfigured() || !oid) return 0;
+  try {
+    const raw = await command(["GET", SPEND(oid)]);
+    if (!raw) return 0;
+    const rec = typeof raw === "object" ? raw : JSON.parse(raw);
+    return Math.max(0, toInt(rec.amt));
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * Claw back an EARN that should not have been kept — e.g. a prepaid order that
  * granted +30 coins and was then cancelled/refunded. Reverses ONCE per reasonKey

@@ -29,6 +29,7 @@ type OrderSummary = {
   phoneLast4: string;
   hasEmail: boolean;
   codCollect: number;
+  coinsSpent?: number;
 };
 
 const inr = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
@@ -378,6 +379,12 @@ const SuccessContent = () => {
                 <span>₹{COD_CHARGE}</span>
               </div>
             )}
+            {summary.coinsSpent ? (
+              <div className="flex items-center justify-between border-t border-silver-light py-2 text-sm font-semibold text-[#A9844C]">
+                <span>🪙 Viora Coins</span>
+                <span>− {inr(summary.coinsSpent)}</span>
+              </div>
+            ) : null}
             <div className="mt-2 flex items-center justify-between border-t border-silver-light pt-3">
               <span className="text-sm text-gray-600">{isCod ? "To pay on delivery" : "Paid online"}</span>
               <span className="font-playfair text-xl font-bold text-primary">

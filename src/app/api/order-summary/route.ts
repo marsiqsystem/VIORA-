@@ -8,6 +8,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { wixAdminClientServer } from "@/lib/wixAdminClientServer";
 import { customFieldValue, extractOrderInfo } from "@/lib/crm/wixOrder";
 import { ORDER_ACCESS_COOKIE, orderAccessCookieOptions, withOrderAccess } from "@/lib/orderAccess";
+import { getSpent as getCoinsSpent } from "@/lib/crm/vioraCoins";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,6 +37,9 @@ export async function GET(req: NextRequest) {
 
   const info: any = extractOrderInfo({ order });
   const total = Number(info.amount) || Number(order.priceSummary?.total?.amount) || 0;
+  // Viora Coins spent on this order (keyed by the Wix order GUID), so the
+  // receipt can show the discount line instead of an unexplained total jump.
+  const coinsSpent = await getCoinsSpent(orderId).catch(() => 0);
   // Paid wrap is a "Gift Packaging" cart line; free wrap is only a custom field.
   const isWrapLine = (name: unknown) => /gift (packaging|wrap)/i.test(String(name || ""));
   const giftWrap = !!customFieldValue(order, "gift wrap");
@@ -65,6 +69,7 @@ export async function GET(req: NextRequest) {
       hasEmail: !!(order.buyerInfo?.email || order.billingInfo?.contactDetails?.email),
       // info.amount is the sealed/verified figure (see extractBillableAmount).
       codCollect: info.paymentMode === "COD" ? total : 0,
+      coinsSpent,
     },
     { headers: noStore }
   );

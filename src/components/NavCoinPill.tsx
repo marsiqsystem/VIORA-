@@ -3,16 +3,24 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { getCoinBalance } from "@/lib/coinsActions";
+import { useWixClient } from "@/hooks/useWixClient";
 
 // Compact navbar pill showing the signed-in customer's live Viora Coins balance
-// (Amazon/Flipkart style). Hidden for guests, when the program is off, or when
-// the balance is 0 — so the navbar stays clean until there's something to show.
-// Tapping it opens the /viora-coins earn-and-spend page. Refreshes on mount and
-// whenever the tab regains focus (e.g. after placing an order that spends coins).
+// (Amazon/Flipkart style). Shown to any LOGGED-IN member — even at 0, so they
+// always know their coins live here; hidden only for guests or when the program
+// is off. Tapping it opens the /viora-coins earn-and-spend page. Refreshes on
+// mount and when the tab regains focus (e.g. after an order spends coins).
 export default function NavCoinPill() {
+  const wixClient = useWixClient();
   const [balance, setBalance] = useState<number | null>(null);
+  const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
 
   useEffect(() => {
+    try {
+      setLoggedIn(wixClient.auth.loggedIn());
+    } catch {
+      setLoggedIn(false);
+    }
     let cancelled = false;
     const load = async () => {
       try {
@@ -23,22 +31,28 @@ export default function NavCoinPill() {
       }
     };
     load();
-    const onFocus = () => load();
+    const onFocus = () => {
+      try {
+        setLoggedIn(wixClient.auth.loggedIn());
+      } catch {}
+      load();
+    };
     window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
       window.removeEventListener("focus", onFocus);
     };
-  }, []);
+  }, [wixClient]);
 
-  // Nothing to show for guests / zero balance.
-  if (!balance || balance <= 0) return null;
+  // Only for signed-in members (guests have no wallet). Shown even at 0 coins.
+  if (!loggedIn) return null;
+  const shown = balance ?? 0;
 
   return (
     <Link
       href="/viora-coins"
-      aria-label={`You have ${balance} Viora Coins — worth ₹${balance}`}
-      title={`Your Viora Coins · ₹${balance} off your next order`}
+      aria-label={`You have ${shown} Viora Coins — worth ₹${shown}`}
+      title={`Your Viora Coins · ₹${shown} off your next order`}
       className="group inline-flex items-center gap-1.5 h-8 md:h-9 pl-1 pr-2.5 md:pr-3 rounded-full border border-[#B8945A] bg-gradient-to-b from-[#E8D5A6] to-[#C9A66B] shadow-[0_2px_8px_rgba(201,166,107,0.45)] transition-all duration-200 hover:brightness-[1.04]"
     >
       <span
@@ -48,7 +62,7 @@ export default function NavCoinPill() {
         🪙
       </span>
       <span className="text-[13px] font-bold leading-none text-[#1A1410] tabular-nums">
-        {balance}
+        {shown}
       </span>
       <span className="hidden text-[13px] font-semibold leading-none text-[#5A4327] lg:inline">
         coins
