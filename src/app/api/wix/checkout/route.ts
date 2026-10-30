@@ -6,7 +6,13 @@ import { readCookieRaw } from "@/lib/metaFbc";
 import { slugFromUrl } from "@/lib/metaCatalogId";
 import { COD_CHARGE, PREPAID_DISCOUNT, REVIEW_REWARD, VIORA_COINS, computeCoinsOrder, bestTierFor } from "@/lib/checkoutPricing";
 import { consumeReviewReward } from "@/lib/crm/reviewReward";
-import { earn as earnCoins, spend as spendCoins, getBalance as getCoinsBalance, coinsEnabled } from "@/lib/crm/vioraCoins";
+import {
+  earn as earnCoins,
+  coinsEnabled,
+  reserve as reserveCoins,
+  releaseReserve as releaseCoinsReserve,
+  commitReserveToOrder as commitCoinsReserve,
+} from "@/lib/crm/vioraCoins";
 import { wixClientServer } from "@/lib/wixClientServer";
 import { makePaymentSeal } from "@/lib/crm/paymentSeal";
 import { fetchRazorpayPayment } from "@/lib/razorpayVerify";
@@ -189,6 +195,9 @@ export async function POST(req: Request) {
   // Set once a Razorpay payment is claimed for this request, and cleared once
   // the Wix order exists — so a failure in between frees the payment for a retry.
   let pendingPaymentClaim = "";
+  // Set once Viora Coins are atomically reserved for this checkout, cleared once
+  // they're bound to the created order — so a failure in between gives them back.
+  let coinsReserveKey = "";
 
   try {
     const body = await req.json();
@@ -305,10 +314,21 @@ export async function POST(req: Request) {
           : null;
         const contactId = member?.member?.contactId || member?.member?._id || "";
         if (contactId) {
-          const balance = await getCoinsBalance(contactId);
-          const allowed = Math.min(coinsAskedRaw, balance);
-          if (allowed > 0) coinsSpend = { contactId, allowed };
-          else console.warn(`[viora-coins] spend skipped — asked ${coinsAskedRaw}, balance ${balance}.`);
+          // ATOMICALLY reserve now (before the discount is computed) so two
+          // simultaneous orders can't both spend the same coins. The reserved
+          // amount is what the order's discount is built from, and it's bound to
+          // the order after creation (or released if the order fails).
+          const { reserved } = await reserveCoins({
+            contactId,
+            amount: coinsAskedRaw,
+            reserveKey: checkoutId,
+          });
+          if (reserved > 0) {
+            coinsSpend = { contactId, allowed: reserved };
+            coinsReserveKey = checkoutId;
+          } else {
+            console.warn(`[viora-coins] spend skipped — asked ${coinsAskedRaw}, nothing available to reserve.`);
+          }
         } else {
           console.warn("[viora-coins] spend requested but no logged-in member resolved.");
         }
@@ -382,6 +402,10 @@ export async function POST(req: Request) {
     if (calculationErrorMessages.length > 0) {
       if (pendingPaymentClaim) await release(pendingPaymentClaim);
       pendingPaymentClaim = "";
+      if (coinsReserveKey) {
+        await releaseCoinsReserve({ reserveKey: coinsReserveKey });
+        coinsReserveKey = "";
+      }
       return NextResponse.json(
         {
           error: `Wix checkout has calculation errors: ${calculationErrorMessages.join("; ")}`,
@@ -478,6 +502,10 @@ export async function POST(req: Request) {
       (orderResult as any)?._id;
 
     if (!orderId) {
+      if (coinsReserveKey) {
+        await releaseCoinsReserve({ reserveKey: coinsReserveKey });
+        coinsReserveKey = "";
+      }
       return NextResponse.json(
         { error: "Wix created the order but did not return an order ID." },
         { status: 502 }
@@ -730,15 +758,21 @@ export async function POST(req: Request) {
           finalTotal = coinsBreakdown.finalTotal;
         }
       }
-      // Burn the coins (claim-once per orderId; idempotent on retry). The order
-      // exists and the customer already got the benefit — prepaid was charged the
-      // reduced amount, COD collects the reduced cash — so this spend is owed.
+      // Bind the reservation to this order (records the spend under the orderId
+      // for cancel/RTO refund; the coins were already deducted at reserve time, so
+      // this never decrements again). The order exists and the customer already
+      // got the benefit — prepaid charged less, COD collects less — so it's owed.
       try {
-        const res = await spendCoins({ contactId: coinsSpend.contactId, amount: coinsSpend.allowed, orderId });
-        if (!res.spent) console.warn(`[viora-coins] spend recorded 0 for order ${orderId} (already claimed or KV blip).`);
+        const res = await commitCoinsReserve({ reserveKey: coinsReserveKey, orderId });
+        if (!res.spent) console.warn(`[viora-coins] reserve->order recorded 0 for ${orderId} (already bound or KV blip).`);
         else console.log(`[viora-coins] spent ${res.spent} coins on order ${orderId}.`);
       } catch (spendErr) {
-        console.error("[viora-coins] spend failed (non-blocking):", spendErr);
+        console.error("[viora-coins] commit reserve failed (non-blocking):", spendErr);
+      } finally {
+        // The order exists → the coins are OWED. Clear the key so a later failure
+        // (outer catch) can never give already-spent coins back. Worst case if the
+        // bind failed: cancel-refund won't find the record — acceptable.
+        coinsReserveKey = "";
       }
     }
 
@@ -992,8 +1026,16 @@ export async function POST(req: Request) {
       order: committedOrder || approvedOrderResult?.order || (orderResult as any)?.order,
     });
   } catch (err: any) {
-    // No order was created — free the payment so the shopper can retry with it.
+    // No order was created — free the payment so the shopper can retry with it,
+    // and give back any coins we atomically reserved for this attempt.
     if (pendingPaymentClaim) await release(pendingPaymentClaim);
+    if (coinsReserveKey) {
+      try {
+        await releaseCoinsReserve({ reserveKey: coinsReserveKey });
+      } catch {
+        /* best-effort */
+      }
+    }
 
     // Log the FULL Wix error so the exact rule/code is visible in Vercel logs.
     console.error("Wix checkout finalization failed:", err);

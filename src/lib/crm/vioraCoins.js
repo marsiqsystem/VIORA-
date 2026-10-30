@@ -158,6 +158,109 @@ export async function refund({ contactId, orderId } = {}) {
   }
 }
 
+const RESERVE = (key) => `${PREFIX}reserve:${key}`; // atomic checkout hold
+
+/**
+ * ATOMICALLY reserve up to `amount` coins, capped to the live balance, for a
+ * checkout. The decrement happens HERE (before the order's discount is computed),
+ * so two orders placed at the same instant can never both spend the same coins —
+ * the second reserves only what's left. Claim-once per reserveKey (a checkout
+ * retry returns the same reservation, never double-decrements). Returns the
+ * amount actually held. Release it with releaseReserve (order failed) or bind it
+ * to the order with commitReserveToOrder (order placed). Never throws.
+ * @returns {Promise<{reserved:number}>}
+ */
+export async function reserve({ contactId, amount, reserveKey } = {}) {
+  const id = clean(contactId);
+  const amt = Math.round(Number(amount) || 0);
+  const rkRaw = clean(reserveKey);
+  if (!coinsEnabled() || !isConfigured() || !id || !rkRaw || amt <= 0) return { reserved: 0 };
+  const rk = RESERVE(rkRaw);
+  try {
+    // Gate the decrement so concurrent retries of the SAME checkout can't stack.
+    const claimed = await command(["SET", rk, "pending", "NX"]);
+    if (claimed !== "OK") {
+      // Already reserved for this checkout — return what was held (idempotent).
+      try {
+        const raw = await command(["GET", rk]);
+        if (!raw || raw === "pending") return { reserved: 0 };
+        const rec = typeof raw === "object" ? raw : JSON.parse(raw);
+        return { reserved: toInt(rec.amt) };
+      } catch {
+        return { reserved: 0 };
+      }
+    }
+    // Atomic decrement, then cap to what was actually available by restoring any
+    // overshoot. (Redis serialises commands, so the sum across concurrent reserves
+    // can never exceed the starting balance.)
+    const newBal = toInt(await command(["DECRBY", BAL(id), String(amt)]));
+    let reserved = amt;
+    if (newBal < 0) {
+      await command(["INCRBY", BAL(id), String(-newBal)]); // balance back to 0
+      reserved = amt + newBal; // amount − overshoot
+      if (reserved < 0) reserved = 0;
+    }
+    await command(["SET", rk, JSON.stringify({ id, amt: reserved })]);
+    return { reserved };
+  } catch (e) {
+    console.warn("[vioraCoins] reserve failed:", e?.message || e);
+    try {
+      await command(["DEL", rk]); // let a retry proceed
+    } catch {
+      /* ignore */
+    }
+    return { reserved: 0 };
+  }
+}
+
+/** Give back a reservation whose order never completed. Never throws. */
+export async function releaseReserve({ reserveKey } = {}) {
+  if (!coinsEnabled() || !isConfigured() || !clean(reserveKey)) return;
+  const rk = RESERVE(clean(reserveKey));
+  try {
+    const raw = await command(["GET", rk]);
+    if (!raw) return;
+    if (raw !== "pending") {
+      const rec = typeof raw === "object" ? raw : JSON.parse(raw);
+      const amt = toInt(rec.amt);
+      const id = clean(rec.id);
+      if (amt > 0 && id) await command(["INCRBY", BAL(id), String(amt)]);
+    }
+    await command(["DEL", rk]);
+  } catch (e) {
+    console.warn("[vioraCoins] releaseReserve failed:", e?.message || e);
+  }
+}
+
+/**
+ * Bind a completed reservation to the order id: records the spend under the
+ * orderId (claim-once) so the existing cancel/RTO refund (keyed by orderId)
+ * works, WITHOUT decrementing again — the coins were already held at reserve
+ * time. Never throws. @returns {Promise<{spent:number}>}
+ */
+export async function commitReserveToOrder({ reserveKey, orderId } = {}) {
+  const oid = clean(orderId);
+  if (!coinsEnabled() || !isConfigured() || !clean(reserveKey) || !oid) return { spent: 0 };
+  const rk = RESERVE(clean(reserveKey));
+  try {
+    const raw = await command(["GET", rk]);
+    if (!raw || raw === "pending") return { spent: 0 };
+    const rec = typeof raw === "object" ? raw : JSON.parse(raw);
+    const amt = toInt(rec.amt);
+    const id = clean(rec.id);
+    if (amt <= 0 || !id) {
+      await command(["DEL", rk]);
+      return { spent: 0 };
+    }
+    await command(["SET", SPEND(oid), JSON.stringify({ id, amt }), "NX"]);
+    await command(["DEL", rk]);
+    return { spent: amt };
+  } catch (e) {
+    console.warn("[vioraCoins] commitReserveToOrder failed:", e?.message || e);
+    return { spent: 0 };
+  }
+}
+
 /** Has this earn reason already been credited? (for "claimed ✓" UI). */
 export async function hasEarned(reasonKey) {
   if (!coinsEnabled() || !isConfigured() || !reasonKey) return false;

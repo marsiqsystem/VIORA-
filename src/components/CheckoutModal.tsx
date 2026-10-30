@@ -23,6 +23,7 @@ import {
   COD_CHARGE,
   PREPAID_DISCOUNT,
   REVIEW_REWARD,
+  VIORA_COINS,
   fallbackCouponDiscount,
   computeCoinsOrder,
   bestTierFor,
@@ -1374,6 +1375,14 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                       </span>
                     </span>
                     <span className="mt-0.5 block text-xs text-gray-500">{opt.sub}</span>
+                    {COINS_UI && (
+                      <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-[#FBF4E4] px-2 py-0.5 text-[10px] font-bold text-[#A9844C]">
+                        🪙{" "}
+                        {optIsPrepaid
+                          ? `Get ${VIORA_COINS.prepaid} coins on this order`
+                          : `Get ${VIORA_COINS.codDelivered} coins when delivered`}
+                      </span>
+                    )}
                   </span>
                   <span className="text-base font-bold tabular-nums text-primary">₹{rupees(opt.amount)}</span>
                 </button>

@@ -100,7 +100,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export type CoinsOrderBreakdown = {
   productSubtotal: number;
-  base: number; // productSubtotal + COD_CHARGE (Style A)
+  base: number; // productSubtotal + COD_CHARGE for COD; productSubtotal for prepaid (free delivery)
   usedCoins: number; // coins actually spent (<= balance, capped so total > 0)
   afterCoins: number;
   ladderPercent: number;
@@ -121,7 +121,12 @@ export function computeCoinsOrder(input: {
   ladderPercent: number;
 }): CoinsOrderBreakdown {
   const productSubtotal = Math.max(0, round2(input.productSubtotal));
-  const base = round2(productSubtotal + COD_CHARGE);
+  // The ₹49 COD charge applies to COD ONLY. Prepaid keeps FREE delivery — baking
+  // the ₹49 into prepaid made small-coin prepaid orders cost MORE than without
+  // coins (e.g. ₹574 → ₹613), which is absurd. Now applying coins always lowers
+  // the total for both methods.
+  const codCharge = input.paymentMethod === "COD" ? COD_CHARGE : 0;
+  const base = round2(productSubtotal + codCharge);
   const usedCoins = Math.max(0, Math.min(Math.round(input.coins) || 0, Math.floor(base) - 1));
   const afterCoins = round2(base - usedCoins);
   const ladderPercent = input.ladderPercent > 0 ? input.ladderPercent : 0;
