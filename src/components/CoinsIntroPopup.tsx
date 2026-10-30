@@ -38,17 +38,37 @@ export default function CoinsIntroPopup() {
         // popups never overlap). Returning visitors already have it set.
         if (!localStorage.getItem(CONSENT_KEY)) return;
         if (sessionStorage.getItem(SEEN_KEY)) return;
+        // Stand down if a "you earned coins" congrats is showing this visit.
+        if (sessionStorage.getItem("viora_congrats_shown")) return;
       } catch {
         return;
       }
       shown = true;
       // A short beat so it lands gently after the banner clears.
-      setTimeout(() => setOpen(true), 700);
+      setTimeout(() => {
+        try {
+          if (sessionStorage.getItem("viora_congrats_shown")) return; // congrats took over meanwhile
+        } catch {}
+        setOpen(true);
+      }, 900);
+    };
+
+    // If a coins congrats pops, yield to it (close / never open this visit).
+    const standDown = () => {
+      shown = true;
+      try {
+        sessionStorage.setItem(SEEN_KEY, "1");
+      } catch {}
+      setOpen(false);
     };
 
     tryShow();
     window.addEventListener("viora:consent-set", tryShow);
-    return () => window.removeEventListener("viora:consent-set", tryShow);
+    window.addEventListener("viora:congrats-open", standDown);
+    return () => {
+      window.removeEventListener("viora:consent-set", tryShow);
+      window.removeEventListener("viora:congrats-open", standDown);
+    };
   }, []);
 
   const dismiss = () => {

@@ -22,6 +22,14 @@ export default function CoinsCongratsPopup() {
         if (!cancelled && res?.total > 0) {
           setCoins(res.total);
           setOpen(true);
+          // Tell the "Introducing Viora Coins" intro popup to stand down — we're
+          // already showing a coins moment, no need to stack two popups.
+          try {
+            sessionStorage.setItem("viora_congrats_shown", "1");
+            window.dispatchEvent(new CustomEvent("viora:congrats-open"));
+          } catch {
+            /* ignore */
+          }
         }
       } catch {
         /* never block the page */

@@ -2,13 +2,20 @@
 
 import { useEffect, useState } from "react";
 import { getCoinBalance } from "@/lib/coinsActions";
+import { useWixClient } from "@/hooks/useWixClient";
 
-// Shows the signed-in customer's live Viora Coins balance. For guests / when the
-// program is off it reads 0; we then invite them to sign in. Client-only.
+// Shows the signed-in customer's live Viora Coins balance. A guest is invited to
+// sign in; a signed-in member with 0 coins is invited to shop/earn (never told to
+// "sign in" when they already are). Client-only.
 export default function CoinBalanceBadge() {
+  const wixClient = useWixClient();
   const [balance, setBalance] = useState<number | null>(null);
+  const [loggedIn, setLoggedIn] = useState(false);
 
   useEffect(() => {
+    try {
+      setLoggedIn(wixClient.auth.loggedIn());
+    } catch {}
     let cancelled = false;
     (async () => {
       try {
@@ -21,7 +28,7 @@ export default function CoinBalanceBadge() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [wixClient]);
 
   if (balance === null) return null;
 
@@ -44,6 +51,8 @@ export default function CoinBalanceBadge() {
         <span>
           Your balance: <b style={{ color: "#F6D58A" }}>{balance} coins</b> (₹{balance})
         </span>
+      ) : loggedIn ? (
+        <span style={{ fontWeight: 500 }}>Shop &amp; review to start earning coins</span>
       ) : (
         <span style={{ fontWeight: 500 }}>Sign in &amp; shop to start earning coins</span>
       )}
