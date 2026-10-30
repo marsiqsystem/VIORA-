@@ -148,7 +148,7 @@ function parseModelJson(text) {
 
 /**
  * Format one order's address. Cached per order+fingerprint.
- * @param {{orderId?:string, name?:string, phone?:string, address:object, force?:boolean}} input
+ * @param {{orderId?:string, name?:string, phone?:string, address:object, force?:boolean, debug?:boolean}} input
  * @returns {Promise<{formatted:string[], text:string, verdict:"SHIP"|"CONFIRM"|"UNKNOWN",
  *   locality?:string, landmark?:string, limitation?:string, reason?:string,
  *   source:"cache"|"ai"|"deterministic", pin:string, cost:number}>}
