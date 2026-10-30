@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import NavDrawer from "./nav/NavDrawer";
 import SearchBar from "./SearchBar";
+import NavCoinPill from "./NavCoinPill";
 
 const NavIcons = dynamic(() => import("./NavIcons"), {
   ssr: false,
@@ -112,7 +113,8 @@ const Navbar = () => {
           />
         </Link>
 
-        <div className="flex items-center justify-end gap-1">
+        <div className="flex items-center justify-end gap-1 md:gap-2">
+          <NavCoinPill />
           {searchToggle}
           <NavIcons />
         </div>
