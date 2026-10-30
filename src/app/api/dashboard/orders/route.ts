@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "KV store not configured" }, { status: 503 });
 
   const sp = req.nextUrl.searchParams;
-  const limit = Math.min(1000, Math.max(1, parseInt(sp.get("limit") || "200", 10)));
+  const limit = Math.min(100000, Math.max(1, parseInt(sp.get("limit") || "200", 10)));
   const offset = Math.max(0, parseInt(sp.get("offset") || "0", 10));
 
   const { orders, total } = await ordersStore.listOrders({ limit, offset });

@@ -115,7 +115,7 @@ export default function DashboardPage() {
     if (!k) return;
     setLoading(true); setError("");
     try {
-      const res = await fetch(`/api/dashboard/orders?key=${encodeURIComponent(k)}&limit=2000`, { cache: "no-store" });
+      const res = await fetch(`/api/dashboard/orders?key=${encodeURIComponent(k)}&limit=100000`, { cache: "no-store" });
       const data = await res.json();
       if (!res.ok || !data.ok) {
         if (res.status === 401) { setError("Wrong passcode."); setAuthed(false); try { localStorage.removeItem(KEY_STORE); } catch {} }
