@@ -84,6 +84,11 @@ export const VIORA_COINS = {
   codDelivered: 20, // each COD order, when it is delivered
 };
 
+// Most coins that can be spent on ONE order. Caps our per-order liability and
+// keeps any order from getting too cheap, even for a big balance; the unused
+// coins stay in the wallet for the customer's next order (so they're never lost).
+export const COIN_MAX_PER_ORDER = 50;
+
 // ---- Coins spend math (the ONE place both client & server compute it) -------
 // Applies ONLY when the customer chooses to spend coins (coins > 0). A normal
 // order never calls this and its pricing is completely unchanged.
@@ -127,7 +132,11 @@ export function computeCoinsOrder(input: {
   // the total for both methods.
   const codCharge = input.paymentMethod === "COD" ? COD_CHARGE : 0;
   const base = round2(productSubtotal + codCharge);
-  const usedCoins = Math.max(0, Math.min(Math.round(input.coins) || 0, Math.floor(base) - 1));
+  // Cap coins per order (COIN_MAX_PER_ORDER) and never below ₹1 total.
+  const usedCoins = Math.max(
+    0,
+    Math.min(Math.round(input.coins) || 0, Math.floor(base) - 1, COIN_MAX_PER_ORDER)
+  );
   const afterCoins = round2(base - usedCoins);
   const ladderPercent = input.ladderPercent > 0 ? input.ladderPercent : 0;
   const ladderDiscount = ladderPercent > 0 ? round2((afterCoins * ladderPercent) / 100) : 0;

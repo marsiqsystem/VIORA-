@@ -4,7 +4,7 @@ import { sendOrderConfirmationEmail } from "@/lib/orderEmail";
 import { sendServerCapi } from "@/lib/metaCapiServer";
 import { readCookieRaw } from "@/lib/metaFbc";
 import { slugFromUrl } from "@/lib/metaCatalogId";
-import { COD_CHARGE, PREPAID_DISCOUNT, REVIEW_REWARD, VIORA_COINS, computeCoinsOrder, bestTierFor } from "@/lib/checkoutPricing";
+import { COD_CHARGE, PREPAID_DISCOUNT, REVIEW_REWARD, VIORA_COINS, COIN_MAX_PER_ORDER, computeCoinsOrder, bestTierFor } from "@/lib/checkoutPricing";
 import { consumeReviewReward } from "@/lib/crm/reviewReward";
 import {
   earn as earnCoins,
@@ -228,8 +228,13 @@ export async function POST(req: Request) {
     // could set "collect ₹1" on a ₹599 order.)
     const codCharge = paymentMethod === "COD" ? COD_CHARGE : 0;
     // Viora Coins spend request (client's ask; re-verified server-side below).
+    // Capped to COIN_MAX_PER_ORDER so a tampered client can't over-spend; the
+    // shared computeCoinsOrder caps it again when building the total.
     const coinsRequested = details?.useCoins === true;
-    const coinsAskedRaw = Math.max(0, Math.round(Number(details?.coins) || 0));
+    const coinsAskedRaw = Math.min(
+      COIN_MAX_PER_ORDER,
+      Math.max(0, Math.round(Number(details?.coins) || 0))
+    );
 
     if (!email || !fullName || !phone || !addressLine1 || !city || !state || !postalCode) {
       return NextResponse.json(

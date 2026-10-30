@@ -24,6 +24,7 @@ import {
   PREPAID_DISCOUNT,
   REVIEW_REWARD,
   VIORA_COINS,
+  COIN_MAX_PER_ORDER,
   fallbackCouponDiscount,
   computeCoinsOrder,
   bestTierFor,
@@ -1552,13 +1553,19 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                           <p className="mt-0.5 text-[12px] font-medium text-[#A9844C]">
                             You&apos;re saving ₹
                             {coinsBreakdown ? rupees(coinsBreakdown.usedCoins) : coinBalance} on this order
+                            {coinsBreakdown && coinBalance > coinsBreakdown.usedCoins
+                              ? ` · ${coinBalance - coinsBreakdown.usedCoins} coins saved for next time`
+                              : ""}
                           </p>
                         </>
                       ) : (
                         <>
                           <p className="font-bold text-[#1A1410]">Viora Coins</p>
                           <p className="mt-0.5 text-[12px] text-[#7A6A4A]">
-                            {coinBalance} available · ₹{coinBalance} off
+                            {coinBalance} available ·{" "}
+                            {coinBalance > COIN_MAX_PER_ORDER
+                              ? `use ₹${COIN_MAX_PER_ORDER} off now (max ${COIN_MAX_PER_ORDER}/order)`
+                              : `₹${coinBalance} off`}
                           </p>
                           <a
                             href="/viora-coins"
