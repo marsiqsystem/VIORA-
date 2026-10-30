@@ -438,13 +438,19 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   // What the customer saves by paying online instead of COD (the gap between the
   // two method totals) — correct whether or not coins are applied.
   const prepaidSaving = Math.max(0, Math.round(codTotalWithCoins - prepaidTotalWithCoins));
-  // Only real savings: MRP discount, coupon, automatic discounts, prepaid discount
-  // and — when applied — the Viora Coins spent (so the headline reflects them).
+  // Only real savings: MRP discount, coupon, automatic discounts, the prepaid
+  // discount ACTUALLY applied (0 on a big-coin order where it's dropped), and the
+  // Viora Coins spent — so the headline always matches the real total.
+  const prepaidSavingPart = coinsBreakdown
+    ? coinsBreakdown.prepaidDiscount
+    : isPrepaid
+      ? PREPAID_DISCOUNT
+      : 0;
   const totalSavings =
     mrpSavings +
     wixCouponDiscount +
     automaticDiscount +
-    (isPrepaid ? PREPAID_DISCOUNT : 0) +
+    prepaidSavingPart +
     (coinsBreakdown ? coinsBreakdown.usedCoins : 0);
   // What the same bag costs at full price — the anchor next to the real total.
   const mrpTotal = lineItems.reduce((sum, li) => {
@@ -1646,10 +1652,13 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
                     <span className="tabular-nums">- ₹{rupees(coinsBreakdown.ladderDiscount)}</span>
                   </div>
                 )}
-                {isPrepaid && (
+                {/* Show the ₹25 ONLY when it was actually applied — it's dropped
+                    when a lot of coins are spent (coins >= PREPAID_COIN_DISCOUNT_DROP_AT),
+                    so the breakdown always sums to the total. */}
+                {coinsBreakdown.prepaidDiscount > 0 && (
                   <div className="flex justify-between font-medium text-green-700">
                     <span>Pay-online discount</span>
-                    <span className="tabular-nums">- ₹{PREPAID_DISCOUNT}</span>
+                    <span className="tabular-nums">- ₹{rupees(coinsBreakdown.prepaidDiscount)}</span>
                   </div>
                 )}
               </>
