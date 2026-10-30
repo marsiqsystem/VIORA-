@@ -38,9 +38,12 @@ export default function NavCoinPill() {
       load();
     };
     window.addEventListener("focus", onFocus);
+    // Refresh right after a fresh earn (e.g. the login bonus granted this load).
+    window.addEventListener("viora:coins-check", onFocus);
     return () => {
       cancelled = true;
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("viora:coins-check", onFocus);
     };
   }, [wixClient]);
 

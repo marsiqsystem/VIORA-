@@ -27,6 +27,7 @@ const PendingReviewFlusher = dynamic(
 const CommerceOverlays = dynamic(() => import("@/components/CommerceOverlays"));
 const CoinsCongratsPopup = dynamic(() => import("@/components/CoinsCongratsPopup"));
 const CoinsIntroPopup = dynamic(() => import("@/components/CoinsIntroPopup"));
+const CoinsAutoGrant = dynamic(() => import("@/components/CoinsAutoGrant"));
 
 const SITE_URL = (
   process.env.NEXT_PUBLIC_SITE_URL || "https://www.viorajewel.in"
@@ -288,6 +289,7 @@ export default function RootLayout({
               <CommerceOverlays />
               <CoinsCongratsPopup />
               <CoinsIntroPopup />
+              <CoinsAutoGrant />
             </FloatingReelProvider>
           </ToastProvider>
           <GoogleOneTap />

@@ -2,12 +2,16 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { VIORA_COINS } from "@/lib/checkoutPricing";
 import CoinBalanceBadge from "@/components/CoinBalanceBadge";
+import { getEarnStatus } from "@/lib/coinsActions";
 
 export const metadata: Metadata = {
   title: "Viora Coins — Earn & Save | Viora",
   description:
     "Earn Viora Coins on reviews, logins and orders. 1 coin = ₹1, never expires, and auto-usable at checkout for money off your next order.",
 };
+
+// Read the signed-in member's claim status per request.
+export const dynamic = "force-dynamic";
 
 const ways = [
   {
@@ -16,6 +20,8 @@ const ways = [
     en: "Leave a photo review of your Viora jewellery on our website (once per account).",
     hi: "(Hamari website pe apni Viora jewellery ka photo review daalo — ek account pe ek baar.)",
     cta: { label: "Write a review", href: "/account/orders" },
+    claim: "review" as const,
+    claimedLabel: "Review done",
   },
   {
     icon: "🔐",
@@ -23,6 +29,8 @@ const ways = [
     en: "Sign in to your Viora account for the first time.",
     hi: "(Viora account me pehli baar log in karo.)",
     cta: { label: "Sign in", href: "/login" },
+    claim: "login" as const,
+    claimedLabel: "Signed in",
   },
   {
     icon: "💳",
@@ -30,6 +38,8 @@ const ways = [
     en: "Place a prepaid (pay-online) order — credited when the order is successful.",
     hi: "(Prepaid / online-payment order karo — order success hote hi coins mil jaate hain.)",
     cta: { label: "Shop & pay online", href: "/products" },
+    claim: null,
+    claimedLabel: "",
   },
   {
     icon: "📦",
@@ -37,10 +47,20 @@ const ways = [
     en: "Get a COD order delivered to you — credited when it's delivered.",
     hi: "(COD order deliver hone pe — jaise hi parcel deliver hoga, coins mil jaate hain.)",
     cta: { label: "Shop now", href: "/products" },
+    claim: null,
+    claimedLabel: "",
   },
 ];
 
-export default function VioraCoinsPage() {
+export default async function VioraCoinsPage() {
+  const status = await getEarnStatus().catch(() => ({
+    loggedIn: false,
+    balance: 0,
+    loginClaimed: false,
+    reviewClaimed: false,
+  }));
+  const isClaimed = (claim: "review" | "login" | null) =>
+    claim === "review" ? status.reviewClaimed : claim === "login" ? status.loginClaimed : false;
   return (
     <main style={{ maxWidth: 680, margin: "0 auto", padding: "40px 16px 72px" }}>
       <header style={{ textAlign: "center", marginBottom: 8 }}>
@@ -80,12 +100,18 @@ export default function VioraCoinsPage() {
                 <p className="text-[12.5px] text-[#9A8E7D]">{w.hi}</p>
               </div>
             </div>
-            <Link
-              href={w.cta.href}
-              className="shrink-0 self-stretch whitespace-nowrap rounded-full border border-[#B8945A] bg-gradient-to-b from-[#E8D5A6] to-[#C9A66B] px-4 py-2.5 text-center text-[13px] font-bold text-[#1A1410] shadow-[0_2px_8px_rgba(201,166,107,0.35)] sm:self-center"
-            >
-              {w.cta.label} →
-            </Link>
+            {isClaimed(w.claim) ? (
+              <span className="flex shrink-0 items-center justify-center gap-1.5 self-stretch whitespace-nowrap rounded-full border border-green-600 bg-green-50 px-4 py-2.5 text-center text-[13px] font-bold text-green-700 sm:self-center">
+                ✓ {w.claimedLabel}
+              </span>
+            ) : (
+              <Link
+                href={w.cta.href}
+                className="shrink-0 self-stretch whitespace-nowrap rounded-full border border-[#B8945A] bg-gradient-to-b from-[#E8D5A6] to-[#C9A66B] px-4 py-2.5 text-center text-[13px] font-bold text-[#1A1410] shadow-[0_2px_8px_rgba(201,166,107,0.35)] sm:self-center"
+              >
+                {w.cta.label} →
+              </Link>
+            )}
           </div>
         ))}
       </div>

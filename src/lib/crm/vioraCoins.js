@@ -158,6 +158,16 @@ export async function refund({ contactId, orderId } = {}) {
   }
 }
 
+/** Has this earn reason already been credited? (for "claimed ✓" UI). */
+export async function hasEarned(reasonKey) {
+  if (!coinsEnabled() || !isConfigured() || !reasonKey) return false;
+  try {
+    return !!(await command(["GET", EARN(reasonKey)]));
+  } catch {
+    return false;
+  }
+}
+
 /** Coins spent on an order (0 if none / disabled) — for the receipt line. */
 export async function getSpent(orderId) {
   const oid = clean(orderId);

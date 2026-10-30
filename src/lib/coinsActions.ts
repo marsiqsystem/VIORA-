@@ -8,7 +8,7 @@
 
 import { wixClientServer } from "@/lib/wixClientServer";
 import { VIORA_COINS } from "@/lib/checkoutPricing";
-import { earn, getBalance, takeUnseen, coinsEnabled } from "@/lib/crm/vioraCoins";
+import { earn, getBalance, takeUnseen, coinsEnabled, hasEarned } from "@/lib/crm/vioraCoins";
 
 /** The current logged-in member's contactId, or null for a guest. */
 async function currentContactId(): Promise<string | null> {
@@ -45,6 +45,29 @@ export async function grantLoginBonus(): Promise<{ coinsEarned: number; balance:
     note: "Welcome bonus",
   });
   return { coinsEarned: res.earned ? res.amount : 0, balance: res.balance };
+}
+
+/**
+ * Per-member earn status for the /viora-coins page, so each "way to earn" can
+ * show a claimed state. loginClaimed / reviewClaimed are the once-per-account
+ * steps; prepaid/COD are per-order so they have no single claimed flag.
+ */
+export async function getEarnStatus(): Promise<{
+  loggedIn: boolean;
+  balance: number;
+  loginClaimed: boolean;
+  reviewClaimed: boolean;
+}> {
+  const off = { loggedIn: false, balance: 0, loginClaimed: false, reviewClaimed: false };
+  if (!coinsEnabled()) return off;
+  const id = await currentContactId();
+  if (!id) return off;
+  const [balance, loginClaimed, reviewClaimed] = await Promise.all([
+    getBalance(id),
+    hasEarned(`signup:${id}`),
+    hasEarned(`review:${id}`),
+  ]);
+  return { loggedIn: true, balance, loginClaimed, reviewClaimed };
 }
 
 /**

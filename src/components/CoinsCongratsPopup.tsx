@@ -16,7 +16,7 @@ export default function CoinsCongratsPopup() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const check = async () => {
       try {
         const res = await takeCoinPopup();
         if (!cancelled && res?.total > 0) {
@@ -26,9 +26,15 @@ export default function CoinsCongratsPopup() {
       } catch {
         /* never block the page */
       }
-    })();
+    };
+    check();
+    // Re-check when a fresh earn happens in-session (e.g. the login bonus granted
+    // on this page load, or coins earned via another flow).
+    const onCheck = () => check();
+    window.addEventListener("viora:coins-check", onCheck);
     return () => {
       cancelled = true;
+      window.removeEventListener("viora:coins-check", onCheck);
     };
   }, []);
 
