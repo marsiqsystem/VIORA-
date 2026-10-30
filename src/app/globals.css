@@ -365,6 +365,36 @@ h6 {
   }
 }
 
+/* Viora Coins checkout celebration */
+@keyframes coinPop {
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+
+  70% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Gold shimmer sweep across the "coins applied" card */
+@keyframes coinShimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  60%,
+  100% {
+    transform: translateX(200%);
+  }
+}
+
 @keyframes gradient-shift {
   0%,
   100% {

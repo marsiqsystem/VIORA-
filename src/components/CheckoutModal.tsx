@@ -219,10 +219,11 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
   // live (NEXT_PUBLIC_REVIEW_VOUCHER_ENABLED).
   useReviewVoucher(open, phone, email);
   // Viora Coins: this signed-in customer's wallet balance (0 for guests / when
-  // the program is off). Default the toggle ON so earned coins apply like a
-  // reward; the customer can switch it off.
+  // the program is off). The toggle starts OFF — the customer chooses to apply
+  // their coins, which fires a little celebration and then reveals the discount.
   const [coinBalance, setCoinBalance] = useState(0);
-  const [useCoins, setUseCoins] = useState(true);
+  const [useCoins, setUseCoins] = useState(false);
+  const [coinsJustApplied, setCoinsJustApplied] = useState(false);
   useEffect(() => {
     if (!open || !COINS_UI) return;
     let cancelled = false;
@@ -235,6 +236,12 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
       cancelled = true;
     };
   }, [open]);
+  // Auto-dismiss the "coins applied" celebration after a beat.
+  useEffect(() => {
+    if (!coinsJustApplied) return;
+    const t = setTimeout(() => setCoinsJustApplied(false), 2600);
+    return () => clearTimeout(t);
+  }, [coinsJustApplied]);
 
   useEffect(() => {
     setMounted(true);
@@ -1481,37 +1488,116 @@ const CheckoutModal = ({ open, onClose }: CheckoutModalProps) => {
             />
           </section>
 
-          {/* Viora Coins toggle — only when the program is live */}
-          {COINS_UI && (
-            <section className="mb-2 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
-              <div className="flex items-center gap-2">
-                <span className="text-lg">🪙</span>
-                {coinBalance > 0 ? (
-                  <span className="font-medium text-amber-900">
-                    Use Viora Coins ({coinBalance}) — ₹{coinBalance} off
-                  </span>
-                ) : (
-                  <span className="text-amber-900/80">
-                    Use coins (0) ·{" "}
-                    <a href="/viora-coins" className="underline">
-                      How to earn coins
-                    </a>
-                  </span>
-                )}
-              </div>
-              {coinBalance > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setUseCoins((v) => !v)}
-                  aria-pressed={useCoins}
-                  className={`relative h-6 w-11 rounded-full transition-colors ${useCoins ? "bg-amber-600" : "bg-gray-300"}`}
-                >
+          {/* Viora Coins — premium apply card (only when the program is live) */}
+          {COINS_UI &&
+            (coinBalance > 0 ? (
+              <section
+                className={`relative mb-2 overflow-hidden rounded-xl border p-3.5 text-sm transition-all duration-300 ${
+                  coinsActive
+                    ? "border-[#C9A66B] bg-gradient-to-br from-[#FBF4E4] to-[#F3E3BE]"
+                    : "border-[#E6CF9E] bg-[#FBF7EC]"
+                }`}
+                style={
+                  coinsActive
+                    ? { boxShadow: "0 0 0 1px rgba(201,166,107,.35), 0 8px 22px rgba(201,166,107,.3)" }
+                    : undefined
+                }
+              >
+                {/* subtle shimmer sweep when applied */}
+                {coinsActive && (
                   <span
-                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${useCoins ? "left-[22px]" : "left-0.5"}`}
+                    aria-hidden
+                    className="pointer-events-none absolute inset-0 -translate-x-full animate-[coinShimmer_2.2s_ease-in-out_infinite] bg-gradient-to-r from-transparent via-white/45 to-transparent"
                   />
-                </button>
-              )}
-            </section>
+                )}
+                <div className="relative flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-[#E8D5A6] to-[#C9A66B] text-lg shadow-sm">
+                      🪙
+                    </span>
+                    <div className="leading-tight">
+                      {coinsActive ? (
+                        <>
+                          <p className="font-bold text-[#8A5A00]">
+                            🎉 ₹{coinsBreakdown ? rupees(coinsBreakdown.usedCoins) : coinBalance} Viora Coins
+                            applied!
+                          </p>
+                          <p className="mt-0.5 text-[12px] font-medium text-[#A9844C]">
+                            You&apos;re saving ₹
+                            {coinsBreakdown ? rupees(coinsBreakdown.usedCoins) : coinBalance} on this order
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="font-bold text-[#1A1410]">Viora Coins</p>
+                          <p className="mt-0.5 text-[12px] text-[#7A6A4A]">
+                            {coinBalance} available · ₹{coinBalance} off
+                          </p>
+                          <a
+                            href="/viora-coins"
+                            className="text-[12px] font-semibold text-[#A9844C] underline underline-offset-2 hover:text-[#8A5A00]"
+                          >
+                            How to earn more coins →
+                          </a>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (coinsActive) {
+                        setUseCoins(false);
+                        setCoinsJustApplied(false);
+                      } else {
+                        setUseCoins(true);
+                        setCoinsJustApplied(true);
+                      }
+                    }}
+                    aria-pressed={coinsActive}
+                    className={`shrink-0 rounded-full px-5 py-2 text-[13px] font-bold transition-all ${
+                      coinsActive
+                        ? "border border-[#D9BE86] bg-white/80 text-[#A9844C] hover:bg-white"
+                        : "bg-gradient-to-b from-[#D9BE86] to-[#C9A66B] text-[#1A1410] shadow-[0_2px_8px_rgba(201,166,107,0.45)] hover:brightness-[1.04]"
+                    }`}
+                  >
+                    {coinsActive ? "Remove" : "Apply"}
+                  </button>
+                </div>
+              </section>
+            ) : (
+              <section className="mb-2 flex items-center gap-2 rounded-xl border border-[#E6CF9E] bg-[#FBF7EC] p-3 text-sm text-[#7A6A4A]">
+                <span className="text-lg">🪙</span>
+                <span>
+                  No coins yet ·{" "}
+                  <a href="/viora-coins" className="font-semibold text-[#A9844C] underline">
+                    How to earn coins →
+                  </a>
+                </span>
+              </section>
+            ))}
+
+          {/* Celebration when the customer applies their coins */}
+          {coinsJustApplied && coinsActive && (
+            <div className="pointer-events-none fixed inset-0 z-[60] flex items-center justify-center p-6">
+              <div
+                className="pointer-events-auto animate-[coinPop_.45s_ease-out] rounded-2xl bg-white px-8 py-7 text-center ring-1 ring-[#E6CF9E]"
+                style={{ boxShadow: "0 16px 50px rgba(201,166,107,.45)" }}
+              >
+                <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-b from-[#E8D5A6] to-[#C9A66B] text-3xl shadow-md">
+                  🪙
+                </div>
+                <p className="text-lg font-extrabold text-[#1A1410]">Congrats! 🎉</p>
+                <p className="mt-1 text-sm text-gray-700">
+                  You just saved{" "}
+                  <b className="text-[#8A5A00]">
+                    ₹{coinsBreakdown ? rupees(coinsBreakdown.usedCoins) : coinBalance}
+                  </b>{" "}
+                  with Viora Coins
+                </p>
+                <p className="mt-0.5 text-[11px] text-gray-400">applied to this order</p>
+              </div>
+            </div>
           )}
 
           {/* Price breakdown */}
