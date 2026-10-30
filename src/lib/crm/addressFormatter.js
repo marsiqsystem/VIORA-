@@ -153,7 +153,8 @@ function parseModelJson(text) {
  *   locality?:string, landmark?:string, limitation?:string, reason?:string,
  *   source:"cache"|"ai"|"deterministic", pin:string, cost:number}>}
  */
-export async function formatAddress({ orderId, name, phone, address, force } = {}) {
+export async function formatAddress({ orderId, name, phone, address, force, debug } = {}) {
+  let _dbg = null;
   const a = address || {};
   const pin = clean(a.postalCode).replace(/\D/g, "");
   const fp = fingerprint(a, name, phone);
@@ -213,8 +214,22 @@ export async function formatAddress({ orderId, name, phone, address, force } = {
     // flash-lite first, then the default model.
     const gen = vertexConfigured() ? generateVertex : generateReply;
     let ai = await gen(prompt, { ...opts, model: MODEL });
-    if (!ai.ok) ai = await gen(prompt, opts); // default model fallback
+    let modelUsed = MODEL;
+    if (!ai.ok) {
+      ai = await gen(prompt, opts); // default model fallback
+      modelUsed = "(default)";
+    }
     const parsed = ai.ok ? parseModelJson(ai.text) : null;
+    if (debug) {
+      _dbg = {
+        vertexConfigured: vertexConfigured(),
+        modelUsed,
+        aiOk: ai.ok,
+        aiError: ai.error ? String(JSON.stringify(ai.error)).slice(0, 400) : "",
+        rawText: String(ai.text || "").slice(0, 1200),
+        parsedOk: !!parsed,
+      };
+    }
     if (!parsed) {
       console.warn("[addressFormatter] AI unusable:", JSON.stringify(ai.error || ai.text || "").slice(0, 200));
     }
@@ -253,9 +268,10 @@ export async function formatAddress({ orderId, name, phone, address, force } = {
 
   // 5) Cache (best-effort), minus the per-call fields.
   if (cacheKey) {
-    const { source, cost, ...toCache } = result;
+    const { source, cost, _debug, ...toCache } = result;
     await kv(["SET", cacheKey, JSON.stringify(toCache), "EX", String(CACHE_TTL_S)]);
   }
+  if (debug && _dbg) result._debug = _dbg;
   return result;
 }
 

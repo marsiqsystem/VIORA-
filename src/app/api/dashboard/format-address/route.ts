@@ -66,6 +66,7 @@ async function handle(req: NextRequest) {
     phone: order.phone || order.waPhone,
     address,
     force,
+    debug: sp.get("debug") === "1",
   });
 
   return NextResponse.json({
