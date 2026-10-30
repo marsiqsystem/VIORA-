@@ -10,12 +10,15 @@ import { useWixClient } from "@/hooks/useWixClient";
 // always know their coins live here; hidden only for guests or when the program
 // is off. Tapping it opens the /viora-coins earn-and-spend page. Refreshes on
 // mount and when the tab regains focus (e.g. after an order spends coins).
+const COINS_UI = process.env.NEXT_PUBLIC_COINS_ENABLED === "1";
+
 export default function NavCoinPill() {
   const wixClient = useWixClient();
   const [balance, setBalance] = useState<number | null>(null);
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
 
   useEffect(() => {
+    if (!COINS_UI) return;
     try {
       setLoggedIn(wixClient.auth.loggedIn());
     } catch {
