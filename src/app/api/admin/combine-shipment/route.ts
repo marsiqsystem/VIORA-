@@ -149,11 +149,14 @@ export async function POST(req: NextRequest) {
   const totalUnits = items.reduce((s, it) => s + (Number(it.quantity) || 1), 0) || 1;
 
   // Apply a COD-collect override (e.g. combined 10% discount): scale every item
-  // price so the manifest sub-total equals the amount actually collected, then
-  // set codAmount. Keeps cod_collectible == sub_total == Σ(item prices).
-  if (codCollectOverride != null && codAmount > 0) {
-    const scale = codCollectOverride / codAmount;
-    for (const it of items) it.price = Math.round((Number(it.price) || 0) * scale * 100) / 100;
+  // price so the manifest line items sum to exactly what's collected, then set
+  // codAmount. Keeps cod_collectible == sub_total == Σ(item prices) consistent.
+  if (codCollectOverride != null) {
+    const itemSum = items.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0);
+    if (itemSum > 0) {
+      const scale = codCollectOverride / itemSum;
+      for (const it of items) it.price = Math.round((Number(it.price) || 0) * scale * 100) / 100;
+    }
     codAmount = Math.round(codCollectOverride * 100) / 100;
   }
 
