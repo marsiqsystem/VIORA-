@@ -20,6 +20,14 @@ const CANCEL_KEY = (orderId) => `wa_cancelled_sent:${orderId}`;
  */
 export async function dispatchCancellationOnce(order) {
   if (!order || !order.orderId) return { sent: false, reason: "no order id" };
+  // Permanent mute: an order marked silentCancel must NEVER send a cancellation
+  // message — now or ever. Used to clean up stale/abandoned orders (and the
+  // duplicate single orders of a combined parcel) without texting the customer.
+  // No TTL, unlike the KV dedupe key — so it can't lapse and leak a late message.
+  if (order.silentCancel === true) {
+    console.log(`[cancel] silentCancel flag set for ${order.orderId} — message suppressed.`);
+    return { sent: false, reason: "silent-cancel" };
+  }
   if (!order.phone) {
     console.warn(`[cancel] no phone for ${order.orderId} — skip.`);
     return { sent: false, reason: "no phone" };

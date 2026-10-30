@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { extractOrderInfo } from "@/lib/crm/wixOrder";
 import { dispatchCancellationOnce } from "@/lib/crm/cancel";
 import { config as whatsappCfg } from "@/lib/crm/whatsapp";
+import * as ordersStore from "@/lib/crm/orders-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,7 +70,7 @@ export async function POST(req: NextRequest) {
     } else if (!info.phone) {
       trace.steps.push("skipped: no usable phone");
     } else {
-      const order = {
+      const order: any = {
         orderId: info.orderId,
         phone: info.phone,
         name: info.customerName,
@@ -78,6 +79,13 @@ export async function POST(req: NextRequest) {
         amount: info.amount,
         paymentMode: info.paymentMode,
       };
+      // Permanent "never text on cancel" flag (set for silently-cancelled orders).
+      try {
+        const kv: any = await ordersStore.getOrder(info.orderId);
+        if (kv?.silentCancel) order.silentCancel = true;
+      } catch {
+        /* ignore */
+      }
       const res = await dispatchCancellationOnce(order);
       trace.send = res;
       trace.steps.push(res.sent ? "cancellation sent (live)" : `not sent: ${res.reason}`);
