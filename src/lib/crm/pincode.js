@@ -215,20 +215,19 @@ async function enrichShippingAddress(address) {
   return res;
 }
 
-// --- Reverse lookup: suggest a pincode from a place/area name -----------------
-// When an order's pincode is missing/invalid/mismatched, we try to recover the
-// CORRECT one from the area or city text the customer DID give, via India Post's
-// post-office-name search (/postoffice/<name>). Returns a single best suggestion
-// only when it is UNAMBIGUOUS enough to be safe: all matching post offices resolve
-// to ONE pincode (optionally constrained to the order's state). Never guesses
-// among conflicting pincodes — in that case it returns "" and the order is left
-// for the Call Queue. Cached per name. Never throws.
-async function suggestPincode(name, stateHint = "") {
+// --- Reverse lookup: post offices by NAME -------------------------------------
+// India Post's post-office-name search (/postoffice/<name>), scoped to a state
+// when one is given. Returns a compact, pin-deduped list [{name,pin,district,
+// state}] (max 6) — the raw material both for suggesting a single correct
+// pincode AND for CROSS-CHECKING a given pincode against the customer's own
+// locality words (so we can catch a VALID pincode that belongs to the wrong
+// place). Cached per name. Never throws.
+async function lookupPostOfficesByName(name, stateHint = "") {
   const q = String(name || "").trim();
-  if (q.length < 3) return { pincode: "", city: "", state: "", candidates: 0 };
+  if (q.length < 3) return [];
   const cacheKey = `po:v1:${q.toLowerCase()}`;
-  const cached = await kv(["GET", cacheKey]);
   let pos = null;
+  const cached = await kv(["GET", cacheKey]);
   if (cached) {
     try { pos = JSON.parse(typeof cached === "string" ? cached : JSON.stringify(cached)); } catch { pos = null; }
   }
@@ -241,16 +240,36 @@ async function suggestPincode(name, stateHint = "") {
       await kv(["SET", cacheKey, JSON.stringify(pos), "EX", String(PIN_CACHE_TTL_S)]);
     } catch { pos = []; }
   }
-  if (!Array.isArray(pos) || !pos.length) return { pincode: "", city: "", state: "", candidates: 0 };
+  if (!Array.isArray(pos) || !pos.length) return [];
   // Constrain to the order's state when we have one — avoids a same-named post
-  // office in another state hijacking the suggestion.
+  // office in another state hijacking the result. Fall back to all if none match.
   const st = _norm(stateHint);
   const scoped = st ? pos.filter((p) => _norm(p?.State) === st) : pos;
   const use = scoped.length ? scoped : pos;
-  const pins = [...new Set(use.map((p) => String(p?.Pincode || "").replace(/\D/g, "")).filter((x) => x.length === 6))];
-  if (pins.length !== 1) return { pincode: "", city: "", state: "", candidates: pins.length }; // ambiguous → unsafe
-  const po0 = use[0];
-  return { pincode: pins[0], city: po0?.District || "", state: po0?.State || "", candidates: 1 };
+  const seen = new Set();
+  const out = [];
+  for (const p of use) {
+    const pin = String(p?.Pincode || "").replace(/\D/g, "");
+    if (pin.length !== 6 || seen.has(pin)) continue;
+    seen.add(pin);
+    out.push({ name: String(p?.Name || "").trim(), pin, district: String(p?.District || "").trim(), state: String(p?.State || "").trim() });
+    if (out.length >= 6) break;
+  }
+  return out;
 }
 
-export { extractPincode, lookupPincode, lookupPincodeAreas, buildStructuredAddress, enrichShippingAddress, suggestPincode };
+// --- Reverse lookup: suggest a SINGLE pincode from a place/area name -----------
+// When an order's pincode is missing/invalid/mismatched, recover the CORRECT one
+// from the area or city text the customer DID give. Returns a single best
+// suggestion only when UNAMBIGUOUS (all matching post offices resolve to ONE
+// pincode, optionally constrained to the order's state). Never guesses among
+// conflicting pincodes — returns "" and the order is left for the Call Queue.
+async function suggestPincode(name, stateHint = "") {
+  const offices = await lookupPostOfficesByName(name, stateHint);
+  const pins = [...new Set(offices.map((o) => o.pin))];
+  if (pins.length !== 1) return { pincode: "", city: "", state: "", candidates: pins.length }; // 0 or ambiguous → unsafe
+  const o0 = offices[0];
+  return { pincode: pins[0], city: o0?.district || "", state: o0?.state || "", candidates: 1 };
+}
+
+export { extractPincode, lookupPincode, lookupPincodeAreas, buildStructuredAddress, enrichShippingAddress, suggestPincode, lookupPostOfficesByName };
