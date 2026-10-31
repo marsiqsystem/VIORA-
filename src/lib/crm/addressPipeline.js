@@ -103,6 +103,17 @@ export async function reviewOrderAddress(order, { force = false } = {}) {
       if (sug.pincode && sug.pincode !== pin) { suggestedPincode = sug.pincode; break; }
     }
   }
+  // Locality-level cross-check from the AI formatter — catches a VALID pin that
+  // is simply WRONG for the stated locality (e.g. Noida 201301 on a Ghaziabad
+  // address), which the state-level check above misses. `likelyWrong` means real
+  // evidence (invalid pin / state or district clash / a verified alternative),
+  // not just "area not spelled out", so this doesn't over-flag clean addresses.
+  if (fmt.suggestedPincode && fmt.suggestedPincode !== pin && !suggestedPincode) {
+    suggestedPincode = fmt.suggestedPincode;
+  }
+  if (!pinIssue && (fmt.pinCheck?.likelyWrong || (fmt.suggestedPincode && fmt.suggestedPincode !== pin))) {
+    pinIssue = "pin-mismatch";
+  }
 
   // 3) Problems that force a human call (the AI can't safely invent its way out).
   const problems = [];

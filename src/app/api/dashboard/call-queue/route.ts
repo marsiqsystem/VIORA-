@@ -168,10 +168,23 @@ export async function GET(req: NextRequest) {
           }
         }
 
-        // The AI cleaner's own verdict (stamped on the order by the auto-format
-        // pipeline). A CONFIRM here means the model judged the address not safely
-        // deliverable even after cleaning.
+        // The AI cleaner (stamped on the order by the auto-format pipeline) also
+        // recovers a locality-level WRONG pincode that the state-level check above
+        // misses — e.g. a VALID Noida pin 201301 on a Loni/Ghaziabad address
+        // (correct 201102). Surface it as a pin-mismatch with the recovered
+        // suggestion (it's India-Post-verified, so safe to show).
         const ai: any = o.aiAddr || null;
+        const aiPinProblem =
+          ai && ((ai.suggestedPincode && ai.suggestedPincode !== pin) || ["pin-mismatch", "invalid-pin"].includes(ai.pinIssue));
+        if (aiPinProblem && !reasons.some((x) => ["no-pin", "invalid-pin", "pin-mismatch"].includes(x.type))) {
+          reasons.push({
+            type: "pin-mismatch", pin, suggestedPincode: ai.suggestedPincode || "",
+            text: ai.reason || `Pincode ${pin} may be wrong for this locality${ai.suggestedPincode ? ` — likely ${ai.suggestedPincode}` : " — confirm the correct PIN"}.`,
+          });
+          if (!suggestedPincode && ai.suggestedPincode) suggestedPincode = ai.suggestedPincode;
+        }
+        // A CONFIRM verdict means the model judged the address not safely
+        // deliverable even after cleaning.
         if (ai && (ai.verdict === "CONFIRM" || ai.route === "call") && !reasons.some((x) => ["address-incomplete", "no-pin", "invalid-pin", "pin-mismatch"].includes(x.type))) {
           reasons.push({ type: "ai-confirm", text: ai.reason || ai.limitation || "AI flagged this address to confirm before shipping." });
         }
