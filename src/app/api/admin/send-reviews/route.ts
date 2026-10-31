@@ -95,16 +95,28 @@ export async function POST(req: NextRequest) {
     const results: any[] = [];
     for (const phone of probePhones) {
       let sent = false;
-      let ts: number | null = null;
       let text: string | null = null;
+      // latestReviewTs = the most recent outbound review-template send (any review
+      // wording), normalized to ms. Recency is the reliable "sent in THIS campaign"
+      // signal: the mirrored text can fall back to the hand-written copy when the
+      // approved-body fetch is rate-limited mid-burst, so a text-only coinsOnly match
+      // under-counts. A review-outbound dated today = the live coins template went out.
+      let latestReviewTs = 0;
+      const toMs = (t: any) => {
+        const n = Number(t);
+        if (!n) return 0;
+        return n < 1e12 ? n * 1000 : n; // epoch seconds -> ms
+      };
       try {
         const thread = await getMessages(phone);
-        const hit = (thread.messages || []).find(
-          (m: any) => m.dir === "out" && m.status !== "failed" && RE.test(String(m.text || ""))
-        );
-        if (hit) { sent = true; ts = hit.ts || null; text = String(hit.text || "").slice(0, 50); }
+        for (const m of thread.messages || []) {
+          if (m.dir !== "out" || m.status === "failed") continue;
+          const t = String(m.text || "");
+          if (RE.test(t)) { sent = true; if (!text) text = t.slice(0, 50); }
+          if (ANY_RE.test(t)) { const ms = toMs(m.ts); if (ms > latestReviewTs) latestReviewTs = ms; }
+        }
       } catch { /* treat as not-sent */ }
-      results.push({ phone, sent, ts, text });
+      results.push({ phone, sent, latestReviewTs, text });
     }
     return NextResponse.json({ ok: true, mode: "probePhones", coinsOnly, total: results.length, sent: results.filter((r) => r.sent).length, results });
   }
