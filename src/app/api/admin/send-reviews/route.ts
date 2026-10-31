@@ -29,6 +29,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as wix from "@/lib/crm/wix";
 import * as notify from "@/lib/crm/notify";
 import * as reviewQueue from "@/lib/crm/reviewQueue";
+import { beginReviewCapture } from "@/lib/crm/reviewCapture";
 import { authOk, authConfigured, keyFromRequest, getMessages } from "@/lib/crm/inbox-store";
 
 export const runtime = "nodejs";
@@ -47,6 +48,9 @@ async function sendOne(order: any, force: boolean) {
   const res = await notify.sendReviewRequest(order);
   if (res?.ok && !res?.dryRun) {
     await reviewQueue.dequeue(id); // done — remove from queue so it isn't re-scanned
+    // Open the WhatsApp review-capture window (no-op unless REVIEW_CAPTURE_ENABLED)
+    // so the customer's in-chat rating/photo reply posts to the site + earns coins.
+    try { await beginReviewCapture(order.waPhone || order.phone, id); } catch { /* best-effort */ }
     return { id, sent: true, name: order.name, phone: order.phone };
   }
   if (!force) await reviewQueue.releaseClaim(id); // let a later retry try again
@@ -105,6 +109,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, mode: "test", dryRun: true, wouldSend: order });
     }
     const res: any = await notify.sendReviewRequest(order);
+    if (res?.ok && !res?.dryRun) {
+      // Open the capture window so a reply to THIS test posts + earns coins.
+      try { await beginReviewCapture(testPhone, order.orderId); } catch { /* best-effort */ }
+    }
     return NextResponse.json({
       ok: res?.ok !== false,
       mode: "test",

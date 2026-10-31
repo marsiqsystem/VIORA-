@@ -65,6 +65,11 @@ function normalize(wixOrder) {
     // The Wix GUID — every Wix write (fulfillment, extendedFields flag, delivered
     // stamp) keys on this, not the human order number.
     orderGuid: info.orderGuid || wixOrder._id || wixOrder.id || null,
+    // The buyer's Wix contact id — the SAME identity the coin wallet is keyed on
+    // (earn/refund use buyerInfo.contactId). Carried here so the WhatsApp-native
+    // review capture can grant coins for a reviewed order. null for a rare order
+    // with no buyer contact.
+    contactId: info.contactId || wixOrder.buyerInfo?.contactId || null,
     phone: info.phone,
     name: info.customerName,
     product: info.product,

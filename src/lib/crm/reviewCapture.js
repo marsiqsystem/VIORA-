@@ -19,6 +19,7 @@ import {
   clearReviewDraft,
 } from "./inbox-store";
 import { getOrder, findLatestOrderByPhone } from "./orders-store";
+import * as wix from "./wix";
 import { uploadWhatsAppPhotoToWix, postReviewAsAdmin } from "./reviewAdmin";
 import { earn as earnCoins, coinsEnabled } from "./vioraCoins";
 import { VIORA_COINS } from "@/lib/checkoutPricing";
@@ -197,18 +198,31 @@ async function finalize(phone, draft, { withPhoto, msgName }) {
   // Reward a PHOTO review with Viora Coins (1 coin = ₹1, stack at checkout). Coins
   // are member-tied, so we need the buyer's Wix contactId + COINS_ENABLED; a pure
   // guest (no member account) still gets the review posted — just no coins yet.
+  // Our KV order records don't store contactId, so resolve it from the Wix order
+  // (same identity the earn/refund hooks key on) before granting. reasonKey is the
+  // SAME "review:<contactId>" the website review path uses, so earnCoins is
+  // idempotent across both paths — a customer can never earn the review coins twice.
   let coinsEarned = 0;
-  if (mediaUrl && coinsEnabled() && order?.contactId) {
-    try {
-      const res = await earnCoins({
-        contactId: order.contactId,
-        amount: VIORA_COINS.review,
-        reasonKey: `review:${order.contactId}`,
-        note: "WhatsApp photo review",
-      });
-      if (res?.earned) coinsEarned = res.amount;
-    } catch (e) {
-      console.warn("[reviewCapture] coin grant failed:", e?.message || e);
+  if (mediaUrl && coinsEnabled()) {
+    let contactId = order?.contactId || "";
+    if (!contactId) {
+      try {
+        const wo = (draft.orderId && (await wix.findOrderByNumber(draft.orderId))) || null;
+        contactId = wo?.contactId || "";
+      } catch { /* leave empty — review still posted, just no coins */ }
+    }
+    if (contactId) {
+      try {
+        const res = await earnCoins({
+          contactId,
+          amount: VIORA_COINS.review,
+          reasonKey: `review:${contactId}`,
+          note: "WhatsApp photo review",
+        });
+        if (res?.earned) coinsEarned = res.amount;
+      } catch (e) {
+        console.warn("[reviewCapture] coin grant failed:", e?.message || e);
+      }
     }
   }
 
