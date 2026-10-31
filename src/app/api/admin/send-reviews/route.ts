@@ -77,6 +77,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
+  // ---- PROBE MODE: for each phone, has a review template actually gone out? ----
+  // { probePhones:["918...","917..."] } -> { results:[{phone, sent, ts}] }. Reads
+  // the outbound message log (source of truth: logOutbound only records a SUCCESS),
+  // so a partial/timed-out batch can be reconciled without any Wix lookup. No send.
+  const probePhones: string[] = Array.isArray(body?.probePhones)
+    ? body.probePhones.map((n: any) => String(n).replace(/\D/g, "")).filter(Boolean)
+    : [];
+  if (probePhones.length) {
+    const results: any[] = [];
+    for (const phone of probePhones) {
+      let sent = false;
+      let ts: number | null = null;
+      try {
+        const thread = await getMessages(phone);
+        const hit = (thread.messages || []).find(
+          (m: any) =>
+            m.dir === "out" &&
+            m.status !== "failed" &&
+            /quick review|feedback on this order/i.test(String(m.text || ""))
+        );
+        if (hit) { sent = true; ts = hit.ts || null; }
+      } catch { /* treat as not-sent */ }
+      results.push({ phone, sent, ts });
+    }
+    return NextResponse.json({ ok: true, mode: "probePhones", total: results.length, sent: results.filter((r) => r.sent).length, results });
+  }
+
   // Debug: read back the captured Meta failure reasons for a phone number.
   const readErrors = String(body?.readErrors ?? "").trim();
   if (readErrors) {
