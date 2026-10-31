@@ -85,29 +85,28 @@ export async function POST(req: NextRequest) {
     ? body.probePhones.map((n: any) => String(n).replace(/\D/g, "")).filter(Boolean)
     : [];
   if (probePhones.length) {
+    // coinsOnly:true -> only the NEW coins review template counts as "sent"
+    // (phrases unique to review_request_photo_v1), so customers who only ever got
+    // the OLD util review request are treated as not-yet-sent for THIS campaign.
+    const coinsOnly = body?.coinsOnly === true;
+    const COINS_RE = /review there instead|land in your account|photo review = 75/i;
+    const ANY_RE = /review there instead|land in your account|photo review = 75|feedback on this order|share a quick review/i;
+    const RE = coinsOnly ? COINS_RE : ANY_RE;
     const results: any[] = [];
     for (const phone of probePhones) {
       let sent = false;
       let ts: number | null = null;
+      let text: string | null = null;
       try {
         const thread = await getMessages(phone);
-        // The review template's real (approved) body is the coins copy —
-        // "…Viora Coins land in your account… review there instead…" — not the
-        // hand-written fallback, so match BOTH wordings. These phrases are unique
-        // to the review template among our outbound sends.
         const hit = (thread.messages || []).find(
-          (m: any) =>
-            m.dir === "out" &&
-            m.status !== "failed" &&
-            /review there instead|land in your account|photo review = 75|feedback on this order|share a quick review/i.test(
-              String(m.text || "")
-            )
+          (m: any) => m.dir === "out" && m.status !== "failed" && RE.test(String(m.text || ""))
         );
-        if (hit) { sent = true; ts = hit.ts || null; }
+        if (hit) { sent = true; ts = hit.ts || null; text = String(hit.text || "").slice(0, 50); }
       } catch { /* treat as not-sent */ }
-      results.push({ phone, sent, ts });
+      results.push({ phone, sent, ts, text });
     }
-    return NextResponse.json({ ok: true, mode: "probePhones", total: results.length, sent: results.filter((r) => r.sent).length, results });
+    return NextResponse.json({ ok: true, mode: "probePhones", coinsOnly, total: results.length, sent: results.filter((r) => r.sent).length, results });
   }
 
   // Debug: read back the captured Meta failure reasons for a phone number.
