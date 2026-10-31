@@ -232,6 +232,38 @@ async function pushTracking(orderId, { awb, trackingUrl, carrier = "Velocity" })
   }
 }
 
+/**
+ * Mark a Wix order FULFILLED without tracking info (a plain fulfillment over all
+ * line items). Used for a rider-along order in a COMBINED shipment, which never
+ * gets its own AWB. Never throws. When tracking IS known, use pushTracking instead.
+ */
+async function markFulfilled(orderId) {
+  if (isMock()) {
+    const rec = mockDB.get(String(orderId));
+    if (rec) rec.status = "FULFILLED";
+    console.log(`[wix] MOCK markFulfilled order=${orderId}`);
+    return { ok: true, dryRun: true };
+  }
+  try {
+    const c = client();
+    let lineItems;
+    try {
+      const order = await c.orders.getOrder(orderId);
+      lineItems = (order?.lineItems || [])
+        .filter((li) => li?._id)
+        .map((li) => ({ _id: li._id, quantity: li.quantity ?? 1 }));
+    } catch {
+      /* fall through — attempt without explicit line items */
+    }
+    const fulfillment = lineItems && lineItems.length ? { lineItems } : {};
+    const data = await c.orderFulfillments.createFulfillment(orderId, fulfillment);
+    return { ok: true, dryRun: false, data };
+  } catch (e) {
+    console.warn(`[wix] markFulfilled failed for ${orderId}:`, e?.message || e);
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
 /** Mark the order delivered (stamps the time the review queue reads). Best-effort
  * flag write; the storefront timeline also derives delivered from Velocity's live
  * status, so this never needs to change the Wix fulfillmentStatus. Never throws. */
@@ -313,6 +345,7 @@ export {
   findOrderByAwb,
   queryDeliveredNeedingReview,
   pushTracking,
+  markFulfilled,
   markDelivered,
   getFlag,
   setFlag,
