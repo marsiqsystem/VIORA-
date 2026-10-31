@@ -88,6 +88,33 @@ export async function POST(req: NextRequest) {
   // Default to a DRY RUN unless the caller explicitly says send:true.
   const doSend = body?.send === true;
 
+  // ---- TEST MODE: send the review template to ONE arbitrary number -----------
+  // { testPhone:"918100460566", testName:"Mars", testOrderId:"11057",
+  //   testProduct:"Rosa Blush Set", send:true }  -> fires the live review template
+  // to that number so we can eyeball exactly what customers receive. Dry-run by
+  // default. Does NOT touch the review queue or any claim.
+  const testPhone = String(body?.testPhone ?? "").replace(/\D/g, "");
+  if (testPhone) {
+    const order: any = {
+      orderId: String(body?.testOrderId ?? "TEST"),
+      name: String(body?.testName ?? "there"),
+      product: String(body?.testProduct ?? "Rosa Blush Set"),
+      phone: testPhone,
+    };
+    if (!doSend) {
+      return NextResponse.json({ ok: true, mode: "test", dryRun: true, wouldSend: order });
+    }
+    const res: any = await notify.sendReviewRequest(order);
+    return NextResponse.json({
+      ok: res?.ok !== false,
+      mode: "test",
+      dryRun: false,
+      to: testPhone,
+      wamid: res?.data?.messages?.[0]?.id ?? null,
+      error: res?.error || res?.data?.error || null,
+    });
+  }
+
   // ---- FALLBACK MODE: explicit Wix order numbers -----------------------------
   if (numbers.length > 0) {
     const results: any[] = [];
