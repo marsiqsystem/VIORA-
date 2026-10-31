@@ -53,7 +53,8 @@ export async function POST(req: NextRequest) {
 
   // ---- FULFILL ----
   for (const id of fulfill) {
-    const guid = await guidOf(id);
+    const rec: any = await ordersStore.getOrder(id).catch(() => null);
+    const guid = rec?.orderGuid || "";
     if (!guid) { results.push({ id, action: "fulfill", state: "no-guid" }); continue; }
     try {
       const o: any = await c.orders.getOrder(guid);
@@ -61,10 +62,15 @@ export async function POST(req: NextRequest) {
       const st = norm(o?.status);
       if (st === "CANCELED") { results.push({ id, action: "fulfill", state: "skip-canceled" }); continue; }
       if (fs === "FULFILLED") { results.push({ id, action: "fulfill", state: "already-fulfilled" }); continue; }
-      if (!send) { results.push({ id, action: "fulfill", state: "would-fulfill", fs }); continue; }
+      if (!send) { results.push({ id, action: "fulfill", state: "would-fulfill", fs, awb: rec?.awb || "" }); continue; }
       const lineItems = (o?.lineItems || []).filter((li: any) => li?._id).map((li: any) => ({ _id: li._id, quantity: li.quantity ?? 1 }));
-      await c.orderFulfillments.createFulfillment(guid, lineItems.length ? { lineItems } : {});
-      results.push({ id, action: "fulfill", state: "fulfilled" });
+      // If we already have the carrier AWB, fulfill WITH tracking so the Wix
+      // storefront timeline shows it (and matches what pushTracking would have done).
+      const trackingInfo = rec?.awb
+        ? { trackingInfo: { trackingNumber: String(rec.awb), shippingProvider: rec.courier || "Velocity", trackingLink: rec.trackingUrl || "" } }
+        : {};
+      await c.orderFulfillments.createFulfillment(guid, { ...(lineItems.length ? { lineItems } : {}), ...trackingInfo });
+      results.push({ id, action: "fulfill", state: "fulfilled", awb: rec?.awb || "" });
     } catch (e: any) {
       const msg = e?.message || String(e);
       // Wix throws when there's nothing left to fulfill — treat as already done.
