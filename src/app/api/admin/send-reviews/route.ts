@@ -91,11 +91,17 @@ export async function POST(req: NextRequest) {
       let ts: number | null = null;
       try {
         const thread = await getMessages(phone);
+        // The review template's real (approved) body is the coins copy —
+        // "…Viora Coins land in your account… review there instead…" — not the
+        // hand-written fallback, so match BOTH wordings. These phrases are unique
+        // to the review template among our outbound sends.
         const hit = (thread.messages || []).find(
           (m: any) =>
             m.dir === "out" &&
             m.status !== "failed" &&
-            /quick review|feedback on this order/i.test(String(m.text || ""))
+            /review there instead|land in your account|photo review = 75|feedback on this order|share a quick review/i.test(
+              String(m.text || "")
+            )
         );
         if (hit) { sent = true; ts = hit.ts || null; }
       } catch { /* treat as not-sent */ }
