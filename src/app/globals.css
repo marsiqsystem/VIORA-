@@ -383,6 +383,26 @@ h6 {
   }
 }
 
+/* Brief attention pulse for the navbar coins pill (runs a few times on load) */
+@keyframes coinPulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 2px 8px rgba(201, 166, 107, 0.45);
+  }
+
+  50% {
+    transform: scale(1.07);
+    box-shadow: 0 3px 14px rgba(201, 166, 107, 0.75);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-\[coinPulse_2\.8s_ease-in-out_3\] {
+    animation: none !important;
+  }
+}
+
 /* Gold shimmer sweep across the "coins applied" card */
 @keyframes coinShimmer {
   0% {
