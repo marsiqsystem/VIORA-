@@ -14,20 +14,11 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { authOk, authConfigured, keyFromRequest } from "@/lib/crm/inbox-store";
-import * as ordersStore from "@/lib/crm/orders-store";
-import { processOrder } from "@/lib/crm/addressPipeline";
+import { sweepShipQueue } from "@/lib/crm/addressPipeline";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
-
-// Mirror the Call Queue's "still needs shipping" test so the two agree on scope.
-const MIN_ORDER_NO = 10851;
-const isPendingShip = (o: any) =>
-  !(o.awb && !/^MOCK/i.test(o.awb)) &&
-  !["cancelled", "on_hold", "delivered", "rto", "dispatched", "out_for_delivery", "created"].includes(o.status) &&
-  !!String(o.name || "").trim() &&
-  !!(o.address && (o.address.line1 || o.address.city || o.address.postalCode));
 
 export async function POST(req: NextRequest) {
   if (!authConfigured()) return NextResponse.json({ ok: false, error: "INBOX_SECRET not set" }, { status: 503 });
@@ -46,57 +37,8 @@ export async function POST(req: NextRequest) {
     }
   } catch { /* query params only */ }
 
-  // Candidate set.
-  let candidates: any[];
-  if (onlyId) {
-    const o = await ordersStore.getOrder(onlyId);
-    candidates = o ? [o] : [];
-  } else {
-    const { orders } = await ordersStore.listOrders({ limit: 3000 });
-    candidates = orders
-      .filter((o: any) => isPendingShip(o) && (parseInt(o.orderId, 10) || 0) >= MIN_ORDER_NO)
-      .sort((a: any, b: any) => (parseInt(b.orderId, 10) || 0) - (parseInt(a.orderId, 10) || 0));
-    if (limit > 0) candidates = candidates.slice(0, limit);
-  }
-
-  const rows: any[] = [];
-  const counts = { total: candidates.length, ship: 0, call: 0, willImprove: 0, applied: 0 };
-  const BATCH = 6; // bounded concurrency — each does one (cached) AI call at most
-  for (let i = 0; i < candidates.length; i += BATCH) {
-    const slice = candidates.slice(i, i + BATCH);
-    const done: any[] = await Promise.all(
-      slice.map(async (o: any): Promise<any> => {
-        try {
-          return await processOrder(o, { apply: !dryRun, persist: !dryRun });
-        } catch (e: any) {
-          return { orderId: String(o.orderId), error: e?.message || String(e), route: "error", verdict: "", applied: false };
-        }
-      })
-    );
-    for (const d of done) {
-      const r: any = d.review || {};
-      if (d.route === "ship") counts.ship++;
-      else if (d.route === "call") counts.call++;
-      if (r.improved && d.route === "ship") counts.willImprove++;
-      if (d.applied) counts.applied++;
-      rows.push({
-        orderId: d.orderId,
-        route: d.route,
-        verdict: d.verdict,
-        applied: d.applied,
-        willApply: !!r.improved && d.route === "ship",
-        source: r.source,
-        restoredLine2: r.restoredLine2 || "",
-        suggestedPincode: r.suggestedPincode || "",
-        pinIssue: r.pinIssue || "",
-        problems: r.problems || [],
-        reason: r.reason || "",
-        before: d.before ? [d.before.line1, d.before.line2, d.before.line3, [d.before.city, d.before.state, d.before.postalCode].filter(Boolean).join(", ")].filter(Boolean).join(" | ") : "",
-        after: (d.applied || r.improved) && d.after ? [d.after.line1, d.after.line2, d.after.line3, [d.after.city, d.after.state, d.after.postalCode].filter(Boolean).join(", ")].filter(Boolean).join(" | ") : "",
-        error: d.error,
-      });
-    }
-  }
-
+  // Shared with the hourly cron (/api/cron/format-addresses) so manual and
+  // automatic sweeps behave identically. apply = !dryRun.
+  const { counts, rows } = await sweepShipQueue({ apply: !dryRun, limit, orderId: onlyId });
   return NextResponse.json({ ok: true, dryRun, counts, rows });
 }

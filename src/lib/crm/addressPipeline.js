@@ -238,3 +238,79 @@ export async function processOrder(order, { apply = false, persist = true } = {}
 
   return { orderId: String(order?.orderId || ""), route: review.route, verdict: review.verdict, applied, before, after, review };
 }
+
+// Orders old enough that the automatic pipeline wasn't around for them, and which
+// are irrelevant now — keep the sweep focused on the live ship-ready set.
+const SWEEP_MIN_ORDER_NO = 10851;
+const SWEEP_SKIP_STATUS = ["cancelled", "canceled", "on_hold", "delivered", "rto", "dispatched", "out_for_delivery", "created"];
+
+// "Still needs shipping" — mirrors the Call Queue so the sweep and the queue agree
+// on scope. An order with a real (non-MOCK) AWB is already shipped → skip.
+export function isPendingShip(o) {
+  return !!o
+    && !(o.awb && !/^MOCK/i.test(o.awb))
+    && !SWEEP_SKIP_STATUS.includes(String(o.status || "").toLowerCase())
+    && !!String(o.name || "").trim()
+    && !!(o.address && (o.address.line1 || o.address.city || o.address.postalCode));
+}
+
+/**
+ * Sweep every ship-ready order through the address pipeline. This is the
+ * safety-net behind the instant per-order format the Wix webhook does: anything
+ * the webhook missed (cold AI, a failed call, an order that arrived another way)
+ * is picked up here. With `apply` it writes the cleaned address for SHIP-verdict
+ * orders and flags the rest to the Call Queue; without it, it's a dry-run preview.
+ * @returns {Promise<{counts:{total,ship,call,willImprove,applied}, rows:Array}>}
+ */
+export async function sweepShipQueue({ apply = false, limit = 0, orderId = "", minOrderNo = SWEEP_MIN_ORDER_NO } = {}) {
+  let candidates;
+  if (orderId) {
+    const o = await ordersStore.getOrder(String(orderId).trim());
+    candidates = o ? [o] : [];
+  } else {
+    const { orders } = await ordersStore.listOrders({ limit: 3000 });
+    candidates = orders
+      .filter((o) => isPendingShip(o) && (parseInt(o.orderId, 10) || 0) >= minOrderNo)
+      .sort((a, b) => (parseInt(b.orderId, 10) || 0) - (parseInt(a.orderId, 10) || 0));
+    if (limit > 0) candidates = candidates.slice(0, limit);
+  }
+
+  const rows = [];
+  const counts = { total: candidates.length, ship: 0, call: 0, willImprove: 0, applied: 0 };
+  const BATCH = 6; // bounded concurrency — one (cached) AI call each at most
+  for (let i = 0; i < candidates.length; i += BATCH) {
+    const slice = candidates.slice(i, i + BATCH);
+    const done = await Promise.all(
+      slice.map(async (o) => {
+        try {
+          return await processOrder(o, { apply, persist: apply });
+        } catch (e) {
+          return { orderId: String(o.orderId), error: e?.message || String(e), route: "error", verdict: "", applied: false };
+        }
+      })
+    );
+    for (const d of done) {
+      const r = d.review || {};
+      if (d.route === "ship") counts.ship++;
+      else if (d.route === "call") counts.call++;
+      if (r.improved && d.route === "ship") counts.willImprove++;
+      if (d.applied) counts.applied++;
+      rows.push({
+        orderId: d.orderId,
+        route: d.route,
+        verdict: d.verdict,
+        applied: d.applied,
+        willApply: !!r.improved && d.route === "ship",
+        source: r.source,
+        suggestedPincode: r.suggestedPincode || "",
+        pinIssue: r.pinIssue || "",
+        problems: r.problems || [],
+        reason: r.reason || "",
+        before: d.before ? [d.before.line1, d.before.line2, d.before.line3, [d.before.city, d.before.state, d.before.postalCode].filter(Boolean).join(", ")].filter(Boolean).join(" | ") : "",
+        after: (d.applied || r.improved) && d.after ? [d.after.line1, d.after.line2, d.after.line3, [d.after.city, d.after.state, d.after.postalCode].filter(Boolean).join(", ")].filter(Boolean).join(" | ") : "",
+        error: d.error,
+      });
+    }
+  }
+  return { counts, rows };
+}
