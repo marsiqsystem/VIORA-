@@ -1,35 +1,35 @@
 {
- "generated": "2026-10-29T11:02:41.498Z",
- "source": "Velocity iq-system exports (full history to 2026-10-28), fault-separated (fake vs genuine RTO), recent-weighted",
+ "generated": "2026-11-02T11:27:57.495Z",
+ "source": "Velocity iq-system exports (full history to 2026-10-30), fault-separated (fake vs genuine RTO), recent-weighted, per-state ranking with NO global carrier ban",
  "national": {
+  "XpressBees": {
+   "delPct": 42,
+   "del": 21,
+   "res": 50,
+   "carrierFaultPct": 2
+  },
   "Shadowfax": {
-   "delPct": 53,
-   "del": 10,
-   "res": 19,
+   "delPct": 50,
+   "del": 13,
+   "res": 26,
    "carrierFaultPct": 0
   },
   "Delhivery": {
-   "delPct": 40,
-   "del": 37,
-   "res": 93,
-   "carrierFaultPct": 4
-  },
-  "XpressBees": {
-   "delPct": 62,
-   "del": 13,
-   "res": 21,
-   "carrierFaultPct": 0
+   "delPct": 35,
+   "del": 39,
+   "res": 110,
+   "carrierFaultPct": 5
   },
   "Ekart": {
-   "delPct": 42,
-   "del": 55,
-   "res": 131,
+   "delPct": 39,
+   "del": 57,
+   "res": 146,
    "carrierFaultPct": 15
   },
   "DTDC": {
    "delPct": 44,
    "del": 74,
-   "res": 168,
+   "res": 170,
    "carrierFaultPct": 13
   },
   "Bluedart": {
@@ -46,93 +46,101 @@
   }
  },
  "stateRTO": {
+  "RAJASTHAN": {
+   "rtoPct": 68,
+   "res": 38
+  },
   "WEST BENGAL": {
    "rtoPct": 33,
    "res": 15
   },
-  "TELANGANA": {
-   "rtoPct": 61,
-   "res": 23
-  },
-  "HARYANA": {
-   "rtoPct": 73,
-   "res": 22
-  },
   "UTTAR PRADESH": {
    "rtoPct": 71,
-   "res": 49
+   "res": 62
   },
-  "RAJASTHAN": {
-   "rtoPct": 58,
-   "res": 24
-  },
-  "MAHARASHTRA": {
-   "rtoPct": 53,
-   "res": 51
-  },
-  "DELHI": {
-   "rtoPct": 67,
-   "res": 21
-  },
-  "ODISHA": {
+  "KARNATAKA": {
    "rtoPct": 50,
-   "res": 6
-  },
-  "MADHYA PRADESH": {
-   "rtoPct": 67,
-   "res": 18
-  },
-  "BIHAR": {
-   "rtoPct": 55,
-   "res": 33
-  },
-  "GUJARAT": {
-   "rtoPct": 42,
    "res": 24
   },
   "ASSAM": {
-   "rtoPct": 61,
-   "res": 18
+   "rtoPct": 67,
+   "res": 21
   },
-  "JHARKHAND": {
+  "GUJARAT": {
+   "rtoPct": 44,
+   "res": 25
+  },
+  "HARYANA": {
+   "rtoPct": 75,
+   "res": 28
+  },
+  "BIHAR": {
+   "rtoPct": 56,
+   "res": 34
+  },
+  "UTTARAKHAND": {
+   "rtoPct": 67,
+   "res": 9
+  },
+  "JAMMU & KASHMIR": {
+   "rtoPct": 85,
+   "res": 34
+  },
+  "GOA": {
    "rtoPct": 50,
-   "res": 4
+   "res": 2
   },
-  "KARNATAKA": {
-   "rtoPct": 45,
-   "res": 22
+  "MADHYA PRADESH": {
+   "rtoPct": 71,
+   "res": 24
+  },
+  "TELANGANA": {
+   "rtoPct": 64,
+   "res": 25
   },
   "TAMIL NADU": {
-   "rtoPct": 26,
-   "res": 23
+   "rtoPct": 28,
+   "res": 25
+  },
+  "ODISHA": {
+   "rtoPct": 57,
+   "res": 7
+  },
+  "PUNJAB": {
+   "rtoPct": 75,
+   "res": 16
+  },
+  "MAHARASHTRA": {
+   "rtoPct": 56,
+   "res": 57
+  },
+  "DELHI": {
+   "rtoPct": 64,
+   "res": 22
+  },
+  "JHARKHAND": {
+   "rtoPct": 33,
+   "res": 6
+  },
+  "ARUNACHAL PRADESH": {
+   "rtoPct": 50,
+   "res": 2
   },
   "NAGALAND": {
    "rtoPct": 67,
    "res": 3
-  },
-  "JAMMU & KASHMIR": {
-   "rtoPct": 85,
-   "res": 33
   },
   "ANDHRA PRADESH": {
    "rtoPct": 20,
    "res": 10
   },
   "KERALA": {
-   "rtoPct": 75,
-   "res": 4
+   "rtoPct": 60,
+   "res": 5
   },
   "ANDAMAN & NICOBAR": {
    "rtoPct": 100,
    "res": 2
-  },
-  "UTTARAKHAND": {
-   "rtoPct": 57,
-   "res": 7
-  },
-  "PUNJAB": {
-   "rtoPct": 69,
-   "res": 13
   },
   "DAMAN & DIU": {
    "rtoPct": 100,
@@ -142,24 +150,38 @@
    "rtoPct": 33,
    "res": 3
   },
+  "CHHATTISGARH": {
+   "rtoPct": 0,
+   "res": 5
+  },
   "HIMACHAL PRADESH": {
    "rtoPct": 0,
    "res": 4
-  },
-  "CHHATTISGARH": {
-   "rtoPct": 0,
-   "res": 4
-  },
-  "GOA": {
-   "rtoPct": 0,
-   "res": 1
-  },
-  "ARUNACHAL PRADESH": {
-   "rtoPct": 0,
-   "res": 1
   }
  },
  "bestByState": {
+  "RAJASTHAN": [
+   {
+    "carrier": "Shadowfax",
+    "adj": 37,
+    "del": 1,
+    "res": 2
+   },
+   {
+    "carrier": "DTDC",
+    "adj": 37,
+    "del": 3,
+    "res": 8,
+    "fake": 1
+   },
+   {
+    "carrier": "XpressBees",
+    "adj": 27,
+    "del": 3,
+    "res": 12,
+    "fake": 1
+   }
+  ],
   "WEST BENGAL": [
    {
     "carrier": "DTDC",
@@ -168,35 +190,97 @@
     "res": 5
    },
    {
+    "carrier": "Ekart",
+    "adj": 67,
+    "del": 5,
+    "res": 7
+   },
+   {
     "carrier": "Shadowfax",
     "adj": 60,
     "del": 1,
     "res": 2
+   }
+  ],
+  "UTTAR PRADESH": [
+   {
+    "carrier": "Ekart",
+    "adj": 42,
+    "del": 6,
+    "res": 13,
+    "fake": 1
    },
    {
-    "carrier": "Delhivery",
-    "adj": 57,
+    "carrier": "XpressBees",
+    "adj": 34,
+    "del": 6,
+    "res": 17
+   },
+   {
+    "carrier": "Shadowfax",
+    "adj": 27,
     "del": 0,
     "res": 1
    }
   ],
-  "TELANGANA": [
-   {
-    "carrier": "DTDC",
-    "adj": 46,
-    "del": 7,
-    "res": 15,
-    "fake": 2
-   },
+  "KARNATAKA": [
    {
     "carrier": "Delhivery",
-    "adj": 28,
+    "adj": 50,
+    "del": 3,
+    "res": 6
+   },
+   {
+    "carrier": "Shadowfax",
+    "adj": 45,
     "del": 0,
-    "res": 3
+    "res": 1
+   },
+   {
+    "carrier": "DTDC",
+    "adj": 53,
+    "del": 8,
+    "res": 15,
+    "fake": 3
+   }
+  ],
+  "ASSAM": [
+   {
+    "carrier": "Delhivery",
+    "adj": 38,
+    "del": 3,
+    "res": 6
    },
    {
     "carrier": "Ekart",
-    "adj": 39,
+    "adj": 32,
+    "del": 4,
+    "res": 12
+   },
+   {
+    "carrier": "Amazon",
+    "adj": 29,
+    "del": 0,
+    "res": 1
+   }
+  ],
+  "GUJARAT": [
+   {
+    "carrier": "XpressBees",
+    "adj": 63,
+    "del": 3,
+    "res": 4
+   },
+   {
+    "carrier": "DTDC",
+    "adj": 62,
+    "del": 6,
+    "res": 9,
+    "fake": 1
+   },
+   {
+    "carrier": "Delhivery",
+    "adj": 48,
     "del": 2,
     "res": 5
    }
@@ -209,66 +293,189 @@
     "res": 3
    },
    {
-    "carrier": "XpressBees",
-    "adj": 41,
-    "del": 2,
-    "res": 3
-   },
-   {
-    "carrier": "Amazon",
-    "adj": 27,
-    "del": 0,
-    "res": 1
-   }
-  ],
-  "UTTAR PRADESH": [
-   {
-    "carrier": "XpressBees",
-    "adj": 38,
+    "carrier": "Ekart",
+    "adj": 35,
     "del": 2,
     "res": 4
    },
    {
+    "carrier": "XpressBees",
+    "adj": 32,
+    "del": 3,
+    "res": 8
+   }
+  ],
+  "BIHAR": [
+   {
     "carrier": "Shadowfax",
-    "adj": 26,
+    "adj": 51,
+    "del": 2,
+    "res": 3
+   },
+   {
+    "carrier": "Ekart",
+    "adj": 45,
+    "del": 8,
+    "res": 18
+   },
+   {
+    "carrier": "DTDC",
+    "adj": 40,
+    "del": 1,
+    "res": 3
+   }
+  ],
+  "UTTARAKHAND": [
+   {
+    "carrier": "Delhivery",
+    "adj": 47,
+    "del": 1,
+    "res": 1
+   },
+   {
+    "carrier": "Shadowfax",
+    "adj": 43,
+    "del": 2,
+    "res": 4
+   },
+   {
+    "carrier": "Ekart",
+    "adj": 30,
+    "del": 0,
+    "res": 2
+   }
+  ],
+  "JAMMU & KASHMIR": [
+   {
+    "carrier": "DTDC",
+    "adj": 21,
+    "del": 1,
+    "res": 4
+   },
+   {
+    "carrier": "Amazon",
+    "adj": 13,
     "del": 0,
     "res": 1
    },
    {
     "carrier": "Delhivery",
-    "adj": 21,
+    "adj": 18,
     "del": 3,
-    "res": 16
+    "res": 13,
+    "fake": 1
    }
   ],
-  "RAJASTHAN": [
+  "GOA": [
    {
-    "carrier": "XpressBees",
-    "adj": 52,
+    "carrier": "Delhivery",
+    "adj": 50,
+    "del": 1,
+    "res": 2
+   }
+  ],
+  "MADHYA PRADESH": [
+   {
+    "carrier": "Ekart",
+    "adj": 29,
+    "del": 4,
+    "res": 12
+   },
+   {
+    "carrier": "Delhivery",
+    "adj": 26,
+    "del": 1,
+    "res": 4
+   },
+   {
+    "carrier": "DTDC",
+    "adj": 25,
     "del": 2,
-    "res": 3
+    "res": 8,
+    "fake": 1
+   }
+  ],
+  "TELANGANA": [
+   {
+    "carrier": "Ekart",
+    "adj": 33,
+    "del": 2,
+    "res": 6
    },
    {
     "carrier": "DTDC",
     "adj": 43,
-    "del": 3,
-    "res": 8,
-    "fake": 1
+    "del": 7,
+    "res": 15,
+    "fake": 2
    },
    {
     "carrier": "Delhivery",
-    "adj": 43,
+    "adj": 21,
+    "del": 0,
+    "res": 4
+   }
+  ],
+  "TAMIL NADU": [
+   {
+    "carrier": "XpressBees",
+    "adj": 76,
+    "del": 2,
+    "res": 2
+   },
+   {
+    "carrier": "Shadowfax",
+    "adj": 73,
+    "del": 1,
+    "res": 1
+   },
+   {
+    "carrier": "Ekart",
+    "adj": 71,
     "del": 3,
-    "res": 8,
-    "fake": 2
+    "res": 4
+   }
+  ],
+  "ODISHA": [
+   {
+    "carrier": "Ekart",
+    "adj": 47,
+    "del": 2,
+    "res": 4
+   },
+   {
+    "carrier": "DTDC",
+    "adj": 41,
+    "del": 1,
+    "res": 3
+   }
+  ],
+  "PUNJAB": [
+   {
+    "carrier": "Delhivery",
+    "adj": 23,
+    "del": 1,
+    "res": 4
+   },
+   {
+    "carrier": "Shadowfax",
+    "adj": 22,
+    "del": 0,
+    "res": 1
+   },
+   {
+    "carrier": "Amazon",
+    "adj": 22,
+    "del": 0,
+    "res": 1
    }
   ],
   "MAHARASHTRA": [
    {
     "carrier": "Shadowfax",
-    "adj": 57,
-    "del": 3,
-    "res": 4
+    "adj": 54,
+    "del": 4,
+    "res": 6
    },
    {
     "carrier": "Delhivery",
@@ -277,17 +484,16 @@
     "res": 6
    },
    {
-    "carrier": "DTDC",
-    "adj": 51,
-    "del": 17,
-    "res": 33,
-    "fake": 6
+    "carrier": "Bluedart",
+    "adj": 37,
+    "del": 0,
+    "res": 1
    }
   ],
   "DELHI": [
    {
     "carrier": "Delhivery",
-    "adj": 47,
+    "adj": 46,
     "del": 3,
     "res": 6
    },
@@ -300,231 +506,81 @@
    },
    {
     "carrier": "Ekart",
-    "adj": 30,
-    "del": 2,
-    "res": 7,
-    "fake": 4
-   }
-  ],
-  "ODISHA": [
-   {
-    "carrier": "DTDC",
-    "adj": 48,
-    "del": 1,
-    "res": 3
-   },
-   {
-    "carrier": "Ekart",
-    "adj": 58,
-    "del": 2,
-    "res": 3
-   }
-  ],
-  "MADHYA PRADESH": [
-   {
-    "carrier": "Delhivery",
-    "adj": 28,
-    "del": 1,
-    "res": 4
-   },
-   {
-    "carrier": "DTDC",
-    "adj": 26,
-    "del": 2,
+    "adj": 35,
+    "del": 3,
     "res": 8,
-    "fake": 1
-   },
-   {
-    "carrier": "Ekart",
-    "adj": 39,
-    "del": 3,
-    "res": 6
-   }
-  ],
-  "BIHAR": [
-   {
-    "carrier": "Shadowfax",
-    "adj": 52,
-    "del": 2,
-    "res": 3
-   },
-   {
-    "carrier": "DTDC",
-    "adj": 41,
-    "del": 1,
-    "res": 3
-   },
-   {
-    "carrier": "Delhivery",
-    "adj": 48,
-    "del": 4,
-    "res": 9,
-    "fake": 1
-   }
-  ],
-  "GUJARAT": [
-   {
-    "carrier": "XpressBees",
-    "adj": 67,
-    "del": 3,
-    "res": 4
-   },
-   {
-    "carrier": "DTDC",
-    "adj": 64,
-    "del": 6,
-    "res": 9,
-    "fake": 1
-   },
-   {
-    "carrier": "Delhivery",
-    "adj": 55,
-    "del": 2,
-    "res": 4
-   }
-  ],
-  "ASSAM": [
-   {
-    "carrier": "Delhivery",
-    "adj": 57,
-    "del": 3,
-    "res": 3
-   },
-   {
-    "carrier": "Amazon",
-    "adj": 34,
-    "del": 0,
-    "res": 1
-   },
-   {
-    "carrier": "DTDC",
-    "adj": 30,
-    "del": 0,
-    "res": 2
+    "fake": 4
    }
   ],
   "JHARKHAND": [
    {
     "carrier": "XpressBees",
-    "adj": 50,
-    "del": 1,
-    "res": 2
-   },
-   {
-    "carrier": "Ekart",
-    "adj": 50,
-    "del": 1,
-    "res": 2
-   }
-  ],
-  "KARNATAKA": [
-   {
-    "carrier": "Delhivery",
-    "adj": 64,
+    "adj": 71,
     "del": 3,
     "res": 4
    },
    {
-    "carrier": "Shadowfax",
-    "adj": 49,
-    "del": 0,
-    "res": 1
-   },
-   {
-    "carrier": "DTDC",
-    "adj": 53,
-    "del": 8,
-    "res": 15,
-    "fake": 3
+    "carrier": "Ekart",
+    "adj": 65,
+    "del": 1,
+    "res": 2
    }
   ],
-  "TAMIL NADU": [
+  "ARUNACHAL PRADESH": [
    {
-    "carrier": "XpressBees",
-    "adj": 78,
-    "del": 2,
-    "res": 2
-   },
-   {
-    "carrier": "Delhivery",
-    "adj": 70,
-    "del": 2,
-    "res": 3
-   },
-   {
-    "carrier": "DTDC",
-    "adj": 69,
-    "del": 10,
-    "res": 14
+    "carrier": "Ekart",
+    "adj": 40,
+    "del": 1,
+    "res": 2,
+    "fake": 1
    }
   ],
   "NAGALAND": [
    {
     "carrier": "Delhivery",
-    "adj": 33,
+    "adj": 37,
     "del": 1,
     "res": 1
    },
    {
     "carrier": "Ekart",
-    "adj": 18,
+    "adj": 22,
     "del": 0,
     "res": 2
    }
   ],
-  "JAMMU & KASHMIR": [
-   {
-    "carrier": "DTDC",
-    "adj": 20,
-    "del": 1,
-    "res": 4
-   },
-   {
-    "carrier": "Delhivery",
-    "adj": 20,
-    "del": 3,
-    "res": 12,
-    "fake": 1
-   },
-   {
-    "carrier": "Amazon",
-    "adj": 12,
-    "del": 0,
-    "res": 1
-   }
-  ],
   "ANDHRA PRADESH": [
    {
+    "carrier": "Ekart",
+    "adj": 86,
+    "del": 3,
+    "res": 3
+   },
+   {
     "carrier": "DTDC",
-    "adj": 78,
+    "adj": 79,
     "del": 5,
     "res": 6
    },
    {
     "carrier": "Delhivery",
-    "adj": 65,
+    "adj": 70,
     "del": 0,
     "res": 1
-   },
-   {
-    "carrier": "Ekart",
-    "adj": 85,
-    "del": 3,
-    "res": 3
    }
   ],
   "KERALA": [
    {
     "carrier": "DTDC",
-    "adj": 25,
+    "adj": 43,
     "del": 1,
     "res": 2
    },
    {
     "carrier": "Delhivery",
-    "adj": 15,
-    "del": 0,
-    "res": 2
+    "adj": 40,
+    "del": 1,
+    "res": 3
    }
   ],
   "ANDAMAN & NICOBAR": [
@@ -537,46 +593,6 @@
    {
     "carrier": "Shadowfax",
     "adj": 0,
-    "del": 0,
-    "res": 1
-   }
-  ],
-  "UTTARAKHAND": [
-   {
-    "carrier": "Shadowfax",
-    "adj": 62,
-    "del": 2,
-    "res": 2
-   },
-   {
-    "carrier": "Delhivery",
-    "adj": 56,
-    "del": 1,
-    "res": 1
-   },
-   {
-    "carrier": "DTDC",
-    "adj": 36,
-    "del": 0,
-    "res": 2
-   }
-  ],
-  "PUNJAB": [
-   {
-    "carrier": "Delhivery",
-    "adj": 40,
-    "del": 1,
-    "res": 2
-   },
-   {
-    "carrier": "Shadowfax",
-    "adj": 31,
-    "del": 0,
-    "res": 1
-   },
-   {
-    "carrier": "Amazon",
-    "adj": 31,
     "del": 0,
     "res": 1
    }
@@ -603,6 +619,20 @@
     "res": 2
    }
   ],
+  "CHHATTISGARH": [
+   {
+    "carrier": "Delhivery",
+    "adj": 100,
+    "del": 3,
+    "res": 3
+   },
+   {
+    "carrier": "Ekart",
+    "adj": 100,
+    "del": 2,
+    "res": 2
+   }
+  ],
   "HIMACHAL PRADESH": [
    {
     "carrier": "DTDC",
@@ -622,41 +652,12 @@
     "del": 1,
     "res": 1
    }
-  ],
-  "CHHATTISGARH": [
-   {
-    "carrier": "Delhivery",
-    "adj": 100,
-    "del": 2,
-    "res": 2
-   },
-   {
-    "carrier": "Ekart",
-    "adj": 100,
-    "del": 2,
-    "res": 2
-   }
-  ],
-  "GOA": [
-   {
-    "carrier": "Delhivery",
-    "adj": 100,
-    "del": 1,
-    "res": 1
-   }
-  ],
-  "ARUNACHAL PRADESH": [
-   {
-    "carrier": "Ekart",
-    "adj": 100,
-    "del": 1,
-    "res": 1
-   }
   ]
  },
  "fakeNonServiceable": {
-  "Delhivery": 4,
-  "Ekart": 20,
+  "XpressBees": 1,
+  "Delhivery": 5,
+  "Ekart": 22,
   "DTDC": 22
  }
 }

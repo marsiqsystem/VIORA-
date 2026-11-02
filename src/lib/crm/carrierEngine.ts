@@ -16,14 +16,15 @@ const engine = DATA as {
   fakeNonServiceable: Record<string, number>;
 };
 
-// Carriers that bogus-RTO shipments (no-attempt / "non-serviceable" / "permanent
-// COD off" / "address incomplete") instead of delivering — confirmed from our
-// Velocity reports + the 26-AWB complaint. We ship from Velocity only now, so the
-// recommendation ranks on OUR Velocity delivery history and AVOIDS these: Ekart is
-// the worst (15% all-time / 21% recent fake-RTO) and is only ever used when it is
-// the sole serviceable carrier for a pin. (DTDC also fakes ~13% but still carries
-// the most volume, so it stays in rotation, just penalised in the per-state order.)
-export const AVOID_CARRIERS = new Set(["Ekart"]);
+// NO global avoid list (changed 2026-11-02). We used to blanket-demote Ekart
+// everywhere, but our own data shows that's wrong: Ekart is the BEST carrier in
+// UP / West Bengal / Andhra / Bihar and a disaster in Delhi / J&K / Maharashtra.
+// No carrier is good or bad everywhere. Ranking is now purely PER STATE on real
+// delivery history with a fake-RTO penalty (baked into carrier-engine-data.json),
+// so a carrier sinks only in the regions where it actually fakes/underperforms.
+// AVOID_CARRIERS is kept (empty) so existing imports keep working, but it no
+// longer bans anyone globally.
+export const AVOID_CARRIERS = new Set<string>([]);
 export const isAvoided = (c?: string) => AVOID_CARRIERS.has(String(c || ""));
 // How often each carrier bogus-RTO'd (fake / resolved), for display + tie-breaks.
 export const fakeRatePct = (c?: string): number => engine.national[String(c || "")]?.carrierFaultPct ?? 0;
@@ -54,10 +55,12 @@ export function fullState(raw?: string): string {
 export function stateRTO(raw?: string): { rtoPct: number; res: number } | null {
   return engine.stateRTO[fullState(raw)] || null;
 }
-// Stable re-order so AVOID carriers (Ekart) sit last — a belt-and-suspenders on
-// top of the data, which is already built with them demoted. Non-avoid order kept.
+// No-op now that there is no global avoid list (2026-11-02). The per-state order
+// baked into carrier-engine-data.json already reflects real performance + the
+// fake-RTO penalty, so we keep it exactly as ranked. Kept as a pass-through so
+// callers don't change.
 function demoteAvoided(best: Best[]): Best[] {
-  return [...best].sort((a, b) => (isAvoided(a.carrier) ? 1 : 0) - (isAvoided(b.carrier) ? 1 : 0));
+  return best;
 }
 export function best3(raw?: string): Best[] {
   return demoteAvoided(engine.bestByState[fullState(raw)] || []);

@@ -1150,7 +1150,13 @@ function ShipQueueTab({ orders, loading, apiKey, onChanged }: { orders: Order[];
                 <td style={{ padding: "8px 10px" }}>
                   <span style={{ background: BUCKET_STYLE[r.bucket].bg, color: BUCKET_STYLE[r.bucket].fg, padding: "2px 10px", borderRadius: 999, fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>{r.bucket}</span>
                 </td>
-                <td style={{ padding: "8px 10px" }}>{r.best.length ? r.best.map((b) => `${b.carrier} ${b.adj}%`).join(" · ") : <span style={{ color: C.sub }}>no data</span>}</td>
+                <td style={{ padding: "8px 10px" }}>{r.best.length ? r.best.map((b, i) => (
+                  <span key={b.carrier}>
+                    {i > 0 ? " · " : ""}
+                    <b style={{ color: i === 0 ? C.ok : C.text }}>{b.carrier}</b> {b.adj}%
+                    {b.fake ? <span style={{ color: C.bad }} title={`bounced ${b.fake} fake-RTO in ${r.state} (no/low attempt)`}> ⚠{b.fake}</span> : null}
+                  </span>
+                )) : <span style={{ color: C.sub }}>no data</span>}</td>
                 <td style={{ padding: "8px 10px" }}>{r.flags.map((f) => <span key={f} style={{ background: "#FBE3E1", color: C.bad, padding: "1px 7px", borderRadius: 6, fontSize: 11, marginRight: 4 }}>{f}</span>)}</td>
                 <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{r.payment}</td>
                 <td style={{ padding: "8px 10px", maxWidth: 260, fontSize: 12, color: C.sub }} title={r.cleanAddr}>{r.cleanAddr.length > 70 ? r.cleanAddr.slice(0, 70) + "…" : r.cleanAddr}</td>

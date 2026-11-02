@@ -5,9 +5,12 @@ import fs from "node:fs";
 const [,, DS, OUT] = process.argv;
 const all = JSON.parse(fs.readFileSync(DS,"utf8"));
 const ACTIVE = new Set(["DTDC","Delhivery","Ekart","XpressBees","Shadowfax","Bluedart","Amazon"]);
-// Carriers with a high fake-RTO (no-attempt / bogus non-serviceable) record — demoted
-// so they're only chosen when nothing cleaner serves the pin. Ekart is the worst.
-const AVOID = new Set(["Ekart"]);
+// NO global avoid list (changed 2026-11-02): no carrier is banned everywhere.
+// Each carrier is ranked PER STATE on real delivery history with a fake-RTO
+// penalty, so a carrier that fakes in one region sinks THERE while still ranking
+// first where it actually delivers (e.g. Ekart is best in UP/WB but drops out of
+// the top-3 in Delhi/J&K/Maharashtra). The old blanket "Ekart last everywhere"
+// hard demotion was removed — it cost us the regions Ekart is genuinely best in.
 const RW = 1.5; // recent rows weigh more in the ranking score
 
 const resolved = all.filter(r => r.outcome==="DELIVERED" || r.outcome==="RTO");
@@ -39,8 +42,9 @@ for(const [st,v] of Object.entries(stateTot)) stateRTO[st] = { rtoPct: Math.roun
 function best(state){ const sm=stateTot[state]; const prior = sm&&sm.wr ? sm.wd/sm.wr : natMean;
   return Object.values(sc).filter(a=>a.state===state&&a.r>0)
     .map(a=>{ const base=(a.wd+K*prior)/(a.wr+K); const fakeRate=a.fake/a.r;
-      let score = base - 0.7*fakeRate;
-      if(AVOID.has(a.carrier)) score -= 1;        // hard demotion: Ekart below any clean carrier
+      // Per-state fake-RTO penalty only — no global ban. A carrier that bounces
+      // bogus RTOs in THIS state sinks here; it is untouched where it's clean.
+      const score = base - 0.8*fakeRate;
       return { carrier:a.carrier, adj:Math.round(100*base), del:a.d, res:a.r, fake:a.fake, score:+score.toFixed(4) }; })
     .sort((x,y)=> y.score-x.score || y.res-x.res)
     .slice(0,3)
@@ -54,7 +58,7 @@ for(const [c,v] of Object.entries(natl)) if(v.fake) fakeNonServiceable[c]=v.fake
 
 const outObj = {
   generated: new Date().toISOString(),
-  source: "Velocity iq-system exports (full history to 2026-10-28), fault-separated (fake vs genuine RTO), recent-weighted",
+  source: "Velocity iq-system exports (full history to 2026-10-30), fault-separated (fake vs genuine RTO), recent-weighted, per-state ranking with NO global carrier ban",
   national, stateRTO, bestByState, fakeNonServiceable,
 };
 fs.writeFileSync(OUT, JSON.stringify(outObj, null, 1));
