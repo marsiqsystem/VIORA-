@@ -87,6 +87,13 @@ const HomePage = async ({ searchParams }: { searchParams?: { preview?: string } 
       sub: `${fromLine} · COD available`,
       cta: { label: "Explore now", href: "/list#product-grid" },
     },
+    "viora-coins": {
+      // The banner/poster carry their own text + button; this copy is for screen readers.
+      eyebrow: "Introducing Viora Coins",
+      headline: "Shop, earn coins, save more",
+      sub: "Earn Viora Coins on reviews, sign-in & orders — 1 coin = ₹1 off your next order.",
+      cta: { label: "Shop Now & Start Earning", href: "/viora-coins" },
+    },
     wedding: {
       eyebrow: "Wedding season",
       headline: "Statement sets for every function",

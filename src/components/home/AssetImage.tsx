@@ -9,13 +9,16 @@ type Props = {
   priority?: boolean;
   className?: string;
   quality?: number;
+  /** "cover" (default) crops to fill; "contain" shows the whole image (for a
+   *  self-contained baked poster that must not be cropped). */
+  fit?: "cover" | "contain";
 };
 
 /**
  * A filled image for a design-brief slot. In development, placeholder slots show
  * their brief ID so it's clear which delivered file goes where.
  */
-const AssetImage = ({ image, fallbackSrc, sizes, priority, className = "", quality = 75 }: Props) => {
+const AssetImage = ({ image, fallbackSrc, sizes, priority, className = "", quality = 75, fit = "cover" }: Props) => {
   const src = image.src || fallbackSrc;
   const showTag = image.placeholder && process.env.NODE_ENV !== "production";
 
@@ -29,7 +32,7 @@ const AssetImage = ({ image, fallbackSrc, sizes, priority, className = "", quali
           sizes={sizes}
           quality={quality}
           priority={priority}
-          className={`object-cover ${className}`}
+          className={`${fit === "contain" ? "object-contain" : "object-cover"} ${className}`}
           style={image.position ? { objectPosition: image.position } : undefined}
         />
       ) : (

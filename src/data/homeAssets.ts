@@ -26,7 +26,7 @@ export type HomeImage = {
 // Phone art delivered 2026-09-26 as 1550x1015 landscapes, so phones show the whole
 // banner and put the live copy in a panel underneath (HeroCarousel).
 
-export type HeroSlideId = "best-sellers" | "festive-combo" | "wedding" | "noble-teardrop" | "crystal-wings" | "little-more-you";
+export type HeroSlideId = "best-sellers" | "festive-combo" | "wedding" | "noble-teardrop" | "crystal-wings" | "little-more-you" | "viora-coins";
 
 export type HeroSlideAsset = {
   id: HeroSlideId;
@@ -38,8 +38,11 @@ export type HeroSlideAsset = {
    * - "card": a small white card in the corner — for busy art (faces, collages).
    * - "baked": the banner already carries its own text/button — no overlay,
    *   the whole slide is the link (phones: the art is the link, panel shows sub + button).
+   * - "baked-tall": a self-contained PORTRAIT poster for phones (its own text +
+   *   button baked in) — shown whole/uncropped with no copy panel; desktop uses
+   *   the wide baked banner. The whole slide is the link.
    */
-  variant?: "full" | "card" | "baked";
+  variant?: "full" | "card" | "baked" | "baked-tall";
   /** Hidden while the festive combo slide is live (it re-uses this art). */
   hideDuringFestive?: boolean;
   /** Desktop only — the art has no usable phone crop (e.g. wide banners with printed text). */
@@ -62,6 +65,15 @@ export const HERO_SLIDES: HeroSlideAsset[] = [
     // Delivered 2026-09-18 at 2062x701 (not the brief's 2560x960); mobile still to come.
     desktop: { src: "/home/01-hero/vj_h1-a_best-sellers_desktop.jpg", alt: "Model wearing a pink crystal necklace with matching earrings", briefId: "H1-A", placeholder: false, position: "80% 50%" },
     mobile: { src: "/home/01-hero/vj_h1-a_best-sellers_mobile.jpg", alt: "Model wearing a pink crystal necklace with matching earrings", briefId: "H1-A", placeholder: false },
+  },
+  {
+    // Viora Coins rewards banner — carries its own headline, earn list and
+    // "Shop Now & Start Earning" button. Desktop = wide 8:3 banner; mobile =
+    // full portrait poster (shown whole via the "baked-tall" variant).
+    id: "viora-coins",
+    variant: "baked-tall",
+    desktop: { src: "/home/01-hero/vj_h1-g_viora-coins_desktop.jpg", alt: "Introducing Viora Coins — shop, earn coins, save more. Earn +75 for a photo review, +10 first sign-in, +30 a prepaid order, +20 a delivered COD order. Shop Now & Start Earning", briefId: "H1-G", placeholder: false },
+    mobile: { src: "/home/01-hero/vj_h1-g_viora-coins_mobile.jpg", alt: "Introducing Viora Coins — shop, earn coins, save more. Earn +75 for a photo review, +10 first sign-in, +30 a prepaid order, +20 a delivered COD order. Shop Now & Start Earning", briefId: "H1-G", placeholder: false },
   },
   {
     // Same art as the festive slide — shown until that campaign starts.

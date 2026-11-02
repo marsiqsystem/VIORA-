@@ -18,7 +18,7 @@ export type HeroSlide = {
   /** Counts down to the festive combo's real end date. */
   countdown?: boolean;
   /** See HeroSlideAsset.variant in data/homeAssets.ts. */
-  variant?: "full" | "card" | "baked";
+  variant?: "full" | "card" | "baked" | "baked-tall";
   hideOnMobile?: boolean;
 };
 
@@ -124,37 +124,54 @@ const HeroCarousel = ({ slides: allSlides }: { slides: HeroSlide[] }) => {
               className={`absolute inset-0 transition-opacity duration-700 ${active ? "z-10 opacity-100" : "z-0 opacity-0"}`}
             >
               {/* ---- Phones ---- */}
-              <div className="absolute inset-x-0 top-0 aspect-[3/2] md:hidden">
-                <AssetImage image={slide.mobile} sizes="100vw" priority={i === 0} />
-                {variant === "baked" && (
+              {variant === "baked-tall" ? (
+                // A self-contained PORTRAIT poster (its own headline, earn list and
+                // button baked in): show the whole thing, uncropped, with no copy
+                // panel. The whole slide is the link.
+                <div className="absolute inset-0 bg-primary md:hidden">
+                  <AssetImage image={slide.mobile} sizes="100vw" priority={i === 0} fit="contain" />
                   <Link
                     href={slide.cta.href}
-                    tabIndex={-1}
+                    tabIndex={active ? 0 : -1}
                     aria-label={`${slide.headline} — ${slide.cta.label}`}
                     className="absolute inset-0"
                   />
-                )}
-              </div>
-              <div className="absolute inset-x-0 bottom-0 flex h-[228px] flex-col px-4 pb-9 pt-4 text-white md:hidden">
-                <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-white/70">{slide.eyebrow}</p>
-                {/* Baked banners already show their headline in the art. */}
-                {variant !== "baked" && (
-                  <h2 className="mt-1 font-playfair text-[1.6rem] font-bold leading-[1.1]">{slide.headline}</h2>
-                )}
-                {slide.countdown ? (
-                  <Countdown />
-                ) : (
-                  <p className="mt-1.5 line-clamp-2 text-xs font-medium leading-relaxed text-white/85">{slide.sub}</p>
-                )}
-                <div className="min-h-3 flex-1" />
-                <Link
-                  href={slide.cta.href}
-                  tabIndex={active ? 0 : -1}
-                  className="shrink-0 inline-flex w-full items-center justify-center bg-accent px-6 py-3 text-sm font-bold uppercase tracking-wider text-white"
-                >
-                  {slide.cta.label}
-                </Link>
-              </div>
+                </div>
+              ) : (
+                <>
+                  <div className="absolute inset-x-0 top-0 aspect-[3/2] md:hidden">
+                    <AssetImage image={slide.mobile} sizes="100vw" priority={i === 0} />
+                    {variant === "baked" && (
+                      <Link
+                        href={slide.cta.href}
+                        tabIndex={-1}
+                        aria-label={`${slide.headline} — ${slide.cta.label}`}
+                        className="absolute inset-0"
+                      />
+                    )}
+                  </div>
+                  <div className="absolute inset-x-0 bottom-0 flex h-[228px] flex-col px-4 pb-9 pt-4 text-white md:hidden">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-white/70">{slide.eyebrow}</p>
+                    {/* Baked banners already show their headline in the art. */}
+                    {variant !== "baked" && (
+                      <h2 className="mt-1 font-playfair text-[1.6rem] font-bold leading-[1.1]">{slide.headline}</h2>
+                    )}
+                    {slide.countdown ? (
+                      <Countdown />
+                    ) : (
+                      <p className="mt-1.5 line-clamp-2 text-xs font-medium leading-relaxed text-white/85">{slide.sub}</p>
+                    )}
+                    <div className="min-h-3 flex-1" />
+                    <Link
+                      href={slide.cta.href}
+                      tabIndex={active ? 0 : -1}
+                      className="shrink-0 inline-flex w-full items-center justify-center bg-accent px-6 py-3 text-sm font-bold uppercase tracking-wider text-white"
+                    >
+                      {slide.cta.label}
+                    </Link>
+                  </div>
+                </>
+              )}
 
               {/* ---- Desktop ---- */}
               <div className="absolute inset-0 hidden md:block">
@@ -194,7 +211,7 @@ const HeroCarousel = ({ slides: allSlides }: { slides: HeroSlide[] }) => {
                   </Link>
                 </div>
               )}
-              {variant === "baked" && (
+              {(variant === "baked" || variant === "baked-tall") && (
                 // The art carries its own headline and button — the whole slide is the link.
                 <Link
                   href={slide.cta.href}
