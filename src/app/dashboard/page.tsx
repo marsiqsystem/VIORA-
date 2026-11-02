@@ -60,6 +60,12 @@ const rupee2 = (v: number | null | undefined) =>
   v == null || v === 0 ? (v === 0 ? "₹0" : "—") : `₹${Number(v).toLocaleString("en-IN")}`;
 const fmtDate = (ms: number) =>
   ms ? new Date(ms).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+const fmtTime = (ms: number) =>
+  ms ? new Date(ms).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true }) : "";
+// Date + time (IST) for the order placed-at — shown in the queues so the operator
+// can see how old / how recent each order is.
+const fmtDateTime = (ms: number) =>
+  ms ? `${fmtDate(ms)}, ${fmtTime(ms)}` : "—";
 const monthLabel = (m: string) => {
   if (!m) return "—";
   const [y, mo] = m.split("-");
@@ -918,7 +924,10 @@ function ToShipTab({ orders, loading, apiKey, onChanged }: { orders: Order[]; lo
               const best = pick(r);
               return (
                 <tr key={o.orderId} style={{ borderBottom: `1px solid ${C.border}` }}>
-                  <td style={{ padding: "8px 10px", fontWeight: 600, whiteSpace: "nowrap" }}>#{o.orderId}</td>
+                  <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                    <div style={{ fontWeight: 600 }}>#{o.orderId}</div>
+                    <div style={{ color: C.sub, fontSize: 10, fontWeight: 400 }}>{fmtDateTime(o.createdAt)}</div>
+                  </td>
                   <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{o.name}<div style={{ color: C.sub, fontSize: 11 }}>{o.phone}</div></td>
                   <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{o.address?.city || ""}<div style={{ color: C.sub, fontSize: 11 }}>{r.state}</div></td>
                   <td style={{ padding: "8px 10px", fontSize: 12 }}>{o.product || o.dCode}{o.colour ? ` – ${o.colour}` : ""}<div style={{ color: C.sub, fontSize: 11 }}>×{o.qty || 1}</div></td>
@@ -1516,7 +1525,7 @@ function OrdersTab({ orders, loading, apiKey, onChanged }: { orders: Order[]; lo
           <tbody>
             {filtered.map((o) => (
               <tr key={o.orderId}>
-                <td style={td}>{fmtDate(o.createdAt)}</td>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDateTime(o.createdAt)}</td>
                 <td style={{ ...td, fontWeight: 700 }}>#{o.orderId}</td>
                 <td style={td}>{o.dCode || o.product || "—"}{o.colour && <div style={{ color: C.sub, fontSize: 12 }}>{o.colour}</div>}</td>
                 <td style={td}>{o.name || "—"}{o.phone && <div style={{ color: C.sub, fontSize: 12 }}>{o.phone}</div>}</td>
