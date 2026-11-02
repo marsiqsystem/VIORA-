@@ -1142,7 +1142,10 @@ function ShipQueueTab({ orders, loading, apiKey, onChanged }: { orders: Order[];
             {!loading && shown.length === 0 && <tr><td colSpan={10} style={{ padding: 16, color: C.sub }}>No pending orders in this bucket. 🎉</td></tr>}
             {shown.map(({ o, r }) => (
               <tr key={o.orderId} style={{ borderBottom: `1px solid ${C.border}` }}>
-                <td style={{ padding: "8px 10px", fontWeight: 600, whiteSpace: "nowrap" }}>#{o.orderId}</td>
+                <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                  <div style={{ fontWeight: 600 }}>#{o.orderId}</div>
+                  <div style={{ color: C.sub, fontSize: 10, fontWeight: 400 }}>{fmtDateTime(o.createdAt)}</div>
+                </td>
                 <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
                   {o.name}
                   <div style={{ color: C.sub, fontSize: 11 }}>{o.phone}</div>
