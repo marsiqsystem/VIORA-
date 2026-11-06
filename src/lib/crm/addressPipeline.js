@@ -172,7 +172,10 @@ export async function reviewOrderAddress(order, { force = false } = {}) {
     rtoPct,
     problems,
     restoredLine2,
-    improved: fmt.source === "ai" || fmt.source === "cache" || !!restoredLine2,
+    // "Improved" = worth writing back: the AI cleaned/arranged it, OR we added the
+    // free OSM locality/landmark (fmt.enriched) — so the engine keeps improving thin
+    // addresses even when the AI call fails, OR we restored a Wix-dropped street line.
+    improved: fmt.source === "ai" || fmt.source === "cache" || !!fmt.enriched || !!restoredLine2,
   };
 }
 

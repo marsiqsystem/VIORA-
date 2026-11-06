@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/format-addresses",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/geo-fill",
+      "schedule": "20 */2 * * *"
     }
   ]
 }

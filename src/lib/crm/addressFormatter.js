@@ -19,11 +19,13 @@
 import { lookupPincodeAreas, lookupPostOfficesByName } from "./pincode";
 import { generateReply } from "./gemini";
 import { generateVertex, isConfigured as vertexConfigured } from "./vertexGemini";
+import { getPincodeGeo } from "./geoPincode";
 
 // Flash-Lite: $0.10 / $0.40 per 1M in/out tokens. ~750 tokens per address ⇒
 // ~₹0.01 each. Overridable, but keep it to a cheap model.
 const MODEL = process.env.GEMINI_ADDRESS_MODEL || "gemini-2.5-flash-lite";
-const CACHE_PREFIX = "addrfmt:v8:"; // v8: locality-level PIN cross-check (recover/correct a wrong pincode from the customer's own area names)
+const CACHE_PREFIX = "addrfmt:v9:"; // v9: free-OSM geo enrichment (locality + nearest landmark from map data); deterministic path now applies when enriched
+
 const CACHE_TTL_S = 90 * 24 * 60 * 60; // 90 days
 
 function kvCfg() {
@@ -196,8 +198,8 @@ async function crossCheckPin({ pin, pinInfo, address }) {
 
 // A short, stable fingerprint of the address input, so a later EDIT re-formats
 // (cache miss) but an unchanged order is served from cache.
-function fingerprint(a, name, phone) {
-  const s = [name, phone, a.line1, a.line2, a.line3, a.city, a.state, a.postalCode]
+function fingerprint(a, name, phone, extra = "") {
+  const s = [name, phone, a.line1, a.line2, a.line3, a.city, a.state, a.postalCode, extra]
     .map((x) => _norm(x))
     .join("|");
   let h = 0;
@@ -205,10 +207,36 @@ function fingerprint(a, name, phone) {
   return (h >>> 0).toString(36);
 }
 
+// Extra ship-to lines recovered FOR FREE from OpenStreetMap (geoPincode.js): the
+// real locality (suburb/town) and the nearest navigable landmark for this PIN.
+// These make a thin address (just "<area>, <PIN>", no house no.) deliverable. We
+// add them ONLY when the customer's own street text doesn't already name them, so
+// we never duplicate or over-stuff. All OSM values are real, verified places —
+// never invented — so adding them is safe (like the India Post PO-area landmark).
+function geoExtraLines(address, geo) {
+  if (!geo) return [];
+  const a = address || {};
+  const streetBits = [a.line1, a.line2, a.line3].map(clean).filter(Boolean);
+  const streetText = _norm(streetBits.join(" "));
+  const extra = [];
+  if (geo.localityLine) {
+    const already = geo.localityLine.split(",").some((part) => {
+      const t = _norm(part);
+      return t.length >= 3 && streetText.includes(t);
+    });
+    if (!already) extra.push(geo.localityLine);
+  }
+  const hasLandmark = /\b(near|opposite|behind|beside|nr\.?)\b/i.test(streetBits.join(" "));
+  if (geo.bestLandmark && !hasLandmark && !streetText.includes(_norm(geo.bestLandmark))) {
+    extra.push(`Near ${geo.bestLandmark}`);
+  }
+  return extra;
+}
+
 // Deterministic courier-ready lines, used both for the no-AI fast path and as a
 // safe fallback. Never invents — only arranges what's there plus verified city/
-// state/pin.
-function deterministicFormat({ name, phone, address, pinInfo }) {
+// state/pin and the free OSM locality/landmark (geoExtraLines).
+function deterministicFormat({ name, phone, address, pinInfo, geo }) {
   const a = address || {};
   const streetBits = [a.line1, a.line2, a.line3].map(clean).filter(Boolean);
   const city = clean(a.city) || clean(pinInfo?.city);
@@ -216,7 +244,7 @@ function deterministicFormat({ name, phone, address, pinInfo }) {
   const pin = clean(a.postalCode).replace(/\D/g, "");
   const lines = [];
   if (clean(name)) lines.push(clean(name));
-  lines.push(...streetBits);
+  lines.push(...streetBits, ...geoExtraLines(a, geo));
   const cityState = [city, state].filter(Boolean).join(", ");
   if (cityState) lines.push(pin ? `${cityState} - ${pin}` : cityState);
   else if (pin) lines.push(`PIN ${pin}`);
@@ -238,7 +266,7 @@ function isAlreadyClean(address, pinInfo) {
   return true;
 }
 
-function buildPrompt({ name, phone, address, pinInfo, pinCheck }) {
+function buildPrompt({ name, phone, address, pinInfo, pinCheck, geo }) {
   const a = address || {};
   const raw = [a.line1, a.line2, a.line3].map(clean).filter(Boolean).join("\n");
   const facts = pinInfo?.state
@@ -247,6 +275,21 @@ function buildPrompt({ name, phone, address, pinInfo, pinCheck }) {
       (pinInfo.division ? `, postal division "${pinInfo.division}"` : "") +
       `. Post-office localities on this PIN (real places you may reference): ${(pinInfo.areas || []).join(", ") || "(none)"}.`
     : `PIN ${a.postalCode || "(missing)"} did not resolve to India Post data.`;
+
+  // MAP FACTS (OpenStreetMap, verified real places) — the actual on-the-ground
+  // locality and the nearest navigable landmarks for this PIN's centre. Use these
+  // like the India Post areas (rule 4/6b): add the locality when it's missing, and
+  // add ONE nearby landmark as "Near <X>" when the customer gave none and the
+  // street is thin. These are REAL places (not inventions). Distances are from the
+  // PIN centre, so prefer the closest; never claim an exact distance to the house.
+  let mapFacts = "";
+  if (geo && (geo.localityLine || (geo.landmarks && geo.landmarks.length))) {
+    const lm = (geo.landmarks || []).slice(0, 6).map((l) => `${l.name} (${l.type}, ~${l.dist}m)`).join("; ");
+    mapFacts =
+      `\nVerified MAP facts (OpenStreetMap, real places):` +
+      (geo.localityLine ? ` locality around this PIN = "${geo.localityLine}".` : "") +
+      (lm ? ` Nearby landmarks: ${lm}.` : "");
+  }
 
   // PIN CROSS-CHECK block — only when the given PIN looks wrong for the locality.
   // Gives the model India-Post-verified pincodes for the customer's OWN area words
@@ -281,6 +324,7 @@ function buildPrompt({ name, phone, address, pinInfo, pinCheck }) {
     `Raw address:\n${raw || "(empty)"}\n` +
     `City given: ${clean(a.city) || "(none)"}  State given: ${clean(a.state) || "(none)"}\n` +
     `Verified PIN facts: ${facts}` +
+    mapFacts +
     cross
   );
 }
@@ -294,7 +338,7 @@ const SYSTEM_PROMPT =
   "(1) FIX spelling, capitalization, punctuation and obvious typos; expand clear abbreviations ('Bas stand'->'Bus Stand', 'ke pass/pas/pass'->'Near', 'oppo'->'Opposite', 'St'->'Street', 'rd'->'Road', 'nr'->'Near'). Do NOT change unfamiliar local names you can't confidently correct. " +
   "(2) LANDMARK PLACEMENT: keep the customer's own relation word EXACTLY — never turn 'Opposite'/'Behind' into 'Near'. If they wrote a bare landmark that is clearly the delivery reference (e.g. 'Bus Stand', 'XYZ Hospital') you MAY prefix 'Near' to arrange it. " +
   "(3) PRESERVE every customer detail — recipient name, house/flat/building no., village, town, district/tehsil, street, landmark, phone — EXACTLY. NEVER invent a house number, building, street, landmark or recipient detail. Do NOT change the PIN on your own guess; the ONLY time you may change it is when a 'PIN CROSS-CHECK' section supplies a verified correct PIN for the customer's own locality (see rule 7b). " +
-  "(4) KEEP any landmark the customer gave (temple/mandir, masjid, church, school, shop, hospital, chowk, bus stand, etc.) — never delete it or swap it for a post-office name. ONLY when the customer gave NO usable landmark AND the street is thin, you MAY add ONE nearest VERIFIED post-office area from the given facts as 'Near <Area>'. Never invent a landmark not in the input or the facts. " +
+  "(4) KEEP any landmark the customer gave (temple/mandir, masjid, church, school, shop, hospital, chowk, bus stand, etc.) — never delete it or swap it for a post-office name. ONLY when the customer gave NO usable landmark AND the street is thin, you MAY add ONE nearby VERIFIED landmark as 'Near <X>' — either a post-office area from the PIN facts OR a named place from the 'Verified MAP facts' (OpenStreetMap) line (a hospital, school, temple, market, station, etc. — prefer the closest). Likewise, when the address names no locality/colony, you MAY add the OSM locality from the MAP facts as the locality line. These MAP places are REAL and verified — using them is NOT inventing. Never invent a landmark that is in neither the input nor the facts. " +
   "(5) Remove ACCIDENTAL repetition (same landmark/locality written twice), but keep two genuinely different components. " +
   "(6) Standardize city/state to the verified PIN facts when they clearly differ; if the customer's 'city' is really a locality, keep it as the locality line and use the PIN's district as the city/district. " +
   "(6b) ADMINISTRATIVE ENRICHMENT (this is what makes the output good, like a hand-cleaned address): you MAY and SHOULD add, taken ONLY from the verified facts, the administrative Block ('Block <X>'), the District, and the country line 'India'. These are real units from India Post, so adding them is NOT inventing. If the facts give no block, simply omit the Block line — never guess one. Do the same spelling/arrangement care on village/town names. " +
@@ -381,7 +425,19 @@ function parseModelJson(text) {
 export async function formatAddress({ orderId, name, phone, address, force } = {}) {
   const a = address || {};
   const pin = clean(a.postalCode).replace(/\D/g, "");
-  const fp = fingerprint(a, name, phone);
+
+  // Free OSM geo (locality + nearest landmark) for this PIN — CACHE-ONLY read, so
+  // it's fast and safe inline. The cron (/api/cron/geo-fill) warms the cache in the
+  // background (Overpass is too slow to call here). Fetched BEFORE the fingerprint
+  // so its signature is part of the cache key: when the cron later warms a PIN that
+  // had no geo at first format, the key changes and the address re-formats WITH the
+  // locality/landmark (self-healing) instead of serving the stale pre-geo result.
+  let geo = null;
+  try { if (pin.length === 6) geo = await getPincodeGeo(pin); } catch { /* best-effort */ }
+  const geoSig = geo ? `${geo.localityLine || ""}~${geo.bestLandmark || ""}` : "";
+  const geoEnriched = geoExtraLines(a, geo).length > 0;
+
+  const fp = fingerprint(a, name, phone, geoSig);
   const cacheKey = orderId ? `${CACHE_PREFIX}${orderId}:${fp}` : "";
 
   // 1) Cache.
@@ -434,8 +490,8 @@ export async function formatAddress({ orderId, name, phone, address, force } = {
   //    Stand'), so output matches a hand-cleaned address. Deterministic stays as
   //    the safe fallback in the else branch if the model fails.
   const aiOn = vertexConfigured() || !!process.env.GEMINI_API_KEY;
-  if (isAlreadyClean(a, pinInfo) && !aiOn) {
-    const formatted = deterministicFormat({ name, phone, address: a, pinInfo });
+  if (isAlreadyClean(a, pinInfo) && !aiOn && !geoEnriched) {
+    const formatted = deterministicFormat({ name, phone, address: a, pinInfo, geo });
     result = {
       formatted,
       text: formatted.join("\n"),
@@ -445,6 +501,7 @@ export async function formatAddress({ orderId, name, phone, address, force } = {
       limitation: "",
       reason: "Address already complete — PIN verified.",
       source: "deterministic",
+      enriched: false,
       pin,
       ...pinMeta,
       cost: 0,
@@ -453,7 +510,7 @@ export async function formatAddress({ orderId, name, phone, address, force } = {
     // 4) Model path. Try the cheap Flash-Lite first; if that model/call fails,
     //    fall back to the default model (whatever autoReply uses) so a wrong
     //    model id can never silently disable the formatter.
-    const prompt = buildPrompt({ name, phone, address: a, pinInfo, pinCheck });
+    const prompt = buildPrompt({ name, phone, address: a, pinInfo, pinCheck, geo });
     const opts = { systemPrompt: SYSTEM_PROMPT, temperature: 0, maxOutputTokens: 512 };
     // Prefer Vertex AI (service-account on a GCP project with working billing)
     // when it's configured; otherwise the AI Studio API key. Each tries the cheap
@@ -485,6 +542,7 @@ export async function formatAddress({ orderId, name, phone, address, force } = {
         limitation: clean(parsed.limitation),
         reason: clean(parsed.reason),
         source: "ai",
+        enriched: true,
         pin,
         ...pinMeta,
         suggestedPincode,
@@ -493,16 +551,19 @@ export async function formatAddress({ orderId, name, phone, address, force } = {
       };
     } else {
       // Fallback: deterministic format, neutral verdict (never block shipping).
-      const formatted = deterministicFormat({ name, phone, address: a, pinInfo });
+      // Still enriched with the free OSM locality/landmark — so the engine keeps
+      // IMPROVING addresses even when the AI is down (the main robustness win).
+      const formatted = deterministicFormat({ name, phone, address: a, pinInfo, geo });
       result = {
         formatted,
         text: formatted.join("\n"),
         verdict: pinInfo.state ? "SHIP" : "UNKNOWN",
         locality: pinInfo.city || clean(a.city),
-        landmark: "",
+        landmark: geo?.bestLandmark || "",
         limitation: (ai.ok ? "AI output unreadable — showing arranged address." : "AI unavailable — showing arranged address.") + aiErr,
-        reason: "",
+        reason: geoEnriched ? "Locality/landmark added from map data (AI unavailable)." : "",
         source: "deterministic",
+        enriched: geoEnriched,
         pin,
         ...pinMeta,
         cost: 0,
