@@ -512,23 +512,25 @@ export async function formatAddress({ orderId, name, phone, address, force } = {
     //    model id can never silently disable the formatter.
     const prompt = buildPrompt({ name, phone, address: a, pinInfo, pinCheck, geo });
     const opts = { systemPrompt: SYSTEM_PROMPT, temperature: 0, maxOutputTokens: 512 };
-    // Prefer Vertex AI (service-account on a GCP project) when configured; each
-    // provider tries the cheap flash-lite first, then its default model. CRITICAL:
-    // if Vertex fails (e.g. its GCP project's billing is disabled -> HTTP 403, which
-    // is exactly what was silently killing enhancement in prod), FALL BACK to the
-    // AI Studio GEMINI_API_KEY (free tier) instead of giving up — so a dead Vertex
-    // project can never take the whole address AI down while a working key sits idle.
+    // Each provider tries the cheap flash-lite first, then its default model.
+    // Boss decision (2026-11-06): the GCP/Vertex project's billing is expiring and
+    // was 403-ing every call, so PREFER the free AI Studio key (GEMINI_API_KEY).
+    // Vertex is only a last resort — used when there's no AI Studio key, or if the
+    // free key itself fails. Deterministic + free-OSM enrichment is the final net,
+    // so the engine keeps working even when BOTH providers are down.
     const tryGen = async (gen) => {
       let r = await gen(prompt, { ...opts, model: MODEL });
       if (!r.ok) r = await gen(prompt, opts);
       return r;
     };
     let ai;
-    if (vertexConfigured()) {
-      ai = await tryGen(generateVertex);
-      if (!ai.ok && process.env.GEMINI_API_KEY) ai = await tryGen(generateReply);
-    } else {
+    if (process.env.GEMINI_API_KEY) {
       ai = await tryGen(generateReply);
+      if (!ai.ok && vertexConfigured()) ai = await tryGen(generateVertex);
+    } else if (vertexConfigured()) {
+      ai = await tryGen(generateVertex);
+    } else {
+      ai = { ok: false, error: "no AI provider configured" };
     }
     const parsed = ai.ok ? parseModelJson(ai.text) : null;
     if (!parsed) {
