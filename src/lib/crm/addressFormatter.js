@@ -23,7 +23,7 @@ import { getPincodeGeo } from "./geoPincode";
 
 // Flash-Lite: $0.10 / $0.40 per 1M in/out tokens. ~750 tokens per address ⇒
 // ~₹0.01 each. Overridable, but keep it to a cheap model.
-const MODEL = process.env.GEMINI_ADDRESS_MODEL || "gemini-2.5-flash-lite";
+const MODEL = process.env.GEMINI_ADDRESS_MODEL || "gemini-3.5-flash-lite";
 const CACHE_PREFIX = "addrfmt:v9:"; // v9: free-OSM geo enrichment (locality + nearest landmark from map data); deterministic path now applies when enriched
 
 const CACHE_TTL_S = 90 * 24 * 60 * 60; // 90 days
