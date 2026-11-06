@@ -512,12 +512,24 @@ export async function formatAddress({ orderId, name, phone, address, force } = {
     //    model id can never silently disable the formatter.
     const prompt = buildPrompt({ name, phone, address: a, pinInfo, pinCheck, geo });
     const opts = { systemPrompt: SYSTEM_PROMPT, temperature: 0, maxOutputTokens: 512 };
-    // Prefer Vertex AI (service-account on a GCP project with working billing)
-    // when it's configured; otherwise the AI Studio API key. Each tries the cheap
-    // flash-lite first, then the default model.
-    const gen = vertexConfigured() ? generateVertex : generateReply;
-    let ai = await gen(prompt, { ...opts, model: MODEL });
-    if (!ai.ok) ai = await gen(prompt, opts); // default model fallback
+    // Prefer Vertex AI (service-account on a GCP project) when configured; each
+    // provider tries the cheap flash-lite first, then its default model. CRITICAL:
+    // if Vertex fails (e.g. its GCP project's billing is disabled -> HTTP 403, which
+    // is exactly what was silently killing enhancement in prod), FALL BACK to the
+    // AI Studio GEMINI_API_KEY (free tier) instead of giving up — so a dead Vertex
+    // project can never take the whole address AI down while a working key sits idle.
+    const tryGen = async (gen) => {
+      let r = await gen(prompt, { ...opts, model: MODEL });
+      if (!r.ok) r = await gen(prompt, opts);
+      return r;
+    };
+    let ai;
+    if (vertexConfigured()) {
+      ai = await tryGen(generateVertex);
+      if (!ai.ok && process.env.GEMINI_API_KEY) ai = await tryGen(generateReply);
+    } else {
+      ai = await tryGen(generateReply);
+    }
     const parsed = ai.ok ? parseModelJson(ai.text) : null;
     if (!parsed) {
       console.warn("[addressFormatter] AI unusable:", JSON.stringify(ai.error || ai.text || "").slice(0, 200));
