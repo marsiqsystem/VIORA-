@@ -201,7 +201,11 @@ async function freeSearchCandidates({ pin, locality, city, state }, _diag) {
 function geminiCfg() {
   return {
     apiKey: (process.env.GEMINI_API_KEY || "").trim(),
-    model: (process.env.GEMINI_PROXIMITY_MODEL || process.env.GEMINI_MODEL || "gemini-3.5-flash").trim(),
+    // flash-lite is plenty for pure text structuring and (unlike full flash) does
+    // not burn the output budget on "thinking" tokens — full flash truncated the
+    // JSON answer to a partial first object. flash-lite is also what the address
+    // formatter already uses successfully on the free key.
+    model: (process.env.GEMINI_PROXIMITY_MODEL || "gemini-3.5-flash-lite").trim(),
   };
 }
 
@@ -214,7 +218,12 @@ async function geminiGenerate(prompt, opts = {}) {
   if (!apiKey) return { ok: false, error: "GEMINI_API_KEY not set" };
   const body = {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: { temperature: 0.1, maxOutputTokens: 1600 },
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: 2048,
+      // No reasoning needed for structuring — keep the whole budget for the answer.
+      thinkingConfig: { thinkingBudget: 0 },
+    },
   };
   if (opts.grounding === true) body.tools = [{ google_search: {} }];
   const url = `${GEN_BASE}/models/${model}:generateContent`;
