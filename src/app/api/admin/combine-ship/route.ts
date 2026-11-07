@@ -31,6 +31,7 @@ import { authOk, authConfigured, keyFromRequest } from "@/lib/crm/inbox-store";
 import * as ordersStore from "@/lib/crm/orders-store";
 import * as velocity from "@/lib/crm/velocity";
 import * as wix from "@/lib/crm/wix";
+import { processOrder } from "@/lib/crm/addressPipeline";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,10 +57,21 @@ export async function POST(req: NextRequest) {
   if (!primaryNo || !secondaryNo)
     return NextResponse.json({ ok: false, error: "primary and secondary order numbers required." }, { status: 400 });
 
-  const primary = await ordersStore.getOrder(primaryNo);
+  let primary = await ordersStore.getOrder(primaryNo);
   const secondary = await ordersStore.getOrder(secondaryNo);
   if (!primary) return NextResponse.json({ ok: false, error: `Order ${primaryNo} not found in store.` }, { status: 404 });
   if (!secondary) return NextResponse.json({ ok: false, error: `Order ${secondaryNo} not found in store.` }, { status: 404 });
+
+  // Enhance the primary's ship-to address with the AI pipeline before it goes to
+  // Velocity (the combined parcel ships under the primary's address). Cheap when
+  // it already ran (cached); only rewrites when the AI is confident. Best-effort.
+  try {
+    await processOrder(primary, { apply: true });
+    const re = await ordersStore.getOrder(primaryNo);
+    if (re) primary = re;
+  } catch (e: any) {
+    console.warn(`[combine-ship] address enhance skipped for ${primaryNo}:`, e?.message || e);
+  }
 
   // Combined item list — one line per order, keeping the real product name + SKU
   // (Velocity REQUIRES a SKU). Per-item price is scaled so the item total equals
@@ -132,6 +144,24 @@ export async function POST(req: NextRequest) {
       { ok: false, step: "velocity-create", error: res?.error || "velocity create failed", detail: res?.data || res?.raw || null, preview },
       { status: 502 }
     );
+
+  // 1b) Stamp a CUSTOMER-FACING combined snapshot on the PRIMARY store order, so
+  // every WhatsApp update (out-for-delivery COD amount, etc.) and the tracking page
+  // show BOTH products and the FULL combined total — not just the primary's single
+  // product/price. The velocity-webhook overlays these onto the Wix order (which
+  // only knows the primary's single values) before messaging. We deliberately do
+  // NOT touch sellingPrice/amount here (those stay per-order for accounting).
+  try {
+    await ordersStore.updateOrder(primary.orderId, {
+      combinedShipment: `VJ-#${primary.orderId}`,
+      combinedProduct: input.product, // "A + B"
+      combinedAmount: codAmount, // full COD to collect for the combined parcel
+      combinedItems: items,
+      combinedOrderIds: [primary.orderId, secondary.orderId],
+    });
+  } catch (e: any) {
+    console.warn(`[combine-ship] combined snapshot on ${primary.orderId} failed:`, e?.message || e);
+  }
 
   // 2) Mark the requested Wix orders fulfilled.
   const guidByNo: Record<string, string> = { [primary.orderId]: primary.orderGuid, [secondary.orderId]: secondary.orderGuid };

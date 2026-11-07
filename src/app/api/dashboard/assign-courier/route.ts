@@ -17,6 +17,7 @@ import * as ordersStore from "@/lib/crm/orders-store";
 import * as velocity from "@/lib/crm/velocity";
 import * as shiprocket from "@/lib/crm/shiprocket";
 import * as ithink from "@/lib/crm/ithink";
+import { processOrder } from "@/lib/crm/addressPipeline";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,11 +33,29 @@ export async function POST(req: NextRequest) {
   const courier = String(body?.courier || "").trim().toLowerCase();
   if (!orderId || !courier) return NextResponse.json({ ok: false, error: "orderId and courier required" }, { status: 400 });
 
-  const order = await ordersStore.getOrder(orderId);
+  let order = await ordersStore.getOrder(orderId);
   if (!order) return NextResponse.json({ ok: false, error: "order not found in store" }, { status: 404 });
 
   // Couriers with a real API link: velocity, shiprocket and ithink.
   const KNOWN = new Set(["velocity", "shiprocket", "ithink"]);
+
+  // GUARANTEE the AI-enhanced address goes to the courier. Address formatting
+  // normally happens async (on Wix ingest + the hourly cron), so an order shipped
+  // before that ran — or whose format failed — could still carry the raw address.
+  // Run the AI pipeline synchronously right before creating on the courier and use
+  // its result: formatAddress is cached per order+fingerprint, so this is cheap
+  // when it already ran. It only rewrites the address when the AI is confident
+  // (route=ship + improved); a "call"-route address is left as-is (operator chose
+  // to ship it). Best-effort — a formatter hiccup must never block the ship.
+  if (KNOWN.has(courier)) {
+    try {
+      await processOrder(order, { apply: true });
+      const refreshed = await ordersStore.getOrder(orderId);
+      if (refreshed) order = refreshed;
+    } catch (e) {
+      console.warn(`[assign-courier] address enhance skipped for ${orderId}:`, (e as any)?.message || e);
+    }
+  }
 
   // Unknown couriers (e.g. a future one before its API is wired): just record
   // the choice so the operator can ship it in that courier's own dashboard.

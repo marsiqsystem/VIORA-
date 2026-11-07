@@ -119,6 +119,12 @@ export async function POST(req: NextRequest) {
       // Carry the permanent "never text on cancel" flag so a Velocity delete of a
       // silently-cancelled order (or a combined parcel's duplicate) sends nothing.
       if (kv?.silentCancel) (order as any).silentCancel = true;
+      // COMBINED parcel: the Wix order only knows the PRIMARY's single product +
+      // price, but this parcel ships two orders. Overlay the combined snapshot the
+      // combine-ship route stamped on the primary so the customer's messages show
+      // BOTH products and the FULL COD total (not just one order's).
+      if (kv?.combinedProduct) (order as any).product = kv.combinedProduct;
+      if (kv?.combinedAmount != null) (order as any).amount = kv.combinedAmount;
     } catch { /* ignore */ }
     // Carry a tracking URL for the dispatched message's {{3}} (webhook value,
     // else whatever Wix stored; notify falls back to building it from the AWB).
