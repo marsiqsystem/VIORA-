@@ -124,7 +124,7 @@ async function handle(req: NextRequest) {
     const name = String(g("testName") || "there");
     const coins = parseInt(String(g("testCoins") ?? "50"), 10) || 50;
     const res: any = await sendTemplate({ to: phone, templateName: TEMPLATE, languageCode: LANG, bodyParams: [name, String(coins)] });
-    if (res?.ok) { try { await recordOutbound({ to: phone, text: bodyText(name, coins), name, template: TEMPLATE, status: "sent", wamid: res?.data?.messages?.[0]?.id }); } catch { /* best effort */ } }
+    if (res?.ok) { try { await recordOutbound({ to: phone, text: bodyText(name, coins), name, template: true, status: "sent", wamid: res?.data?.messages?.[0]?.id }); } catch { /* best effort */ } }
     return NextResponse.json({ ok: !!res?.ok, mode: "test", phone, sent: !!res?.ok, error: res?.ok ? undefined : res?.error });
   }
 
@@ -174,7 +174,7 @@ async function handle(req: NextRequest) {
     }
     const res: any = await sendTemplate({ to: r.phone, templateName: TEMPLATE, languageCode: LANG, bodyParams: [r.name, String(r.balance)] });
     if (res?.ok) {
-      try { await recordOutbound({ to: r.phone, text: bodyText(r.name, r.balance), name: r.name, template: TEMPLATE, status: "sent", wamid: res?.data?.messages?.[0]?.id }); } catch { /* best effort */ }
+      try { await recordOutbound({ to: r.phone, text: bodyText(r.name, r.balance), name: r.name, template: true, status: "sent", wamid: res?.data?.messages?.[0]?.id }); } catch { /* best effort */ }
       results.push({ contactId: r.contactId, phone: r.phone, balance: r.balance, sent: true });
     } else {
       // Release the dedupe claim so a retry can re-send a failed one.
