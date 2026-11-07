@@ -218,12 +218,9 @@ async function geminiGenerate(prompt, opts = {}) {
   if (!apiKey) return { ok: false, error: "GEMINI_API_KEY not set" };
   const body = {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
-      temperature: 0.1,
-      maxOutputTokens: 2048,
-      // No reasoning needed for structuring — keep the whole budget for the answer.
-      thinkingConfig: { thinkingBudget: 0 },
-    },
+    // flash-lite thinks lightly, so a generous output ceiling is enough to avoid
+    // the JSON truncation full flash hit. (thinkingConfig is rejected 400 here.)
+    generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
   };
   if (opts.grounding === true) body.tools = [{ google_search: {} }];
   const url = `${GEN_BASE}/models/${model}:generateContent`;
