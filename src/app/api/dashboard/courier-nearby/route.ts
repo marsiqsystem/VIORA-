@@ -69,10 +69,10 @@ async function handle(req: NextRequest) {
     }
   }
 
-  // Diagnostics (isolate a 429 as grounding-specific vs model-specific):
-  //   &nogrounding=1  -> call without the google_search tool
-  //   &model=gemini-3.5-flash-lite -> override the model
-  const grounding = sp.get("nogrounding") === "1" ? false : undefined;
+  // Default path is FREE (we search via DuckDuckGo+Nominatim, Gemini just structures).
+  //   &grounding=1  -> try the PAID grounded path (only works if billing is enabled)
+  //   &model=...    -> model override (diagnostic; not cached)
+  const grounding = sp.get("grounding") === "1";
   const modelOverride = sp.get("model") || undefined;
 
   const record = force
