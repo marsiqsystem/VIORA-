@@ -52,6 +52,28 @@ export async function POST(req: NextRequest) {
   if (!authOk(body?.key ?? keyFromRequest(req)))
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
+  // PRE-STEP — mute before a MANUAL Velocity cancel. Set the permanent
+  // silentCancel flag on the given order numbers so when the operator cancels them
+  // in the Velocity dashboard, the cancel webhook sends NO "order cancelled" text
+  // to the customer (we're combining, not really cancelling). Returns without
+  // creating anything. When the combined order is later created under <primary>,
+  // that create clears silentCancel on the primary so its own future genuine
+  // cancellations still message; absorbed secondaries stay muted forever.
+  //   { "muteCancel":["11176","11177"] }
+  const muteCancel: string[] = Array.isArray(body?.muteCancel) ? body.muteCancel.map((x: any) => String(x).trim()).filter(Boolean) : [];
+  if (muteCancel.length) {
+    const muted: any[] = [];
+    for (const no of muteCancel) {
+      try {
+        await ordersStore.updateOrder(no, { silentCancel: true });
+        muted.push({ orderNo: no, ok: true });
+      } catch (e: any) {
+        muted.push({ orderNo: no, ok: false, error: e?.message || String(e) });
+      }
+    }
+    return NextResponse.json({ ok: true, muted, note: "silentCancel set — cancel these in the Velocity dashboard now; no customer message will be sent. Then run the combine (send:true) to create the merged parcel." });
+  }
+
   const primaryNo = String(body?.primary ?? "").trim();
   const secondaryNo = String(body?.secondary ?? "").trim();
   if (!primaryNo || !secondaryNo)
@@ -99,8 +121,17 @@ export async function POST(req: NextRequest) {
   const drift = round2(codAmount - items.reduce((s, it) => s + it.price, 0));
   if (drift !== 0 && items.length) items[0].price = round2(items[0].price + drift);
 
+  // Velocity dedupes on the order reference "VJ-#<orderId>". If the primary was
+  // already created once (and later cancelled in the Velocity dashboard), the ref
+  // can refuse reuse (order_created:0). `refSuffix` (e.g. "-C") makes a fresh,
+  // unique Velocity reference while keeping the base order number so the webhook
+  // still correlates to <primary> (its base regex strips a "-<suffix>"). Our store
+  // keys stay on the bare primary.orderId; only Velocity sees the suffix.
+  const refSuffix = String(body?.refSuffix || "").trim();
+  const velocityRefId = `${primary.orderId}${refSuffix}`;
+
   const input = {
-    orderId: primary.orderId,
+    orderId: velocityRefId,
     orderGuid: primary.orderGuid,
     name: primary.name,
     phone: primary.phone,
@@ -119,7 +150,7 @@ export async function POST(req: NextRequest) {
   const tagDispatched: string[] = Array.isArray(body?.tagDispatched) ? body.tagDispatched.map((x: any) => String(x).trim()).filter(Boolean) : [];
 
   const preview = {
-    velocityOrderId: `VJ-#${primary.orderId}`,
+    velocityOrderId: `VJ-#${velocityRefId}`,
     correlatesToWixNumber: primary.orderId,
     customer: primary.name,
     phone: primary.phone,
@@ -158,6 +189,10 @@ export async function POST(req: NextRequest) {
       combinedAmount: codAmount, // full COD to collect for the combined parcel
       combinedItems: items,
       combinedOrderIds: [primary.orderId, secondary.orderId],
+      // The combined parcel ships under <primary>, so re-enable its cancellation
+      // messaging (it may have been muted before a manual Velocity cancel). The
+      // absorbed secondary keeps silentCancel = true.
+      silentCancel: false,
     });
   } catch (e: any) {
     console.warn(`[combine-ship] combined snapshot on ${primary.orderId} failed:`, e?.message || e);
