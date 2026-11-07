@@ -74,10 +74,11 @@ async function handle(req: NextRequest) {
   //   &model=...    -> model override (diagnostic; not cached)
   const grounding = sp.get("grounding") === "1";
   const modelOverride = sp.get("model") || undefined;
+  const debug = sp.get("debug") === "1";
 
   const record = force
-    ? await fillCourierProximity(pin, { force: true, locality, city, state, grounding, model: modelOverride })
-    : (await getCourierProximity(pin)) || (await fillCourierProximity(pin, { locality, city, state, grounding, model: modelOverride }));
+    ? await fillCourierProximity(pin, { force: true, locality, city, state, grounding, model: modelOverride, debug })
+    : (await getCourierProximity(pin)) || (await fillCourierProximity(pin, { locality, city, state, grounding, model: modelOverride, debug }));
 
   const suggestion = await suggestNearestCourier(pin, fullState(state), { best3 });
 

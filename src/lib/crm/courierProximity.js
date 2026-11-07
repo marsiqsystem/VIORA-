@@ -37,7 +37,6 @@
 const NEAR_PREFIX = "courier:near:v1:";
 const NEAR_TTL_S = 60 * 60 * 24 * 120; // 120 days — counters barely move; keep lookups rare
 const GEN_BASE = "https://generativelanguage.googleapis.com/v1beta";
-const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36";
 const NOMINATIM_UA = "viora-shipping-courier-finder/1.0 (viorajewel.in)";
 
 // Couriers we can actually ship with (via Velocity last-mile / Shiprocket / iThink
@@ -104,64 +103,84 @@ const stripTags = (s) =>
     .trim();
 
 // ---------------------------------------------------------------------------
-// FREE search layer — no API key. Returns candidate listing text + source URLs.
+// Search layer — FREE + ToS-compliant. Two sources:
+//   • Google Programmable Search (Custom Search JSON API) — the rich source
+//     (JustDial / Sulekha / Cybo listings with phones + ratings). Free tier is
+//     100 queries/day at NO cost and needs NO billing card — just a search-engine
+//     id (cx) + API key. No-ops cleanly until GOOGLE_CSE_KEY/CX are set.
+//   • OpenStreetMap Nominatim free-text — keyless, sanctioned (UA-identified),
+//     finds mapped named courier businesses. Works from the server today.
+// We do NOT scrape search engines that block automated/server access.
 // ---------------------------------------------------------------------------
 
-// DuckDuckGo HTML results (title + snippet per hit). Falls back to the lite host.
-async function duckduckgo(query) {
-  const hosts = [
-    `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
-    `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`,
-  ];
-  for (const url of hosts) {
-    try {
-      const r = await fetch(url, { headers: { "User-Agent": UA, Accept: "text/html" }, signal: AbortSignal.timeout(15000) });
-      if (!r.ok) continue;
-      const html = await r.text();
-      const titles = [...html.matchAll(/result__a[^>]*>([\s\S]*?)<\/a>/g)].map((m) => stripTags(m[1]));
-      const snips = [...html.matchAll(/result__snippet[^>]*>([\s\S]*?)<\/a>/g)].map((m) => stripTags(m[1]));
-      const liteCells = titles.length ? [] : [...html.matchAll(/<td[^>]*class="result-snippet"[^>]*>([\s\S]*?)<\/td>/g)].map((m) => stripTags(m[1]));
-      const lines = [];
-      const n = Math.max(titles.length, snips.length);
-      for (let i = 0; i < n; i++) {
-        const t = titles[i] || "";
-        const s = snips[i] || "";
-        const line = [t, s].filter(Boolean).join(" — ");
-        if (line) lines.push(line);
-      }
-      const all = lines.concat(liteCells).filter(Boolean);
-      if (all.length) return all.slice(0, 12);
-    } catch {
-      /* try next host */
-    }
-  }
-  return [];
+function cseCfg() {
+  return {
+    key: (process.env.GOOGLE_CSE_KEY || process.env.GOOGLE_CSE_API_KEY || "").trim(),
+    cx: (process.env.GOOGLE_CSE_CX || process.env.GOOGLE_CSE_ID || "").trim(),
+  };
 }
 
-// Nominatim free-text search — finds mapped, named courier businesses near a pin.
-async function nominatimCourier(pin, city) {
+// Google Programmable Search — title + snippet per result. Returns [] if unconfigured.
+async function googleCSE(query, _diag) {
+  const { key, cx } = cseCfg();
+  if (!key || !cx) {
+    if (_diag) _diag.push({ src: "cse", status: "unconfigured" });
+    return [];
+  }
   try {
-    const q = encodeURIComponent(`courier ${pin} ${city || ""}`.trim());
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&addressdetails=1&limit=8`, {
+    const url = `https://www.googleapis.com/customsearch/v1?key=${encodeURIComponent(key)}&cx=${encodeURIComponent(cx)}&gl=in&num=8&q=${encodeURIComponent(query)}`;
+    const r = await fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(15000) });
+    const j = await r.json().catch(() => ({}));
+    if (_diag) _diag.push({ src: "cse", status: r.status, items: (j.items || []).length, error: j?.error?.message });
+    if (!r.ok) return [];
+    return (j.items || [])
+      .map((it) => [it.title, it.snippet].map((s) => stripTags(s)).filter(Boolean).join(" — "))
+      .filter(Boolean)
+      .slice(0, 10);
+  } catch (e) {
+    if (_diag) _diag.push({ src: "cse", error: String(e?.message || e).slice(0, 60) });
+    return [];
+  }
+}
+
+// One Nominatim free-text query -> display_name lines.
+async function nominatimQuery(q) {
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&countrycodes=in&format=json&addressdetails=1&limit=6`, {
       headers: { "User-Agent": NOMINATIM_UA, Accept: "application/json" },
       signal: AbortSignal.timeout(12000),
     });
     if (!r.ok) return [];
     const arr = await r.json().catch(() => []);
-    return (Array.isArray(arr) ? arr : []).map((h) => String(h.display_name || "").trim()).filter(Boolean).slice(0, 8);
+    return (Array.isArray(arr) ? arr : []).map((h) => String(h.display_name || "").trim()).filter(Boolean);
   } catch {
     return [];
   }
 }
 
-// Gather raw candidate listings for a pincode from the free sources.
-async function freeSearchCandidates({ pin, locality, city, state }) {
+// Nominatim across a few courier terms to broaden coverage (keyless baseline).
+async function nominatimCourier(pin, city, _diag) {
+  const where = [pin, city].filter(Boolean).join(" ");
+  const terms = ["courier", "DTDC", "Delhivery", "DTDC courier", "parcel service"];
+  const out = [];
+  // Sequential (Nominatim asks <=1 req/s); cap total time via per-call timeout.
+  for (const t of terms) {
+    const hits = await nominatimQuery(`${t} ${where}`.trim());
+    out.push(...hits);
+    if (out.length >= 10) break;
+  }
+  if (_diag) _diag.push({ src: "nominatim", hits: out.length });
+  return out.slice(0, 10);
+}
+
+// Gather raw candidate listings for a pincode from the sources above.
+async function freeSearchCandidates({ pin, locality, city, state }, _diag) {
   const where = [locality, city, state].map((s) => String(s || "").trim()).filter(Boolean).join(" ");
-  const [ddg, nom] = await Promise.all([
-    duckduckgo(`courier counter branch ${where} ${pin} address phone`),
-    nominatimCourier(pin, city || state),
+  const [cse, nom] = await Promise.all([
+    googleCSE(`courier counter branch ${where} ${pin} address phone`, _diag),
+    nominatimCourier(pin, city || state, _diag),
   ]);
-  const candidates = [...ddg, ...nom.map((n) => `OSM: ${n}`)];
+  const candidates = [...cse, ...nom.map((n) => `OSM: ${n}`)];
   // de-dupe near-identical lines
   const seen = new Set();
   const uniq = [];
@@ -310,7 +329,7 @@ export async function getCourierProximity(pin) {
  * heuristic fallback if the LLM is unavailable. opts.grounding=true is the paid
  * path (only if billing is ever enabled). Diagnostic runs are never cached.
  */
-export async function fillCourierProximity(pin, { force = false, locality, city, state, grounding = false, model } = {}) {
+export async function fillCourierProximity(pin, { force = false, locality, city, state, grounding = false, model, debug = false } = {}) {
   const p = normPin(pin);
   if (p.length !== 6) return null;
   if (!force) {
@@ -318,17 +337,19 @@ export async function fillCourierProximity(pin, { force = false, locality, city,
     if (existing && existing.ok) return existing;
   }
 
+  const diag = debug ? [] : null;
   // Paid shortcut: if billing is enabled, let Gemini do the whole grounded search.
   let candidates = [];
   let gen;
   if (grounding === true) {
     gen = await geminiGenerate(extractPromptGrounded({ pin: p, locality, city, state }), { grounding: true, model });
   } else {
-    candidates = await freeSearchCandidates({ pin: p, locality, city, state });
+    candidates = await freeSearchCandidates({ pin: p, locality, city, state }, diag);
     if (!candidates.length) {
-      return { pin: p, ok: false, grounded: false, counters: [], aiError: "no free search results", via: "free", filledAt: Date.now() };
+      return { pin: p, ok: false, grounded: false, counters: [], aiError: "no search results (add GOOGLE_CSE_KEY/CX for rich results)", via: "free", diag, filledAt: Date.now() };
     }
     gen = await geminiGenerate(extractPrompt({ pin: p, locality, city, state }, candidates), { grounding: false, model });
+    if (diag) diag.push({ src: "gemini", ok: gen.ok, status: gen.status, error: gen.error, textLen: (gen.text || "").length });
   }
 
   let counters = [];
@@ -377,7 +398,12 @@ export async function fillCourierProximity(pin, { force = false, locality, city,
     model: gen.model,
     filledAt: Date.now(),
   };
-  const isDiagnostic = !!model; // model override = a probe; don't poison the cache
+  if (debug) {
+    record.diag = diag;
+    record.rawAi = (gen.text || "").slice(0, 500);
+    record.candidatesSample = candidates.slice(0, 8);
+  }
+  const isDiagnostic = !!model || debug; // a probe — don't poison the cache
   if (!isDiagnostic) await kv(["SET", `${NEAR_PREFIX}${p}`, JSON.stringify(record), "EX", String(NEAR_TTL_S)]);
   return record;
 }
