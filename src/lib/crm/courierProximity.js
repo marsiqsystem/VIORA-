@@ -115,14 +115,19 @@ function geminiCfg() {
 // model actually used Google Search (groundingMetadata present) + any API error.
 // This is also how we discover, on the real prod key, whether free-tier grounding
 // is even available for the project (the docs conflict for Gemini 3.x).
-async function groundedGenerate(prompt) {
-  const { apiKey, model } = geminiCfg();
+// `opts.grounding=false` and `opts.model` are diagnostic overrides used to isolate
+// whether a 429 is grounding-specific or model-specific.
+async function groundedGenerate(prompt, opts = {}) {
+  const cfg = geminiCfg();
+  const apiKey = cfg.apiKey;
+  const model = opts.model || cfg.model;
   if (!apiKey) return { ok: false, error: "GEMINI_API_KEY not set" };
+  const useGrounding = opts.grounding !== false;
   const body = {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    tools: [{ google_search: {} }],
     generationConfig: { temperature: 0.1, maxOutputTokens: 1600 },
   };
+  if (useGrounding) body.tools = [{ google_search: {} }];
   const url = `${GEN_BASE}/models/${model}:generateContent`;
   try {
     const res = await fetch(url, {
@@ -196,7 +201,7 @@ export async function getCourierProximity(pin) {
  * available on this key at all. A failed lookup is NOT cached (so it retries),
  * unless it genuinely found zero counters with grounding working.
  */
-export async function fillCourierProximity(pin, { force = false, locality, city, state } = {}) {
+export async function fillCourierProximity(pin, { force = false, locality, city, state, grounding, model } = {}) {
   const p = normPin(pin);
   if (p.length !== 6) return null;
   if (!force) {
@@ -204,7 +209,7 @@ export async function fillCourierProximity(pin, { force = false, locality, city,
     if (existing && existing.ok) return existing;
   }
 
-  const gen = await groundedGenerate(buildPrompt({ pin: p, locality, city, state }));
+  const gen = await groundedGenerate(buildPrompt({ pin: p, locality, city, state }), { grounding, model });
   if (!gen.ok) {
     // Surface the failure (don't cache) so a later run / forced retry can succeed
     // and so the probe shows the real error (e.g. grounding not in free tier).
@@ -251,10 +256,12 @@ export async function fillCourierProximity(pin, { force = false, locality, city,
     model: gen.model,
     filledAt: Date.now(),
   };
-  // Cache only a successful lookup (grounded or not — a real "[]" is a valid answer
-  // once the model actually searched; if it wasn't grounded we still cache so we
-  // don't burn repeated calls, but mark grounded:false for visibility).
-  await kv(["SET", `${NEAR_PREFIX}${p}`, JSON.stringify(record), "EX", String(NEAR_TTL_S)]);
+  // Cache only a real production lookup — never a diagnostic run (no-grounding or a
+  // model override), so the probe can't poison the per-pincode cache.
+  const isDiagnostic = grounding === false || !!model;
+  if (!isDiagnostic) {
+    await kv(["SET", `${NEAR_PREFIX}${p}`, JSON.stringify(record), "EX", String(NEAR_TTL_S)]);
+  }
   return record;
 }
 

@@ -69,8 +69,14 @@ async function handle(req: NextRequest) {
     }
   }
 
+  // Diagnostics (isolate a 429 as grounding-specific vs model-specific):
+  //   &nogrounding=1  -> call without the google_search tool
+  //   &model=gemini-3.5-flash-lite -> override the model
+  const grounding = sp.get("nogrounding") === "1" ? false : undefined;
+  const modelOverride = sp.get("model") || undefined;
+
   const record = force
-    ? await fillCourierProximity(pin, { force: true, locality, city, state })
+    ? await fillCourierProximity(pin, { force: true, locality, city, state, grounding, model: modelOverride })
     : (await getCourierProximity(pin)) || (await fillCourierProximity(pin, { locality, city, state }));
 
   const suggestion = await suggestNearestCourier(pin, fullState(state), { best3 });
