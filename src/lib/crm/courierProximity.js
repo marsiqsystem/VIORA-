@@ -264,11 +264,13 @@ function extractPrompt({ pin, locality, city, state }, candidates) {
   const where = [locality, city, state].map((s) => String(s || "").trim()).filter(Boolean).join(", ");
   return [
     `Below are raw web/map search result lines about courier / parcel-delivery`,
-    `counters near PIN ${pin}${where ? ` (${where})` : ""}, India. Extract the REAL`,
-    `courier branches mentioned. Use ONLY facts present in the lines — do NOT invent`,
-    `addresses, phones or ratings. Merge duplicates of the same branch.`,
+    `counters in or around PIN ${pin}${where ? ` (${where})` : ""}, India. Extract EVERY`,
+    `real courier branch mentioned in the lines, including ones in the same city or an`,
+    `adjacent area/sector (a slightly different pincode is fine — list them, nearest`,
+    `first). Use ONLY facts present in the lines — do NOT invent addresses, phones or`,
+    `ratings. Merge duplicates of the same branch.`,
     ``,
-    `Return ONLY a JSON array (no prose, no markdown), best/nearest first, up to 6:`,
+    `Return ONLY a JSON array (no prose, no markdown), nearest/most-relevant first, up to 6:`,
     `{"courier":"<company>","branch":"<short area/branch>","address":"<street address if present>",`,
     `"phone":"<phone if present else ''>","rating":<number or null>,"distanceNote":"<area note or ''>"}`,
     ``,
