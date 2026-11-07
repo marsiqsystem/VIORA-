@@ -77,7 +77,7 @@ async function handle(req: NextRequest) {
 
   const record = force
     ? await fillCourierProximity(pin, { force: true, locality, city, state, grounding, model: modelOverride })
-    : (await getCourierProximity(pin)) || (await fillCourierProximity(pin, { locality, city, state }));
+    : (await getCourierProximity(pin)) || (await fillCourierProximity(pin, { locality, city, state, grounding, model: modelOverride }));
 
   const suggestion = await suggestNearestCourier(pin, fullState(state), { best3 });
 
