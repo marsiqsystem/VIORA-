@@ -89,4 +89,15 @@ export default {
     headerImageUrl: HEADER_IMAGE_URL, // template has an IMAGE header (product photo / logo)
     // body {{1}} name, {{2}} order id, {{3}} product, {{4}} COD amount ; static Track button
   },
+  // COD soft-gate confirm (2026-11-09). Fires INSTEAD of the normal confirmation
+  // for COD orders into high-RTO states (see carrierEngine.codSoftGateFires), when
+  // COD_SOFTGATE_ENABLED=1. Firmer "please confirm or pay online" wording with the
+  // same ✅ Confirm / ❌ Cancel quick-replies the standard flow already handles.
+  // Header-less UTILITY (order-specific, no promo) to maximise approval + delivery.
+  codConfirm: {
+    name: process.env.TPL_COD_CONFIRM || "cod_confirm_prepaid_v1",
+    lang: LANG,
+    headerImageUrl: null, // header-less UTILITY template
+    // body {{1}} name, {{2}} order id, {{3}} product, {{4}} COD amount ; Confirm/Cancel quick-replies
+  },
 };

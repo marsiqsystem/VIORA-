@@ -13,6 +13,7 @@ import { renderTemplateBody } from "./templateText";
 import { applyOverride } from "./orderOverride";
 import T from "./templates";
 import { lookupPincode } from "./pincode";
+import { codSoftGateFires } from "./carrierEngine";
 
 /** Normalize a SQLite order row (snake_case) into the shape used below. */
 function fromRow(row) {
@@ -222,6 +223,20 @@ async function sendOrderConfirmation(o) {
   // message for that order — now and in future — shows the corrected name+photo.
   // No-op when no override is stored. See src/lib/crm/orderOverride.js.
   await applyOverride(o);
+  // COD soft-gate: a COD order into a high-RTO state gets the FIRMER confirm
+  // template instead of the normal one (it still ships — this only asks the
+  // customer to actively confirm, which cuts RTO). No-op unless COD_SOFTGATE_ENABLED.
+  try {
+    let st = o.address?.state || o.state || "";
+    if (!st && o.address?.postalCode) {
+      const r = await lookupPincode(String(o.address.postalCode));
+      st = r?.state || "";
+    }
+    const gate = codSoftGateFires(o.paymentMode, st);
+    if (gate.fire) return await sendCodConfirm(o, gate);
+  } catch {
+    /* on any gate error, fall through to the normal confirmation */
+  }
   const isV2 = /v2$/i.test(T.orderConfirmation.name || "");
   const bodyParams = isV2
     ? await buildConfirmV2Params(o)
@@ -238,6 +253,29 @@ async function sendOrderConfirmation(o) {
   });
   const text = await realText(T.orderConfirmation.name, T.orderConfirmation.lang, bodyParams, render.orderConfirmation(o));
   await logOutbound(o.waPhone || o.phone, text, res, o.name, headerImageUrl);
+  return res;
+}
+
+// --- COD soft-gate confirm (fires for COD orders into high-RTO states) --------
+// Header-less UTILITY template cod_confirm_prepaid_v1 with ✅ Confirm / ❌ Cancel
+// quick-replies (the same taps autoReply already handles). body {{1}} name,
+// {{2}} order id, {{3}} product, {{4}} COD amount. Called from sendOrderConfirmation
+// in place of the normal confirmation when the gate fires.
+async function sendCodConfirm(o, gate) {
+  const bodyParams = [o.name, o.orderId, o.product || "your order", o.amount ?? ""];
+  const headerImageUrl = o.productImage || T.codConfirm.headerImageUrl;
+  const res = await sendTemplate({
+    to: o.waPhone || o.phone,
+    templateName: T.codConfirm.name,
+    languageCode: T.codConfirm.lang,
+    ...(headerImageUrl ? { headerImageUrl } : {}),
+    bodyParams,
+  });
+  const text = await realText(T.codConfirm.name, T.codConfirm.lang, bodyParams, render.orderConfirmation(o));
+  await logOutbound(o.waPhone || o.phone, text, res, o.name, headerImageUrl);
+  try {
+    console.log(`[cod-softgate] firmer confirm sent for #${o.orderId} (${gate?.state} RTO ${gate?.rtoPct}%).`);
+  } catch { /* logging only */ }
   return res;
 }
 
@@ -393,6 +431,7 @@ export {
   prettyPayment,
   buildConfirmV2Params,
   sendOrderConfirmation,
+  sendCodConfirm,
   sendDispatched,
   sendOutForDelivery,
   sendDelivered,

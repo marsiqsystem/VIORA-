@@ -127,3 +127,31 @@ export function recommend(o: { paymentMode?: string; address?: Addr }): Reco {
   else bucket = "SHIP";
   return { state: st, rtoPct: r?.rtoPct ?? null, sample: r?.res ?? 0, best: demoteAvoided(engine.bestByState[st] || []), payment, bucket, flags, cleanAddr: cleanAddress(o.address || null) };
 }
+
+// --- COD soft-gate (2026-11-09) -------------------------------------------------
+// The real RTO lever: a COD order shipping into a high-RTO state STILL SHIPS (we do
+// NOT lower the deliberate <80% ship threshold — chasing confirmation on mid-RTO
+// lost more sales than it saved), but it gets a FIRMER "please confirm / or pay
+// online" WhatsApp instead of the normal confirmation. Making the customer actively
+// confirm a COD order measurably cuts RTO, and prepaid RTO is ~0%.
+//
+// Gated by env so it is a true no-op until the boss flips it on AFTER the Meta
+// template (cod_confirm_prepaid_v1) is approved:
+//   COD_SOFTGATE_ENABLED = 1          -> turn the firmer message on
+//   COD_SOFTGATE_MIN     = 60         -> fire for destination-state RTO >= this %
+// Band chosen from our own data (2026-11-09): >=60% covers UP/HR/PB/MP/RJ/Delhi/
+// Telangana/Assam/Kerala/J&K — ~51% of shipments, where almost all RTO burns.
+export const COD_SOFTGATE_ENABLED =
+  process.env.COD_SOFTGATE_ENABLED === "1" || process.env.COD_SOFTGATE_ENABLED === "true";
+export const COD_SOFTGATE_MIN = Number(process.env.COD_SOFTGATE_MIN || 60);
+
+// Should this COD order get the firmer confirm? Pure/network-free — the caller
+// passes an already-resolved state (full name, 2-letter, or IN-XX). Returns the
+// decision plus the state's RTO% for logging. PREPAID never fires (RTO ~0%).
+export function codSoftGateFires(paymentMode?: string, stateRaw?: string): { fire: boolean; rtoPct: number | null; state: string } {
+  const st = fullState(stateRaw);
+  const r = engine.stateRTO[st] || null;
+  const isCOD = !/prepaid/i.test(String(paymentMode || ""));
+  const fire = COD_SOFTGATE_ENABLED && isCOD && r != null && r.rtoPct >= COD_SOFTGATE_MIN;
+  return { fire, rtoPct: r?.rtoPct ?? null, state: st };
+}
