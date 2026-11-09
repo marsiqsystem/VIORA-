@@ -37,7 +37,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 // Send a review to one already-normalized order, honouring the once-only claim.
-async function sendOne(order: any, force: boolean) {
+async function sendOne(order: any, force: boolean, templateName?: string) {
   const id = String(order.orderId ?? order.orderGuid ?? "");
   if (!id) return { id, sent: false, reason: "no id" };
 
@@ -45,7 +45,7 @@ async function sendOne(order: any, force: boolean) {
     const won = await reviewQueue.claimReview(id);
     if (!won) return { id, sent: false, name: order.name, reason: "already sent (claimed)" };
   }
-  const res = await notify.sendReviewRequest(order);
+  const res = await notify.sendReviewRequest(order, templateName ? { templateName } : {});
   if (res?.ok && !res?.dryRun) {
     await reviewQueue.dequeue(id); // done — remove from queue so it isn't re-scanned
     // Open the WhatsApp review-capture window (no-op unless REVIEW_CAPTURE_ENABLED)
@@ -135,6 +135,9 @@ export async function POST(req: NextRequest) {
   const numbers: string[] = Array.isArray(body?.numbers) ? body.numbers.map((n: any) => String(n).trim()).filter(Boolean) : [];
   // Default to a DRY RUN unless the caller explicitly says send:true.
   const doSend = body?.send === true;
+  // Optional per-call template override (e.g. "review_request_util_v1" to force the
+  // UTILITY template past the MARKETING frequency cap). Falls back to the env default.
+  const templateOverride: string | undefined = String(body?.template ?? "").trim() || undefined;
 
   // ---- TEST MODE: send the review template to ONE arbitrary number -----------
   // { testPhone:"918100460566", testName:"Mars", testOrderId:"11057",
@@ -180,7 +183,7 @@ export async function POST(req: NextRequest) {
         results.push({ number, name: order.name, phone: order.phone, product: order.product, wouldSend: true });
         continue;
       }
-      results.push({ number, ...(await sendOne(order, force)) });
+      results.push({ number, ...(await sendOne(order, force, templateOverride)) });
     }
     const sent = results.filter((r) => r.sent).length;
     return NextResponse.json({ ok: true, mode: "numbers", dryRun: !doSend, sent, total: numbers.length, results });
@@ -210,7 +213,7 @@ export async function POST(req: NextRequest) {
 
   const results: any[] = [];
   for (const order of due) {
-    results.push(await sendOne(order, false)); // queue mode always respects the claim
+    results.push(await sendOne(order, false, templateOverride)); // queue mode always respects the claim
   }
   const sent = results.filter((r) => r.sent).length;
   return NextResponse.json({ ok: true, mode: "queue", dryRun: false, sent, total: due.length, results });

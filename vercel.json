@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/geo-fill",
       "schedule": "20 */2 * * *"
+    },
+    {
+      "path": "/api/cron/coins-remind",
+      "schedule": "30 4 * * 1"
     }
   ]
 }

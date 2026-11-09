@@ -340,27 +340,30 @@ async function sendDelivered(o) {
 
 // --- Workflow 4: review request (2-3 days post-delivery) ---------------------
 // IMAGE header ; body {{1}} name, {{2}} order id ; button url {{1}} product slug.
-async function sendReviewRequest(o) {
+async function sendReviewRequest(o, opts = {}) {
   await applyOverride(o);
   const bodyParams = [o.name, o.orderId];
-  // review_request_util_v1 (UTILITY) is HEADER-LESS → headerImageUrl is null, so we
-  // send no header (an image header to a header-less template gives Meta's "header:
-  // Format mismatch" error). review_request_photo_v1 (MARKETING) HAS an image header
-  // and it must ALWAYS be the fixed "how to review" instruction card — NOT the
-  // order's product photo — so customers see the step-by-step. Hence we use the
-  // configured headerImageUrl verbatim here (unlike other workflows that prefer
-  // o.productImage); when it's set it's the instruction card.
-  const headerImageUrl = T.reviewRequest.headerImageUrl || undefined;
+  // Default to the configured review template; a caller can override it per-send
+  // (e.g. force the UTILITY review_request_util_v1 to reach customers the MARKETING
+  // photo template got frequency-capped on). opts.templateName wins when given.
+  const templateName = opts.templateName || T.reviewRequest.name;
+  // review_request_util_v1 (UTILITY) is HEADER-LESS → no header (an image header to a
+  // header-less template gives Meta's "header: Format mismatch" error). The MARKETING
+  // photo template HAS an image header that must ALWAYS be the fixed "how to review"
+  // instruction card. So: send the configured header image UNLESS this is a *_util_*
+  // template, which is header-less by definition.
+  const isUtil = /_util_?/i.test(templateName) || /util/i.test(templateName);
+  const headerImageUrl = isUtil ? undefined : (T.reviewRequest.headerImageUrl || undefined);
   const res = await sendTemplate({
     to: o.waPhone || o.phone,
-    templateName: T.reviewRequest.name,
+    templateName,
     languageCode: T.reviewRequest.lang,
     ...(headerImageUrl ? { headerImageUrl } : {}),
     bodyParams,
     // TODO: pass the real Wix product slug through the store instead of slugifying the name.
     urlButtons: [{ index: "0", param: slugify(o.product) }],
   });
-  const text = await realText(T.reviewRequest.name, T.reviewRequest.lang, bodyParams, render.reviewRequest(o));
+  const text = await realText(templateName, T.reviewRequest.lang, bodyParams, render.reviewRequest(o));
   await logOutbound(o.waPhone || o.phone, text, res, o.name, headerImageUrl);
   return res;
 }
