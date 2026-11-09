@@ -69,8 +69,8 @@ export async function uploadWhatsAppPhotoToWix(mediaId, fileName = "review-photo
 
 /**
  * Post a product review as the site admin.
- * @param {{productId:string, rating:number, title?:string, body:string,
- *          mediaUrl?:string, authorName?:string}} input
+ * @param {{productId:string, contactId:string, rating:number, title?:string,
+ *          body:string, mediaUrl?:string, authorName?:string}} input
  * @returns {Promise<{ok:boolean, id?:string, error?:any}>}
  */
 export async function postReviewAsAdmin(input) {
