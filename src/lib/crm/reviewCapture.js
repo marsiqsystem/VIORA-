@@ -180,8 +180,25 @@ async function finalize(phone, draft, { withPhoto, msgName }) {
   }
 
   const authorName = order?.name || msgName || "Verified buyer";
+  // Wix requires a contact-linked author, so resolve the buyer's contactId BEFORE
+  // posting (same id the coin wallet uses below). Without it createReview 500s.
+  let contactId = order?.contactId || "";
+  if (!contactId) {
+    try {
+      const wo = (draft.orderId && (await wix.findOrderByNumber(draft.orderId))) || null;
+      contactId = wo?.contactId || "";
+    } catch { /* leave empty */ }
+  }
+  if (!contactId) {
+    // No buyer contact to attach the review to — thank the customer, flag, clear.
+    console.warn(`[reviewCapture] no contactId for ${phone} (order ${draft.orderId}) — cannot post review.`);
+    await clearReviewDraft(phone);
+    await reply(phone, "Thank you so much for your review! 💛 Our team will add it shortly.");
+    return;
+  }
   const posted = await postReviewAsAdmin({
     productId,
+    contactId,
     rating: draft.rating,
     body: draft.body || `${draft.rating}/5`,
     mediaUrl: mediaUrl || undefined,
@@ -204,13 +221,7 @@ async function finalize(phone, draft, { withPhoto, msgName }) {
   // idempotent across both paths — a customer can never earn the review coins twice.
   let coinsEarned = 0;
   if (mediaUrl && coinsEnabled()) {
-    let contactId = order?.contactId || "";
-    if (!contactId) {
-      try {
-        const wo = (draft.orderId && (await wix.findOrderByNumber(draft.orderId))) || null;
-        contactId = wo?.contactId || "";
-      } catch { /* leave empty — review still posted, just no coins */ }
-    }
+    // contactId was already resolved above (required to post) — reuse it.
     if (contactId) {
       try {
         const res = await earnCoins({

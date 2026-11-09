@@ -74,11 +74,14 @@ export async function uploadWhatsAppPhotoToWix(mediaId, fileName = "review-photo
  * @returns {Promise<{ok:boolean, id?:string, error?:any}>}
  */
 export async function postReviewAsAdmin(input) {
-  const { productId, rating, title, body, mediaUrl, authorName } = input || {};
+  const { productId, rating, title, body, mediaUrl, authorName, contactId } = input || {};
   if (!productId || !rating || !body?.trim()) {
     return { ok: false, error: "missing productId/rating/body" };
   }
   if (rating < 1 || rating > 5) return { ok: false, error: "rating out of range" };
+  // Wix Reviews createReview requires the author to carry a contactId — an author
+  // with only a free-text name returns an opaque 500. So contactId is mandatory.
+  if (!contactId) return { ok: false, error: "missing contactId (Wix requires a contact-linked author)" };
   // Wix Reviews requires content.title. When the customer didn't give one (the
   // common case for a WhatsApp reply), derive a short title from the body, else a
   // rating-based fallback — so a title is ALWAYS present and createReview never 400s.
@@ -94,7 +97,7 @@ export async function postReviewAsAdmin(input) {
     const created = await client.reviews.createReview({
       namespace: NAMESPACE,
       entityId: productId,
-      author: { authorName: authorName?.trim() || "Verified buyer" },
+      author: { contactId, ...(authorName?.trim() ? { authorName: authorName.trim() } : {}) },
       content: {
         title: deriveTitle(),
         body: body.trim(),

@@ -34,24 +34,29 @@ export async function POST(req: NextRequest) {
   const title = String(body?.title ?? "").trim() || undefined;
   const orderId = String(body?.orderId ?? "").trim();
   let productId = String(body?.productId ?? "").trim();
+  let contactId = String(body?.contactId ?? "").trim();
 
   if (!reviewBody) return NextResponse.json({ ok: false, error: "body (review text) required" }, { status: 400 });
   if (!(rating >= 1 && rating <= 5)) return NextResponse.json({ ok: false, error: "rating must be 1-5" }, { status: 400 });
 
-  // Resolve the product from the order number when productId isn't given.
+  // Resolve product + contact (Wix requires a contact-linked author) from the order.
   let resolvedName = authorName;
-  if (!productId && orderId) {
+  if ((!productId || !contactId) && orderId) {
     try {
       const order: any = await wix.findOrderByNumber(orderId);
-      productId = order?.productId || "";
+      if (!productId) productId = order?.items?.[0]?.productId || order?.productId || "";
+      if (!contactId) contactId = order?.contactId || "";
       if (!resolvedName) resolvedName = order?.name || undefined;
-    } catch { /* leave productId empty -> error below */ }
+    } catch { /* leave empty -> error below */ }
   }
   if (!productId) {
     return NextResponse.json({ ok: false, error: "could not resolve productId (pass productId or a valid orderId)" }, { status: 422 });
   }
+  if (!contactId) {
+    return NextResponse.json({ ok: false, error: "could not resolve contactId (pass contactId or a valid orderId with a buyer contact)" }, { status: 422 });
+  }
 
-  const posted = await postReviewAsAdmin({ productId, rating, body: reviewBody, authorName: resolvedName, title });
+  const posted = await postReviewAsAdmin({ productId, contactId, rating, body: reviewBody, authorName: resolvedName, title });
   if (!posted.ok) {
     return NextResponse.json({ ok: false, error: posted.error, productId }, { status: 502 });
   }
