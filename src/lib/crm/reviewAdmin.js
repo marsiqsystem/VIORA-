@@ -79,6 +79,16 @@ export async function postReviewAsAdmin(input) {
     return { ok: false, error: "missing productId/rating/body" };
   }
   if (rating < 1 || rating > 5) return { ok: false, error: "rating out of range" };
+  // Wix Reviews requires content.title. When the customer didn't give one (the
+  // common case for a WhatsApp reply), derive a short title from the body, else a
+  // rating-based fallback — so a title is ALWAYS present and createReview never 400s.
+  const deriveTitle = () => {
+    const t = (title || "").trim();
+    if (t) return t.slice(0, 100);
+    const words = body.trim().split(/\s+/).slice(0, 6).join(" ");
+    if (words) return words.slice(0, 100);
+    return rating >= 4 ? "Great product" : `${rating}-star review`;
+  };
   try {
     const client = wixAdminClientServer();
     const created = await client.reviews.createReview({
@@ -86,7 +96,7 @@ export async function postReviewAsAdmin(input) {
       entityId: productId,
       author: { authorName: authorName?.trim() || "Verified buyer" },
       content: {
-        title: title?.trim() || undefined,
+        title: deriveTitle(),
         body: body.trim(),
         rating,
         media: mediaUrl ? [{ image: mediaUrl }] : undefined,
