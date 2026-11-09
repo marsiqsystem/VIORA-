@@ -62,8 +62,8 @@ export async function POST(req: NextRequest) {
       {
         type: "BUTTONS",
         buttons: [
-          { type: "QUICK_REPLY", text: "✅ Confirm" },
-          { type: "QUICK_REPLY", text: "❌ Cancel" },
+          { type: "QUICK_REPLY", text: "Confirm" },
+          { type: "QUICK_REPLY", text: "Cancel" },
         ],
       },
     ],
