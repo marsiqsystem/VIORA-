@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
   const orderId = String(body?.orderId ?? "").trim();
   const status = String(body?.status ?? "").trim().toLowerCase();
   if (!orderId) return NextResponse.json({ ok: false, error: "orderId required" }, { status: 400 });
-  if (!VALID.has(status)) return NextResponse.json({ ok: false, error: `status must be one of: ${[...VALID].join(", ")}` }, { status: 400 });
+  if (!VALID.has(status)) return NextResponse.json({ ok: false, error: `status must be one of: ${Array.from(VALID).join(", ")}` }, { status: 400 });
 
   const before: any = await getOrder(orderId);
   const res = await updateOrder(orderId, { status });
