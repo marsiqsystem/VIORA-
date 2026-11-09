@@ -469,4 +469,118 @@ export async function suggestNearestCourier(pin, state, deps = {}) {
   return { suggested, reason, nearby, firstToCheck, via: rec?.via || null, hasData: !!rec };
 }
 
+// ===========================================================================
+// PROXIMITY RANKING (2026-11-09) — the operator's real rule: rank the 5 approved
+// couriers PURELY by how close their nearest hub is to THIS customer's address.
+// Closer hub = genuine delivery attempt; far/none = fake-attempt RTO. We do NOT
+// use Velocity serviceability (it says "serviceable" where no real hub exists, the
+// exact cause of fake-attempt RTOs). Map evidence only. Facility coords are cached
+// per pincode (they don't move); the distance is computed live from the address.
+// ===========================================================================
+const APPROVED5 = ["DTDC", "Delhivery", "Bluedart", "XpressBees", "Ekart"];
+const APPROVED5_DISPLAY = { DTDC: "DTDC", Delhivery: "Delhivery", Bluedart: "Blue Dart", XpressBees: "XpressBees", Ekart: "Ekart" };
+const PROX_PREFIX = "courier:prox:v2:";
+const PROX_TTL_S = 60 * 60 * 24 * 30; // 30 days — courier hub locations are stable
+
+function haversineKm(aLat, aLon, bLat, bLon) {
+  const toR = (d) => (d * Math.PI) / 180;
+  const dLat = toR(bLat - aLat), dLon = toR(bLon - aLon);
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(toR(aLat)) * Math.cos(toR(bLat)) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+
+// Nominatim search that RETAINS coordinates (nominatimQuery above drops them).
+async function nominatimGeo(q, limit = 6) {
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&countrycodes=in&format=json&addressdetails=1&limit=${limit}`, {
+      headers: { "User-Agent": NOMINATIM_UA, Accept: "application/json" },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!r.ok) return [];
+    const arr = await r.json().catch(() => []);
+    return (Array.isArray(arr) ? arr : [])
+      .map((h) => ({ name: String(h.display_name || "").trim(), lat: Number(h.lat), lon: Number(h.lon) }))
+      .filter((h) => h.name && Number.isFinite(h.lat) && Number.isFinite(h.lon));
+  } catch { return []; }
+}
+
+// Classify a facility from its listing text (best-effort; the spec forbids treating
+// a booking counter as a delivery hub).
+function classifyFacility(name) {
+  const t = String(name || "").toLowerCase();
+  if (/\b(hub|warehouse|sorting|fulfil|processing|mother\s*hub)\b/.test(t)) return "Delivery hub / sorting facility";
+  if (/\b(branch|office|service\s*cent)\b/.test(t)) return "Branch office";
+  if (/\b(counter|franchise|booking|agency|pickup|collection)\b/.test(t)) return "Booking / pickup counter";
+  return "Listing (type unconfirmed)";
+}
+
+// Geocode the customer: full address first (most precise), then city+state+pin,
+// then the pincode centroid. Null when nothing resolves.
+async function geocodeCustomer({ addressText, pin, city, state }) {
+  const tries = [
+    addressText && String(addressText).trim(),
+    [city, state, pin, "India"].filter(Boolean).join(", "),
+    pin && `${pin} India`,
+  ].filter(Boolean);
+  for (const q of tries) {
+    const hits = await nominatimGeo(q, 1);
+    if (hits.length) return { lat: hits[0].lat, lon: hits[0].lon, matched: q };
+  }
+  return null;
+}
+
+// Fetch each approved courier's facility coords near the pincode (cached per pin).
+async function courierFacilities(pin, city, state) {
+  const key = `${PROX_PREFIX}${pin || "nopin"}`;
+  if (pin) { try { const c = await kv(["GET", key]); if (c) return JSON.parse(c); } catch { /* miss */ } }
+  const where = [city, state, pin].filter(Boolean).join(" ").trim();
+  const out = {};
+  for (const courier of APPROVED5) {
+    // sequential — Nominatim allows ~1 req/s
+    const hits = await nominatimGeo(`${courier} courier ${where}`, 6);
+    out[courier] = hits
+      .filter((h) => h.name.toLowerCase().includes(courier.toLowerCase()))
+      .slice(0, 5)
+      .map((h) => ({ name: h.name, lat: h.lat, lon: h.lon, type: classifyFacility(h.name) }));
+  }
+  if (pin) { try { await kv(["SET", key, JSON.stringify(out), "EX", String(PROX_TTL_S)]); } catch { /* ignore */ } }
+  return out;
+}
+
+/**
+ * Rank the 5 approved couriers by nearest-hub distance to the customer's address.
+ * @param {{pin?:string, city?:string, state?:string, addressText?:string}} loc
+ * @returns {Promise<{customer:{lat,lon,matched}|null, couriers:Array<{courier,found,nearestFacility,facilityType,distanceKm}>}>}
+ */
+export async function rankCouriersByProximity({ pin, city, state, addressText } = {}) {
+  const [customer, facilities] = await Promise.all([
+    geocodeCustomer({ addressText, pin, city, state }),
+    courierFacilities(pin, city, state),
+  ]);
+  const rows = APPROVED5.map((courier) => {
+    const list = facilities[courier] || [];
+    let nearest = null;
+    for (const f of list) {
+      const km = customer ? haversineKm(customer.lat, customer.lon, f.lat, f.lon) : null;
+      if (!nearest || (km != null && (nearest.km == null || km < nearest.km))) nearest = { ...f, km };
+    }
+    return {
+      courier: APPROVED5_DISPLAY[courier],
+      found: !!nearest,
+      nearestFacility: nearest?.name || null,
+      facilityType: nearest?.type || "UNKNOWN",
+      distanceKm: nearest?.km != null ? Math.round(nearest.km * 10) / 10 : null,
+    };
+  });
+  // Closest first; then any found-without-distance; not-found last.
+  rows.sort((a, b) => {
+    if (a.distanceKm != null && b.distanceKm != null) return a.distanceKm - b.distanceKm;
+    if (a.distanceKm != null) return -1;
+    if (b.distanceKm != null) return 1;
+    if (a.found !== b.found) return a.found ? -1 : 1;
+    return 0;
+  });
+  return { customer, couriers: rows };
+}
+
 export { KNOWN_COURIERS, canonicalCourier };

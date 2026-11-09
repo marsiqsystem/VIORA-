@@ -20,8 +20,8 @@
 
 import { reviewOrderAddress } from "./addressPipeline";
 import { lookupPincodeAreas } from "./pincode";
-import { fullState, stateRTO, best3, fakeRatePct } from "./carrierEngine";
-import { suggestNearestCourier } from "./courierProximity";
+import { fullState, stateRTO, fakeRatePct } from "./carrierEngine";
+import { rankCouriersByProximity } from "./courierProximity";
 
 // The ONLY five providers the spec allows, with display names.
 export const APPROVED_COURIERS = ["DTDC", "Delhivery", "Bluedart", "XpressBees", "Ekart"];
@@ -58,47 +58,27 @@ function scoreAddress({ pinValid, stateMatch, cityKnown, lineText, pinConflict }
   return { total, breakdown: { pin: pinPts, locality: localityPts, road: roadPts, landmark: landmarkPts, house: housePts } };
 }
 
-// Rank + describe the 5 approved couriers for this destination from the signals we
-// actually have (per-state history + facility proximity). Everything unknown is
-// labelled UNKNOWN — never guessed.
-function buildCourierTable(state, nearbyCounters) {
-  const ranked = best3(state) || [];                 // our per-state best performers
-  const rankIndex = new Map(ranked.map((b, i) => [String(b.carrier || "").toLowerCase(), i]));
-  const nearbyByCourier = new Map();
-  for (const c of nearbyCounters || []) {
-    const k = String(c.courier || "").toLowerCase();
-    if (!nearbyByCourier.has(k)) nearbyByCourier.set(k, c);
-  }
-
-  const rows = APPROVED_COURIERS.map((courier) => {
-    const key = courier.toLowerCase();
-    const counter = nearbyByCourier.get(key) || null;
-    const rank = rankIndex.has(key) ? rankIndex.get(key) + 1 : null; // 1..n or null
-    const fake = fakeRatePct(courier);
-    // Last-mile / RTO signal from OUR history (the only verified performance data).
-    let lastMile = "UNKNOWN";
-    if (rank === 1) lastMile = "Strong — #1 performer here (our data)";
-    else if (rank) lastMile = `Good — top-${ranked.length} here (our data)`;
-    else if (fake >= 20) lastMile = `Weak — ${fake}% fake-attempt RTO (our data)`;
-    // A composite, honest score: proximity (have/UNKNOWN) + our RTO history. We do
-    // NOT award points for serviceability/last-mile we can't verify.
-    let score = 0;
-    if (counter) score += 20;                         // nearby facility present
-    if (rank === 1) score += 25; else if (rank === 2) score += 18; else if (rank === 3) score += 12;
-    if (fake >= 25) score -= 10;                       // heavy faker penalty
+// Turn the proximity ranking (distance to the customer's address) into the 5-courier
+// comparison. PRIMARY ranking is distance — a closer hub means a genuine delivery
+// attempt, not a fake-attempt RTO. Our per-area history is attached only as a
+// secondary WARNING (e.g. "known to fake attempts here"), never as the ranking driver.
+function buildCourierTable(proxCouriers) {
+  return (proxCouriers || []).map((c, i) => {
+    const fake = fakeRatePct(c.courier.replace(/\s/g, "")); // "Blue Dart" -> "BlueDart" best-effort
+    const fakeAlt = fakeRatePct(c.courier);
+    const fakePct = Math.max(fake, fakeAlt);
     return {
-      courier: DISPLAY[courier],
-      nearestFacility: counter ? (counter.branch || counter.address || "in-area listing") : "UNKNOWN",
-      facilityType: counter ? "Booking counter / listing (type unverified)" : "UNKNOWN",
-      distance: counter ? (counter.distanceNote || "in-area") : "UNKNOWN",
-      pinServiceability: "UNKNOWN — verify in Velocity",
-      lastMile,
-      ourRtoHistory: rank ? `rank #${rank} of ${ranked.length} for ${state || "area"}` : (fake ? `${fake}% fake RTO` : "no history"),
-      score,
+      courier: c.courier,
+      rank: c.found ? i + 1 : null,
+      nearestFacility: c.nearestFacility || "UNKNOWN — no map listing found",
+      facilityType: c.facilityType,
+      distanceKm: c.distanceKm, // null when no facility/coords found
+      proximityNote: c.distanceKm != null
+        ? `${c.distanceKm} km from the customer — ${c.distanceKm <= 8 ? "very close, strong genuine-attempt odds" : c.distanceKm <= 20 ? "moderate distance" : "far — higher fake-attempt risk"}`
+        : "No hub found on the map for this area yet",
+      historyWarning: fakePct >= 20 ? `⚠️ ${fakePct}% fake-attempt RTO in our data for this region` : "",
     };
   });
-  rows.sort((a, b) => b.score - a.score);
-  return rows;
 }
 
 /**
@@ -160,27 +140,35 @@ export async function analyzeAddressCourier(input = {}) {
     ].filter(Boolean),
   };
 
-  // ---- MODULE B: courier selection ----------------------------------------
-  let suggestion = { suggested: null, reason: "", nearby: [], via: null, hasData: false };
-  try { suggestion = await suggestNearestCourier(pin, pinState || custState, { best3 }); } catch { /* keep default */ }
-  const courierTable = buildCourierTable(pinState || custState, suggestion.nearby);
+  // ---- MODULE B: courier selection (PROXIMITY-FIRST, map evidence only) ----
+  // Rank the 5 approved couriers by how close their nearest hub is to the customer's
+  // ADDRESS (searched on the map). We deliberately do NOT use Velocity serviceability
+  // — it reports "serviceable" where no real hub exists, which is exactly what causes
+  // fake-attempt RTOs. Closest real hub = highest genuine-delivery odds.
+  const addressText = review?.cleanedText || lineText;
+  let prox = { customer: null, couriers: [] };
+  try { prox = await rankCouriersByProximity({ pin, city: pinInfo.city || input.city, state: pinState || custState, addressText }); } catch { /* keep default */ }
+  const courierTable = buildCourierTable(prox.couriers);
   const rto = stateRTO(pinState || custState);
 
-  // Best courier = the approved winner from proximity+history; honest about verification.
-  // courierTable is already sorted best-first. If suggestNearestCourier named one of
-  // the 5, prefer it (it blends proximity + our history) and carry its reason.
-  let best = courierTable[0] || null;
-  let bestNote = "";
-  const suggestKey = String(suggestion.suggested || "").toLowerCase();
-  const suggestedApproved = APPROVED_COURIERS.find((c) => c.toLowerCase() === suggestKey);
-  if (suggestedApproved) {
-    const match = courierTable.find((r) => r.courier === DISPLAY[suggestedApproved]);
-    if (match) { best = match; bestNote = suggestion.reason; }
+  // Best courier = the CLOSEST hub to the address. Warn if that nearest courier is a
+  // known fake-attempter in this region, and name the next-closest as backup.
+  const found = courierTable.filter((r) => r.distanceKm != null);
+  let bestCourier;
+  if (found.length) {
+    const top = found[0];
+    bestCourier = {
+      courier: top.courier,
+      why: `Nearest courier hub to the customer's address — ${top.distanceKm} km away (${top.facilityType}). Closest hub = most likely a genuine delivery attempt.`,
+      caution: [top.historyWarning, found[1] ? `Backup: ${found[1].courier} (${found[1].distanceKm} km).` : ""].filter(Boolean).join(" "),
+    };
+  } else {
+    bestCourier = {
+      courier: null,
+      why: "No courier hub found on the map for this area yet (free OSM coverage is sparse here).",
+      caution: "Adding the Google CSE key unlocks full map search for these areas; until then choose from the region's known couriers.",
+    };
   }
-  const anyServiceabilityVerified = false; // no live serviceability API wired yet
-  const bestCourier = best
-    ? { courier: best.courier, why: bestNote || `Best available signal: ${best.lastMile}. ${best.nearestFacility !== "UNKNOWN" ? "Has a nearby facility." : "No nearby facility found."}`, caution: "Live PIN serviceability + last-mile NOT API-verified — CHECK VELOCITY before dispatch." }
-    : { courier: null, why: "NO VERIFIED COURIER — no proximity data and no per-area history.", caution: "CHECK VELOCITY BEFORE DISPATCH." };
 
   // ---- Dispatch verdict ----------------------------------------------------
   let verdict, verdictReason;
@@ -215,10 +203,10 @@ export async function analyzeAddressCourier(input = {}) {
     courierComparison: courierTable,
     stateRtoPct: rto?.rtoPct ?? null,
     bestCourier,
-    serviceabilityVerified: anyServiceabilityVerified,
+    customerGeo: prox.customer ? { lat: prox.customer.lat, lon: prox.customer.lon, matched: prox.customer.matched } : null,
     verdict,
     verdictReason,
     customerMessage,
-    meta: { proximityVia: suggestion.via, hadProximityData: suggestion.hasData, addressVerdict: review?.verdict, addressRoute: review?.route },
+    meta: { couriersWithHub: courierTable.filter((r) => r.distanceKm != null).length, addressVerdict: review?.verdict, addressRoute: review?.route },
   };
 }
