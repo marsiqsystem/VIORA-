@@ -23,20 +23,78 @@ const SERIF = "var(--font-heading), Georgia, 'Times New Roman', serif";
 // D-code catalog: display name + goods cost (base + ₹30 packaging). Base costs
 // from the Product Costs sheet; blanks are editable later.
 const CATALOG: Record<string, { name: string; base: number | null }> = {
-  "D-001": { name: "Ethnic Jewellery Set (Blue)", base: 160 },
+  "D-001": { name: "Eternal Shine Set (Blue)", base: 160 },
   "D-002": { name: "Emerald Bloom Ensemble (Pink)", base: 260 },
-  "D-003": { name: "Ethnic Jewellery Set (D-003)", base: 220 },
-  "D-004": { name: "Ethnic Jewellery Set (D-004)", base: 220 },
-  "D-005": { name: "Ethnic Jewellery Set (D-005)", base: 220 },
+  "D-003": { name: "Celestial Bloom Set", base: 220 },
+  "D-004": { name: "Royal Heartfall Set", base: 220 },
+  "D-005": { name: "Noble Teardrop Harmony Set", base: 220 },
   "D-007": { name: "Azure Empress Sapphire Set", base: 210 },
-  "D-011": { name: "Rosa Blush Set", base: null },
+  "D-008": { name: "Regal Prism Drop Earrings", base: null },
+  "D-009": { name: "Pearl Whisper Diamond Earrings", base: 180 },
+  "D-011": { name: "Rosa Blush Set", base: 150 },
+  "D-012": { name: "Jewellery Set (D-012)", base: 210 },
+  "D-013": { name: "Jewellery Set (D-013)", base: 210 },
   "D-018": { name: "Scarlet Bloom Set", base: 120 },
   "D-021": { name: "Crystal Wings Set", base: 100 },
+  "D-025": { name: "Rakhi Luxe Gift Set", base: 420 },
+  "CB": { name: "Al-Badar Set", base: null },
+  "D-500": { name: "Personal / Misc Item", base: null },
 };
 const goodsCostOf = (code: string) => {
   const c = CATALOG[code];
   return c && c.base != null ? c.base + 30 : null;
 };
+
+// Recover a product's D-code from its free-text NAME when dCode is blank, so
+// those orders stop piling into the "—" (unknown) bucket.
+const NAME_TO_CODE: [RegExp, string][] = [
+  [/royal\s*heartfall/i, "D-004"],
+  [/rosa\s*blush/i, "D-011"],
+  [/crystal\s*wings/i, "D-021"],
+  [/azure\s*empress|sapphire/i, "D-007"],
+  [/emerald\s*bloom/i, "D-002"],
+  [/eternal\s*shine/i, "D-001"],
+  [/noble\s*teardrop|teardrop\s*harmony/i, "D-005"],
+  [/celestial\s*bloom/i, "D-003"],
+  [/scarlet\s*bloom/i, "D-018"],
+  [/pearl\s*whisper/i, "D-009"],
+  [/regal\s*prism/i, "D-008"],
+  [/crystal\s*cascade/i, "D-025"],
+  [/rakhi/i, "D-025"],
+  [/al\s*[-–]?\s*badar/i, "CB"],
+];
+// Messy / combined dCode strings seen in the pipeline -> their primary clean code.
+const CODE_ALIAS: Record<string, string> = {
+  "rakhi set": "D-025", "rakhi": "D-025",
+  "d-001 and others": "D-001", "d-004 all colors": "D-004",
+  "d-005 , d-002, d-007": "D-005", "d-004 & d-007": "D-004",
+  "d-004+d-001": "D-004", "d-004 & d-001": "D-004",
+};
+// Canonical product code: clean dCode > alias-normalised messy dCode > recovered
+// from the product name > "—" only when truly unknown.
+function canonCode(o: { dCode?: string; product?: string }): string {
+  const raw = (o.dCode || "").trim();
+  if (raw && CATALOG[raw.toUpperCase()]) return raw.toUpperCase();
+  const alias = CODE_ALIAS[raw.toLowerCase()];
+  if (alias) return alias;
+  if (/^D-\d{3}$/i.test(raw)) return raw.toUpperCase();
+  const name = (o.product || "").trim();
+  if (name) { for (const [re, code] of NAME_TO_CODE) if (re.test(name)) return code; }
+  return raw ? raw : "—";
+}
+// Canonical courier: the recorded one, else inferred from the AWB prefix
+// (VEL*=Velocity, I8/7X/7D=DTDC, SF=Shiprocket) so fewer land in "unknown".
+function canonCourier(o: { courier?: string; awb?: string; courierService?: string }): string {
+  const c = (o.courier || "").trim().toLowerCase();
+  if (c) return c;
+  const awb = (o.awb || "").trim().toUpperCase();
+  if (/^VEL/.test(awb)) return "velocity";
+  if (/^(I8|7X|7D)/.test(awb)) return "dtdc";
+  if (/^SF/.test(awb)) return "shiprocket";
+  const cs = (o.courierService || "").trim().toLowerCase();
+  if (cs) return cs;
+  return "unknown";
+}
 
 type Order = {
   orderId: string; createdAt: number; month?: string; name: string; phone: string;
@@ -189,7 +247,7 @@ export default function DashboardPage() {
   const byProduct = useMemo(() => {
     const map: Record<string, { orders: number; units: number; revenue: number; profit: number; rto: number }> = {};
     for (const o of orders) {
-      const code = o.dCode || "—";
+      const code = canonCode(o);
       const e = (map[code] ||= { orders: 0, units: 0, revenue: 0, profit: 0, rto: 0 });
       e.orders++; e.units += o.qty || 1; e.revenue += o.sellingPrice || 0; e.profit += o.profit || 0;
       if (isRto(o)) e.rto++;
@@ -207,7 +265,7 @@ export default function DashboardPage() {
     const map: Record<string, { total: number; rto: number }> = {};
     for (const o of orders) {
       if (!["delivered", "rto"].includes(o.status)) continue;
-      const c = o.courier || "unknown";
+      const c = canonCourier(o);
       const e = (map[c] ||= { total: 0, rto: 0 });
       e.total++; if (isRto(o)) e.rto++;
     }
