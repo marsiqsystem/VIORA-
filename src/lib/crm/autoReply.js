@@ -106,6 +106,19 @@ const SHIPPED_OR_DONE = new Set([
   "cancelled",
 ]);
 
+// CONFIRM LOCKS CANCEL. Once an order has been CONFIRMED (customer tapped ✅
+// Confirm, typed a keep reply, or an operator marked it confirmed), a later ❌
+// Cancel from WhatsApp must NOT be able to cancel it. Customers were confirming
+// at night and then cancelling AFTER the parcel was picked up, forcing RTOs.
+// A confirmed order can now only be cancelled by the operator from the dashboard.
+// (An order already shipped/finished is separately covered by SHIPPED_OR_DONE.)
+function isConfirmLocked(order) {
+  if (!order) return false;
+  const st = String(order.status || "").toLowerCase();
+  if (st === "cancelled") return false; // already cancelled — nothing to lock
+  return String(order.callOutcome || "").toLowerCase() === "confirmed";
+}
+
 async function markOrderFromButton(phone, intent) {
   try {
     const order = await findLatestOrderByPhone(phone);
@@ -162,6 +175,12 @@ async function hardCancelOrder(orderId) {
     const status = String(order.status || "").toLowerCase();
     if (SHIPPED_OR_DONE.has(status) && status !== "cancelled") {
       console.log(`[auto-reply] hardCancel: order #${orderId} is '${status}' — too late, operator handles.`);
+      return "too-late";
+    }
+    // Confirm-lock: a confirmed order can't be cancelled from chat even via a
+    // typed CANCEL. (The button path refuses earlier; this is defense in depth.)
+    if (isConfirmLocked(order)) {
+      console.log(`[auto-reply] hardCancel: order #${orderId} already confirmed — locked, operator handles.`);
       return "too-late";
     }
     const now = Date.now();
@@ -345,6 +364,34 @@ const isOppositeTap = (prev, next) =>
  */
 async function handleButtonTap(msg, intent) {
   const phone = msg.from;
+
+  // (0) CONFIRM LOCKS CANCEL. If this order is already confirmed, a ❌ Cancel tap
+  //     must NOT cancel it — refuse politely and flag it so the operator can
+  //     review (they can still cancel from the dashboard). This runs BEFORE the
+  //     pending/conflict/two-step logic so a confirmed order is never re-opened
+  //     or auto-cancelled. Stops the "confirm at night, cancel after pickup" RTO.
+  if (intent === "CANCEL") {
+    const locked = await findLatestOrderByPhone(phone);
+    if (isConfirmLocked(locked)) {
+      try {
+        await updateOrder(locked.orderId, {
+          postConfirmCancelAttempt: true,
+          postConfirmCancelAt: Date.now(),
+          callNote:
+            "⚠️ Customer tapped ❌ Cancel AFTER confirming — cancel locked (dashboard-only).",
+        });
+      } catch { /* best-effort flag */ }
+      try { await clearAwaitingChoice(phone); } catch { /* ignore */ }
+      await replyText(
+        phone,
+        "Your order is already *confirmed* and being prepared for dispatch, so it can't be cancelled here. If you need any help, just reply and our team will assist you. — Team Viora Jewels"
+      );
+      console.log(
+        `[auto-reply] CANCEL tap on CONFIRMED order #${locked.orderId} from ${phone} — refused (confirm-lock).`
+      );
+      return;
+    }
+  }
 
   // (a) Already waiting on a cancel/keep decision? A tap resolves THAT, and is
   //     never re-interpreted as a fresh (possibly conflicting) tap.
