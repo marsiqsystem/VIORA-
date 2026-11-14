@@ -525,11 +525,14 @@ export async function formatAddress({ orderId, name, phone, address, force, forc
       return r;
     };
     let ai;
+    let aiProvider = ""; // which provider actually served (cost visibility)
     if (process.env.GEMINI_API_KEY) {
       ai = await tryGen(generateReply);
-      if (!ai.ok && vertexConfigured()) ai = await tryGen(generateVertex);
+      if (ai.ok) aiProvider = "ai-studio"; // FREE tier
+      if (!ai.ok && vertexConfigured()) { ai = await tryGen(generateVertex); if (ai.ok) aiProvider = "vertex"; }
     } else if (vertexConfigured()) {
       ai = await tryGen(generateVertex);
+      if (ai.ok) aiProvider = "vertex"; // PAID
     } else {
       ai = { ok: false, error: "no AI provider configured" };
     }
@@ -557,6 +560,7 @@ export async function formatAddress({ orderId, name, phone, address, force, forc
         limitation: clean(parsed.limitation),
         reason: clean(parsed.reason),
         source: "ai",
+        aiProvider,
         enriched: true,
         pin,
         ...pinMeta,
