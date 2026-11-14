@@ -598,6 +598,15 @@ export async function formatAddress({ orderId, name, phone, address, force, forc
   if (groundingEnabled() && (forceGround || needsResearch)) {
     try {
       const g = await groundAddress({ name, address: a, pin, pinInfo });
+      // Diagnostic (only when explicitly forced via ?ground=1) — shows whether
+      // grounding actually ran and what it returned, even when it found nothing.
+      if (forceGround) {
+        result.groundingDebug = {
+          ok: g.ok, provider: g.provider || "", error: g.ok ? "" : String(g.error || "").slice(0, 160),
+          capped: !!g.capped, confidence: g.confidence || "", correctedPin: g.correctedPin || "",
+          locality: g.locality || "", landmark: g.landmark || "", note: g.note || "",
+        };
+      }
       if (g.ok && (g.correctedPin || g.locality || g.landmark)) {
         result.grounding = {
           provider: g.provider,
