@@ -162,15 +162,19 @@ async function groundAddress({ name, address, pin, pinInfo } = {}) {
 
   let r = { ok: false, error: "no provider" };
   let provider = "";
+  let aiError = "";
+  let vertexError = "";
   if (e.aiKey) {
-    r = await callAIStudio({ model: e.model, aiKey: e.aiKey, query });
-    if (r.ok) provider = "ai-studio";
+    const ra = await callAIStudio({ model: e.model, aiKey: e.aiKey, query });
+    if (ra.ok) { r = ra; provider = "ai-studio"; }
+    else aiError = typeof ra.error === "string" ? ra.error : JSON.stringify(ra.error || "").slice(0, 240);
   }
   if (!r.ok && e.allowVertex) {
-    r = await callVertex({ model: e.model, query });
-    if (r.ok) provider = "vertex";
+    const rv = await callVertex({ model: e.model, query });
+    if (rv.ok) { r = rv; provider = "vertex"; }
+    else vertexError = typeof rv.error === "string" ? rv.error : JSON.stringify(rv.error || "").slice(0, 240);
   }
-  if (!r.ok) return { ok: false, error: r.error };
+  if (!r.ok) return { ok: false, error: aiError || vertexError || "no provider", aiError, vertexError };
 
   // Count only successful (billable) grounded calls.
   await bumpMonth();

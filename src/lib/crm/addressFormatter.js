@@ -602,7 +602,9 @@ export async function formatAddress({ orderId, name, phone, address, force, forc
       // grounding actually ran and what it returned, even when it found nothing.
       if (forceGround) {
         result.groundingDebug = {
-          ok: g.ok, provider: g.provider || "", error: g.ok ? "" : String(g.error || "").slice(0, 160),
+          ok: g.ok, provider: g.provider || "",
+          error: g.ok ? "" : (typeof g.error === "string" ? g.error : JSON.stringify(g.error || "")).slice(0, 240),
+          aiError: (g.aiError || "").slice(0, 240), vertexError: (g.vertexError || "").slice(0, 240),
           capped: !!g.capped, confidence: g.confidence || "", correctedPin: g.correctedPin || "",
           locality: g.locality || "", landmark: g.landmark || "", note: g.note || "",
         };
