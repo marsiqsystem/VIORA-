@@ -25,11 +25,13 @@ async function handle(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   let orderId = sp.get("orderId") || "";
   let force = sp.get("force") === "1";
+  let forceGround = sp.get("ground") === "1";
   if (req.method === "POST") {
     try {
       const b = await req.json();
       orderId = String(b?.orderId || orderId);
       if (b?.force) force = true;
+      if (b?.ground) forceGround = true;
     } catch {
       /* query params only */
     }
@@ -66,6 +68,7 @@ async function handle(req: NextRequest) {
     phone: order.phone || order.waPhone,
     address,
     force,
+    forceGround,
   });
 
   return NextResponse.json({

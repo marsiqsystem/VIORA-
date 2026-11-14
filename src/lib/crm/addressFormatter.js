@@ -20,6 +20,7 @@ import { lookupPincodeAreas, lookupPostOfficesByName } from "./pincode";
 import { generateReply } from "./gemini";
 import { generateVertex, isConfigured as vertexConfigured } from "./vertexGemini";
 import { getPincodeGeo } from "./geoPincode";
+import { groundAddress, groundingEnabled } from "./grounding";
 
 // Flash-Lite: $0.10 / $0.40 per 1M in/out tokens. ~750 tokens per address ⇒
 // ~₹0.01 each. Overridable, but keep it to a cheap model.
@@ -422,7 +423,7 @@ function parseModelJson(text) {
  *   locality?:string, landmark?:string, limitation?:string, reason?:string,
  *   source:"cache"|"ai"|"deterministic", pin:string, cost:number}>}
  */
-export async function formatAddress({ orderId, name, phone, address, force } = {}) {
+export async function formatAddress({ orderId, name, phone, address, force, forceGround } = {}) {
   const a = address || {};
   const pin = clean(a.postalCode).replace(/\D/g, "");
 
@@ -582,6 +583,46 @@ export async function formatAddress({ orderId, name, phone, address, force } = {
         ...pinMeta,
         cost: 0,
       };
+    }
+  }
+
+  // 4b) GROUNDED DEEP RESEARCH ("pure fixer") — only for genuinely STUCK
+  //     addresses, and only when enabled + under the monthly cap. Google Search
+  //     lets Gemini look up the real locality/PIN/landmark. Budget-safe: prefers
+  //     the free AI Studio quota, hard-capped per month. NEVER auto-ships a
+  //     changed PIN (verdict stays CONFIRM for human verify) — it just supplies a
+  //     researched suggestion + landmark so the Call Queue has real evidence.
+  const needsResearch =
+    (result?.pinCheck?.suspicious && !result?.suggestedPincode) || // PIN looks wrong, India Post couldn't fix it
+    (result?.verdict === "CONFIRM" && !result?.landmark); //        flagged CONFIRM with no landmark to help
+  if (groundingEnabled() && (forceGround || needsResearch)) {
+    try {
+      const g = await groundAddress({ name, address: a, pin, pinInfo });
+      if (g.ok && (g.correctedPin || g.locality || g.landmark)) {
+        result.grounding = {
+          provider: g.provider,
+          confidence: g.confidence,
+          correctedPin: g.correctedPin || "",
+          district: g.district || "",
+          locality: g.locality || "",
+          landmark: g.landmark || "",
+          note: g.note || "",
+        };
+        // A web-verified PIN correction becomes the suggestion (human verifies).
+        if (g.correctedPin && g.correctedPin !== pin) {
+          result.suggestedPincode = g.correctedPin;
+          if (g.district) result.suggestedDistrict = g.district;
+          result.pinCheck = { ...(result.pinCheck || {}), suspicious: true, suggestedPincode: g.correctedPin, suggestedDistrict: g.district || result.pinCheck?.suggestedDistrict || "" };
+          if (result.verdict === "SHIP") result.verdict = "CONFIRM";
+        }
+        // Offer a researched landmark when we had none.
+        if (g.landmark && !result.landmark) result.landmark = g.landmark;
+        result.reason = `${result.reason || ""} [web-researched: ${g.note || g.confidence}]`.trim();
+        result.grounded = true;
+        if (typeof result.cost === "number") result.cost += 1;
+      }
+    } catch {
+      /* grounding is best-effort — never blocks the result */
     }
   }
 

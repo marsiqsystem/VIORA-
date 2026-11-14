@@ -103,6 +103,8 @@ async function generateVertex(userMessage, opts = {}) {
     },
   };
   if (opts.systemPrompt) body.systemInstruction = { parts: [{ text: opts.systemPrompt }] };
+  // Optional tools (e.g. Google Search grounding: [{ googleSearch: {} }]).
+  if (opts.tools) body.tools = opts.tools;
 
   // Gemini 2.5 flash models "think" by default, which spends the output-token
   // budget on hidden reasoning and truncates the real answer (finishReason
